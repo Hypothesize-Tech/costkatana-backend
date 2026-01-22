@@ -7,6 +7,8 @@ import { CKQLService } from '../services/ckql.service';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import mongoose from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 /**
  * Logs Controller
@@ -18,10 +20,16 @@ export class LogsController {
      * Query AI logs with comprehensive filtering
      * GET /api/logs/ai
      */
-    static async queryLogs(req: Request, res: Response): Promise<Response> {
+    static async queryLogs(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('queryLogs', req);
+
         try {
-            const userId = (req as any).user.id;
-            const userRole = (req as any).user.role;
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return res;
+            }
+            const userId = req.userId!;
+            const userRole = (req as any).user?.role;
             
             // Extract query parameters
             const {
@@ -210,15 +218,8 @@ export class LogsController {
             });
             
         } catch (error) {
-            loggingService.error('Failed to query AI logs', {
-                component: 'LogsController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to query logs'
-            });
+            ControllerHelper.handleError('queryLogs', error, req, res, startTime);
+            return res;
         }
     }
     
@@ -226,10 +227,16 @@ export class LogsController {
      * Stream AI logs in real-time (SSE)
      * GET /api/logs/ai/stream
      */
-    static async streamLogs(req: Request, res: Response): Promise<void> {
+    static async streamLogs(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('streamLogs', req);
+
         try {
-            const userId = (req as any).user.id;
-            const userRole = (req as any).user.role;
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+            const userId = req.userId!;
+            const userRole = (req as any).user?.role;
             
             // Set SSE headers
             res.setHeader('Content-Type', 'text/event-stream');
@@ -319,15 +326,7 @@ export class LogsController {
             });
             
         } catch (error) {
-            loggingService.error('Failed to establish log stream', {
-                component: 'LogsController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to establish stream'
-            });
+            ControllerHelper.handleError('streamLogs', error, req, res, startTime);
         }
     }
     
@@ -335,11 +334,18 @@ export class LogsController {
      * Get single log entry with full details
      * GET /api/logs/ai/:logId
      */
-    static async getLogById(req: Request, res: Response): Promise<Response> {
+    static async getLogById(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getLogById', req);
+
         try {
-            const userId = (req as any).user.id;
-            const userRole = (req as any).user.role;
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return res;
+            }
+            const userId = req.userId!;
+            const userRole = (req as any).user?.role;
             const { logId } = req.params;
+            ServiceHelper.validateObjectId(logId, 'logId');
             
             const log = await AILog.findById(logId).lean();
             
@@ -388,6 +394,11 @@ export class LogsController {
             .limit(20)
             .lean();
             
+            ControllerHelper.logRequestSuccess('getLogById', req, startTime, {
+                logId,
+                relatedLogsCount: relatedLogs.length
+            });
+
             return res.json({
                 success: true,
                 data: log,
@@ -395,15 +406,10 @@ export class LogsController {
             });
             
         } catch (error) {
-            loggingService.error('Failed to get log by ID', {
-                component: 'LogsController',
-                error: error instanceof Error ? error.message : String(error)
+            ControllerHelper.handleError('getLogById', error, req, res, startTime, {
+                logId: req.params.logId
             });
-            
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve log'
-            });
+            return res;
         }
     }
     
@@ -411,10 +417,16 @@ export class LogsController {
      * Get aggregated statistics
      * GET /api/logs/ai/stats
      */
-    static async getStats(req: Request, res: Response): Promise<Response> {
+    static async getStats(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getStats', req);
+
         try {
-            const userId = (req as any).user.id;
-            const userRole = (req as any).user.role;
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return res;
+            }
+            const userId = req.userId!;
+            const userRole = (req as any).user?.role;
             
             const {
                 projectId,
@@ -541,15 +553,8 @@ export class LogsController {
             });
             
         } catch (error) {
-            loggingService.error('Failed to get log stats', {
-                component: 'LogsController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve statistics'
-            });
+            ControllerHelper.handleError('getStats', error, req, res, startTime);
+            return res;
         }
     }
     
@@ -557,10 +562,16 @@ export class LogsController {
      * Export logs
      * GET /api/logs/ai/export
      */
-    static async exportLogs(req: Request, res: Response): Promise<void> {
+    static async exportLogs(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('exportLogs', req);
+
         try {
-            const userId = (req as any).user.id;
-            const userRole = (req as any).user.role;
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+            const userId = req.userId!;
+            const userRole = (req as any).user?.role;
             
             const {
                 format = 'json', // json, csv, jsonl
@@ -656,15 +667,7 @@ export class LogsController {
             }
             
         } catch (error) {
-            loggingService.error('Failed to export logs', {
-                component: 'LogsController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to export logs'
-            });
+            ControllerHelper.handleError('exportLogs', error, req, res, startTime);
         }
     }
     
@@ -870,11 +873,16 @@ Provide a clear, 1-2 sentence summary that directly answers the user's question.
      * Natural language query for logs
      * POST /api/logs/ai/chat
      */
-    static async naturalLanguageQuery(req: Request, res: Response): Promise<Response> {
+    static async naturalLanguageQuery(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
-        const userId = (req as any).user.id;
-        const userRole = (req as any).user.role;
-        const ipAddress = req.ip || req.connection.remoteAddress;
+        ControllerHelper.logRequestStart('naturalLanguageQuery', req);
+        
+        if (!ControllerHelper.requireAuth(req, res)) {
+            return res;
+        }
+        const userId = req.userId!;
+        const userRole = (req as any).user?.role;
+        const ipAddress = req.ip || (req as any).connection?.remoteAddress;
         const userAgent = req.headers['user-agent'];
         
         try {
@@ -1171,11 +1179,8 @@ Provide a clear, 1-2 sentence summary that directly answers the user's question.
                 error: error instanceof Error ? error.message : String(error)
             });
             
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to process query',
-                message: error instanceof Error ? error.message : 'Unknown error occurred'
-            });
+            ControllerHelper.handleError('naturalLanguageQuery', error, req, res, startTime);
+            return res;
         }
     }
     
@@ -1183,9 +1188,15 @@ Provide a clear, 1-2 sentence summary that directly answers the user's question.
      * Get chat history for user
      * GET /api/logs/ai/chat/history
      */
-    static async getChatHistory(req: Request, res: Response): Promise<Response> {
+    static async getChatHistory(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getChatHistory', req);
+
         try {
-            const userId = (req as any).user.id;
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return res;
+            }
+            const userId = req.userId!;
             const { limit = 10, offset = 0 } = req.query;
             
             const conversations = await LogQueryConversation.find({ userId })
@@ -1208,15 +1219,8 @@ Provide a clear, 1-2 sentence summary that directly answers the user's question.
             });
             
         } catch (error) {
-            loggingService.error('Failed to get chat history', {
-                component: 'LogsController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve chat history'
-            });
+            ControllerHelper.handleError('getChatHistory', error, req, res, startTime);
+            return res;
         }
     }
     
@@ -1224,9 +1228,15 @@ Provide a clear, 1-2 sentence summary that directly answers the user's question.
      * Delete a conversation
      * DELETE /api/logs/ai/chat/:conversationId
      */
-    static async deleteChatConversation(req: Request, res: Response): Promise<Response> {
+    static async deleteChatConversation(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('deleteChatConversation', req);
+
         try {
-            const userId = (req as any).user.id;
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return res;
+            }
+            const userId = req.userId!;
             const { conversationId } = req.params;
             
             const result = await LogQueryConversation.deleteOne({
@@ -1241,21 +1251,20 @@ Provide a clear, 1-2 sentence summary that directly answers the user's question.
                 });
             }
             
+            ControllerHelper.logRequestSuccess('deleteChatConversation', req, startTime, {
+                conversationId
+            });
+
             return res.json({
                 success: true,
                 message: 'Conversation deleted successfully'
             });
             
         } catch (error) {
-            loggingService.error('Failed to delete conversation', {
-                component: 'LogsController',
-                error: error instanceof Error ? error.message : String(error)
+            ControllerHelper.handleError('deleteChatConversation', error, req, res, startTime, {
+                conversationId: req.params.conversationId
             });
-            
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to delete conversation'
-            });
+            return res;
         }
     }
 }

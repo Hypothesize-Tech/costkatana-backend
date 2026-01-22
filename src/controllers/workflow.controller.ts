@@ -3,35 +3,21 @@ import { workflowOrchestrator, WorkflowExecution } from '../services/workflowOrc
 import { loggingService } from '../services/logging.service';
 import { redisService } from '../services/redis.service';
 import mongoose from 'mongoose';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class WorkflowController {
     /**
      * Create a new workflow template
      */
-    static async createTemplate(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async createTemplate(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const requestId = req.headers['x-request-id'] as string;
-        const userId = req.user?.id || req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('createTemplate', req);
 
         try {
-            loggingService.info('Workflow template creation initiated', {
-                requestId,
-                userId,
-                hasUserId: !!userId
-            });
-
-            if (!userId) {
-                loggingService.warn('Workflow template creation failed - unauthorized', {
-                    requestId,
-                    hasUserId: !!userId
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
 
             const templateData = {
                 ...req.body,
@@ -39,7 +25,7 @@ export class WorkflowController {
             };
 
             loggingService.info('Workflow template creation parameters received', {
-                requestId,
+                requestId: req.headers['x-request-id'] as string,
                 userId,
                 hasTemplateData: !!req.body,
                 templateDataKeys: req.body ? Object.keys(req.body) : [],
@@ -50,12 +36,7 @@ export class WorkflowController {
             });
 
             const template = await workflowOrchestrator.createWorkflowTemplate(templateData);
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Workflow template created successfully', {
-                requestId,
-                duration,
-                userId,
+            ControllerHelper.logRequestSuccess('createTemplate', req, startTime, {
                 templateId: (template as any)._id || template.id,
                 templateName: template.name,
                 hasSteps: !!template.steps,
@@ -65,6 +46,7 @@ export class WorkflowController {
             });
 
             // Log business event
+            const duration = Date.now() - startTime;
             loggingService.logBusiness({
                 event: 'workflow_template_created',
                 category: 'workflow_management',
@@ -83,20 +65,11 @@ export class WorkflowController {
                 data: template
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Workflow template creation failed', {
-                requestId,
-                userId,
-                hasUserId: !!userId,
+            ControllerHelper.handleError('createTemplate', error, req, res, startTime, {
                 templateName: req.body?.name,
                 hasSteps: !!req.body?.steps,
-                stepsCount: req.body?.steps?.length,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
+                stepsCount: req.body?.steps?.length
             });
-            
             next(error);
         }
     }
@@ -104,16 +77,14 @@ export class WorkflowController {
     /**
      * Execute a workflow
      */
-    static async executeWorkflow(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async executeWorkflow(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('executeWorkflow', req);
+
         try {
-            const userId = req.user?.id || req.userId;
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
 
             const { templateId } = req.params;
             const { input, variables, environment, tags } = req.body;
@@ -125,23 +96,26 @@ export class WorkflowController {
                 { variables, environment, tags }
             );
 
+            ControllerHelper.logRequestSuccess('executeWorkflow', req, startTime, {
+                templateId,
+                hasInput: !!input,
+                hasVariables: !!variables,
+                hasEnvironment: !!environment,
+                hasTags: !!tags
+            });
+
             res.status(201).json({
                 success: true,
                 message: 'Workflow execution started',
                 data: execution
             });
         } catch (error: any) {
-            loggingService.error('Execute workflow failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!req.user?.id || !!req.userId,
+            ControllerHelper.handleError('executeWorkflow', error, req, res, startTime, {
                 templateId: req.params.templateId,
                 hasInput: !!req.body?.input,
                 hasVariables: !!req.body?.variables,
                 hasEnvironment: !!req.body?.environment,
-                hasTags: !!req.body?.tags,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                hasTags: !!req.body?.tags
             });
             next(error);
         }
@@ -150,9 +124,13 @@ export class WorkflowController {
     /**
      * Get workflow execution status
      */
-    static async getExecution(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getExecution(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getExecution', req);
+
         try {
             const { executionId } = req.params;
+            ServiceHelper.validateObjectId(executionId, 'executionId');
 
             const execution = await workflowOrchestrator.getWorkflowExecution(executionId);
             if (!execution) {
@@ -163,16 +141,17 @@ export class WorkflowController {
                 return;
             }
 
+            ControllerHelper.logRequestSuccess('getExecution', req, startTime, {
+                executionId
+            });
+
             res.json({
                 success: true,
                 data: execution
             });
         } catch (error: any) {
-            loggingService.error('Get workflow execution failed', {
-                requestId: req.headers['x-request-id'] as string,
-                executionId: req.params.executionId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('getExecution', error, req, res, startTime, {
+                executionId: req.params.executionId
             });
             next(error);
         }
@@ -181,31 +160,27 @@ export class WorkflowController {
     /**
      * List workflow templates for user
      */
-    static async listTemplates(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async listTemplates(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('listTemplates', req);
+
         try {
-            const userId = req.user?.id || req.userId;
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
 
             const templates = await workflowOrchestrator.listTemplates(userId);
+
+            ControllerHelper.logRequestSuccess('listTemplates', req, startTime, {
+                templatesCount: templates.length
+            });
 
             res.json({
                 success: true,
                 data: templates
             });
         } catch (error: any) {
-            loggingService.error('List workflow templates failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!req.user?.id || !!req.userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
+            ControllerHelper.handleError('listTemplates', error, req, res, startTime);
             next(error);
         }
     }
@@ -213,9 +188,13 @@ export class WorkflowController {
     /**
      * Get workflow template
      */
-    static async getTemplate(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getTemplate(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getTemplate', req);
+
         try {
             const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
 
             const template = await workflowOrchestrator.getWorkflowTemplate(templateId);
             if (!template) {
@@ -226,16 +205,17 @@ export class WorkflowController {
                 return;
             }
 
+            ControllerHelper.logRequestSuccess('getTemplate', req, startTime, {
+                templateId
+            });
+
             res.json({
                 success: true,
                 data: template
             });
         } catch (error: any) {
-            loggingService.error('Get workflow template failed', {
-                requestId: req.headers['x-request-id'] as string,
-                templateId: req.params.templateId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('getTemplate', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
             next(error);
         }
@@ -244,9 +224,13 @@ export class WorkflowController {
     /**
      * Get workflow metrics and analytics
      */
-    static async getWorkflowMetrics(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getWorkflowMetrics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getWorkflowMetrics', req);
+
         try {
             const { workflowId } = req.params;
+            ServiceHelper.validateObjectId(workflowId, 'workflowId');
             const { timeRange } = req.query;
 
             const metrics = await workflowOrchestrator.getWorkflowMetrics(
@@ -254,17 +238,19 @@ export class WorkflowController {
                 timeRange as string
             );
 
+            ControllerHelper.logRequestSuccess('getWorkflowMetrics', req, startTime, {
+                workflowId,
+                timeRange
+            });
+
             res.json({
                 success: true,
                 data: metrics
             });
         } catch (error: any) {
-            loggingService.error('Get workflow metrics failed', {
-                requestId: req.headers['x-request-id'] as string,
+            ControllerHelper.handleError('getWorkflowMetrics', error, req, res, startTime, {
                 workflowId: req.params.workflowId,
-                timeRange: req.query.timeRange,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                timeRange: req.query.timeRange
             });
             next(error);
         }
@@ -273,22 +259,27 @@ export class WorkflowController {
     /**
      * Pause workflow execution
      */
-    static async pauseWorkflow(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async pauseWorkflow(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('pauseWorkflow', req);
+
         try {
             const { executionId } = req.params;
+            ServiceHelper.validateObjectId(executionId, 'executionId');
 
             await workflowOrchestrator.pauseWorkflow(executionId);
+
+            ControllerHelper.logRequestSuccess('pauseWorkflow', req, startTime, {
+                executionId
+            });
 
             res.json({
                 success: true,
                 message: 'Workflow paused successfully'
             });
         } catch (error: any) {
-            loggingService.error('Pause workflow failed', {
-                requestId: req.headers['x-request-id'] as string,
-                executionId: req.params.executionId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('pauseWorkflow', error, req, res, startTime, {
+                executionId: req.params.executionId
             });
             next(error);
         }
@@ -297,22 +288,27 @@ export class WorkflowController {
     /**
      * Resume workflow execution
      */
-    static async resumeWorkflow(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async resumeWorkflow(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('resumeWorkflow', req);
+
         try {
             const { executionId } = req.params;
+            ServiceHelper.validateObjectId(executionId, 'executionId');
 
             await workflowOrchestrator.resumeWorkflow(executionId);
+
+            ControllerHelper.logRequestSuccess('resumeWorkflow', req, startTime, {
+                executionId
+            });
 
             res.json({
                 success: true,
                 message: 'Workflow resumed successfully'
             });
         } catch (error: any) {
-            loggingService.error('Resume workflow failed', {
-                requestId: req.headers['x-request-id'] as string,
-                executionId: req.params.executionId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('resumeWorkflow', error, req, res, startTime, {
+                executionId: req.params.executionId
             });
             next(error);
         }
@@ -321,22 +317,27 @@ export class WorkflowController {
     /**
      * Cancel workflow execution
      */
-    static async cancelWorkflow(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async cancelWorkflow(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('cancelWorkflow', req);
+
         try {
             const { executionId } = req.params;
+            ServiceHelper.validateObjectId(executionId, 'executionId');
 
             await workflowOrchestrator.cancelWorkflow(executionId);
+
+            ControllerHelper.logRequestSuccess('cancelWorkflow', req, startTime, {
+                executionId
+            });
 
             res.json({
                 success: true,
                 message: 'Workflow cancelled successfully'
             });
         } catch (error: any) {
-            loggingService.error('Cancel workflow failed', {
-                requestId: req.headers['x-request-id'] as string,
-                executionId: req.params.executionId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('cancelWorkflow', error, req, res, startTime, {
+                executionId: req.params.executionId
             });
             next(error);
         }
@@ -345,9 +346,13 @@ export class WorkflowController {
     /**
      * Get workflow trace (detailed execution trace)
      */
-    static async getWorkflowTrace(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getWorkflowTrace(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getWorkflowTrace', req);
+
         try {
             const { executionId } = req.params;
+            ServiceHelper.validateObjectId(executionId, 'executionId');
 
             const execution = await workflowOrchestrator.getWorkflowExecution(executionId);
             if (!execution) {
@@ -390,16 +395,18 @@ export class WorkflowController {
                 performanceInsights: this.generatePerformanceInsights(execution)
             };
 
+            ControllerHelper.logRequestSuccess('getWorkflowTrace', req, startTime, {
+                executionId,
+                stepsCount: execution.steps.length
+            });
+
             res.json({
                 success: true,
                 data: trace
             });
         } catch (error: any) {
-            loggingService.error('Get workflow trace failed', {
-                requestId: req.headers['x-request-id'] as string,
-                executionId: req.params.executionId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('getWorkflowTrace', error, req, res, startTime, {
+                executionId: req.params.executionId
             });
             next(error);
         }
@@ -408,11 +415,16 @@ export class WorkflowController {
     /**
      * Get workflows list - returns array of workflow executions
      */
-    static async getWorkflowsList(_req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getWorkflowsList(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getWorkflowsList', req);
+
         try {
-            const userId = _req.user?.id || _req.userId;
-            const page = parseInt(_req.query.page as string) || 1;
-            const limit = parseInt(_req.query.limit as string) || 20;
+            const page = parseInt(req.query.page as string) || 1;
+            const limit = parseInt(req.query.limit as string) || 20;
             const skip = (page - 1) * limit;
             
             // Get workflow data directly from Usage collection
@@ -426,7 +438,7 @@ export class WorkflowController {
             
             if (workflowUsage && workflowUsage.length > 0) {
                 loggingService.info('Workflow usage records found for user', {
-                    requestId: _req.headers['x-request-id'] as string,
+                    requestId: req.headers['x-request-id'] as string,
                     userId,
                     workflowUsageCount: workflowUsage.length
                 });
@@ -529,14 +541,9 @@ export class WorkflowController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Get workflows list failed', {
-                requestId: _req.headers['x-request-id'] as string,
-                userId: _req.user?.id || _req.userId,
-                hasUserId: !!_req.user?.id || !!_req.userId,
-                page: _req.query.page,
-                limit: _req.query.limit,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('getWorkflowsList', error, req, res, startTime, {
+                page: req.query.page,
+                limit: req.query.limit
             });
             next(error);
         }
@@ -545,9 +552,14 @@ export class WorkflowController {
     /**
      * Get workflow analytics - returns analytics data
      */
-    static async getWorkflowAnalytics(_req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getWorkflowAnalytics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getWorkflowAnalytics', req);
+
         try {
-            const userId = _req.user?.id || _req.userId;
             
             // Get workflow data directly from Usage collection
             const Usage = mongoose.model('Usage');
@@ -559,9 +571,7 @@ export class WorkflowController {
             }).sort({ createdAt: -1 }).lean();
             
             if (workflowUsage && workflowUsage.length > 0) {
-                loggingService.info('Workflow usage records found for analytics', {
-                    requestId: _req.headers['x-request-id'] as string,
-                    userId,
+                ControllerHelper.logRequestSuccess('getWorkflowAnalytics', req, startTime, {
                     workflowUsageCount: workflowUsage.length
                 });
                 
@@ -633,13 +643,7 @@ export class WorkflowController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Get workflow analytics failed', {
-                requestId: _req.headers['x-request-id'] as string,
-                userId: _req.user?.id || _req.userId,
-                hasUserId: !!_req.user?.id || !!_req.userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
+            ControllerHelper.handleError('getWorkflowAnalytics', error, req, res, startTime);
             next(error);
         }
     }
@@ -647,10 +651,15 @@ export class WorkflowController {
     /**
      * Get workflow observability dashboard data
      */
-    static async getObservabilityDashboard(_req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getObservabilityDashboard(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getObservabilityDashboard', req);
+
         try {
-            const userId = _req.user?.id || _req.userId;
-            const timeRange = _req.query.timeRange as string || '24h';
+            const timeRange = req.query.timeRange as string || '24h';
             
             // Get workflow data directly from Usage collection
             const Usage = mongoose.model('Usage');
@@ -666,7 +675,7 @@ export class WorkflowController {
             
             if (workflowUsage && workflowUsage.length > 0) {
                 loggingService.info('Workflow usage records found for user', {
-                    requestId: _req.headers['x-request-id'] as string,
+                    requestId: req.headers['x-request-id'] as string,
                     userId,
                     workflowUsageCount: workflowUsage.length
                 });
@@ -772,7 +781,7 @@ export class WorkflowController {
 
                 // Log workflow summaries for debugging
                 loggingService.info('Workflow summaries created', {
-                    requestId: _req.headers['x-request-id'] as string,
+                    requestId: req.headers['x-request-id'] as string,
                     userId,
                     totalWorkflows: workflowSummaries.length,
                     automationWorkflows: workflowSummaries.filter(w => w.automationPlatform).length,
@@ -852,11 +861,6 @@ export class WorkflowController {
             }
             
             // Fall back to generated data if no workflow data found
-            loggingService.info('No workflow data found, falling back to generated data', {
-                requestId: _req.headers['x-request-id'] as string,
-                userId,
-                timeRange
-            });
             const dashboardData = await WorkflowController.generateRealDashboardData(userId, timeRange);
 
             res.json({
@@ -864,13 +868,8 @@ export class WorkflowController {
                 data: dashboardData
             });
         } catch (error: any) {
-            loggingService.error('Get observability dashboard failed', {
-                requestId: _req.headers['x-request-id'] as string,
-                userId: _req.user?.id || _req.userId,
-                hasUserId: !!_req.user?.id || !!_req.userId,
-                timeRange: _req.query.timeRange,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('getObservabilityDashboard', error, req, res, startTime, {
+                timeRange: req.query.timeRange
             });
             next(error);
         }

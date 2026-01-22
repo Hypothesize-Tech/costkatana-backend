@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { ProjectService } from '../services/project.service';
 import { UsageService } from '../services/usage.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 interface ChatGPTRequest extends Request {
     body: {
@@ -60,12 +62,6 @@ export class ChatGPTController {
         const { user_id, api_key } = req.body;
 
         try {
-            loggingService.info('Connection status check initiated', {
-                hasUserId: !!user_id,
-                hasApiKey: !!api_key,
-                userIdType: user_id?.includes('@') ? 'email' : user_id ? 'objectId' : 'none',
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // If no authentication provided at all
             if (!user_id && !api_key) {
@@ -221,13 +217,6 @@ export class ChatGPTController {
             if (userId && user) {
                 const duration = Date.now() - startTime;
 
-                loggingService.info('Connection status check successful', {
-                    userId,
-                    userEmail: user.email,
-                    duration,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 // Log business event
                 loggingService.logBusiness({
                     event: 'chatgpt_connection_verified',
@@ -249,10 +238,6 @@ export class ChatGPTController {
             }
 
             // Fallback case - should not reach here
-            loggingService.warn('Connection check reached fallback case', {
-                requestId: req.headers['x-request-id'] as string
-            });
-
             return {
                 connected: false,
                 message: 'I encountered an issue with your connection. Let me help you reconnect!',
@@ -260,15 +245,6 @@ export class ChatGPTController {
                 magicLinkRequired: true
             };
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Connection status check failed', {
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             return {
                 connected: false,
                 message: 'I encountered an issue with your connection. Let me help you reconnect!',
@@ -284,15 +260,10 @@ export class ChatGPTController {
     static async handleAction(req: ChatGPTRequest, res: Response): Promise<void> {
         const startTime = Date.now();
         const { action } = req.body;
+        
+        ControllerHelper.logRequestStart('handleAction', req as AuthenticatedRequest, { action });
 
         try {
-            loggingService.info('ChatGPT action received', {
-                action,
-                hasUserId: !!req.body.user_id,
-                hasApiKey: !!req.body.api_key,
-                hasEmail: !!req.body.email,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Handle magic link generation first (no auth required)
             if (action === 'generate_magic_link') {
@@ -315,12 +286,6 @@ export class ChatGPTController {
 
             // If not connected, guide user through onboarding
             if (!connectionStatus.connected) {
-                loggingService.warn('ChatGPT action failed - authentication required', {
-                    action,
-                    connectionStatus: connectionStatus.message,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(200).json({
                     success: false,
                     error: 'authentication_required',
@@ -367,21 +332,7 @@ export class ChatGPTController {
                     });
             }
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('ChatGPT controller error', {
-                action,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Internal server error',
-                message: error.message
-            });
+            ControllerHelper.handleError('handleAction', error, req as AuthenticatedRequest, res, startTime, { action });
         }
     }
 
@@ -395,19 +346,7 @@ export class ChatGPTController {
         const source = req.body.source || req.body.onboarding?.source || 'chatgpt';
 
         try {
-            loggingService.info('Magic link generation initiated', {
-                email,
-                name,
-                source,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!email) {
-                loggingService.warn('Magic link generation failed - email required', {
-                    receivedBody: req.body,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Email is required for magic link generation',
@@ -445,13 +384,6 @@ export class ChatGPTController {
             if (magicLinkResponse?.success) {
                 const duration = Date.now() - startTime;
 
-                loggingService.info('Magic link generated successfully', {
-                    email,
-                    source,
-                    duration,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 // Log business event
                 loggingService.logBusiness({
                     event: 'chatgpt_magic_link_generated',
@@ -480,13 +412,6 @@ export class ChatGPTController {
                     }
                 });
             } else {
-                loggingService.error('Magic link generation failed', {
-                    email,
-                    source,
-                    error: magicLinkResponse?.error || 'Unknown error',
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(500).json({
                     success: false,
                     error: 'Failed to generate magic link',
@@ -495,17 +420,6 @@ export class ChatGPTController {
             }
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Generate magic link error', {
-                email,
-                source,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             res.status(500).json({
                 success: false,
                 error: 'Failed to generate magic link',
@@ -522,21 +436,7 @@ export class ChatGPTController {
         const { conversation_data } = req.body;
 
         try {
-            loggingService.info('ChatGPT usage tracking initiated', {
-                userId,
-                model: conversation_data?.model,
-                hasPrompt: !!conversation_data?.prompt,
-                hasResponse: !!conversation_data?.response,
-                conversationId: conversation_data?.conversation_id,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!conversation_data) {
-                loggingService.warn('Usage tracking failed - conversation data required', {
-                    userId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'conversation_data is required for track_usage action'
@@ -594,16 +494,6 @@ export class ChatGPTController {
 
             const duration = Date.now() - startTime;
 
-            loggingService.info('ChatGPT usage tracked successfully', {
-                userId,
-                model: conversation_data.model || 'gpt-3.5-turbo',
-                totalTokens,
-                cost,
-                duration,
-                conversationId: conversation_data.conversation_id,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             // Log business event
             loggingService.logBusiness({
                 event: 'chatgpt_usage_tracked',
@@ -630,17 +520,6 @@ export class ChatGPTController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Track usage error', {
-                userId,
-                model: conversation_data?.model,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             res.status(500).json({
                 success: false,
                 error: 'Failed to track usage',
@@ -658,23 +537,7 @@ export class ChatGPTController {
         const { project } = req.body;
 
         try {
-            loggingService.info('ChatGPT project creation initiated', {
-                userId,
-                projectName: project?.name,
-                hasDescription: !!project?.description,
-                budgetAmount: project?.budget_amount,
-                budgetPeriod: project?.budget_period,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!project || !project.name) {
-                loggingService.warn('Project creation failed - project data with name required', {
-                    userId,
-                    hasProject: !!project,
-                    hasName: !!project?.name,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Project data with name is required for create_project action'
@@ -701,15 +564,6 @@ export class ChatGPTController {
 
             const duration = Date.now() - startTime;
 
-            loggingService.info('ChatGPT project created successfully', {
-                userId,
-                projectId: newProject._id,
-                projectName: newProject.name,
-                budget: `${newProject.budget.amount} ${newProject.budget.period}`,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             // Log business event
             loggingService.logBusiness({
                 event: 'chatgpt_project_created',
@@ -735,17 +589,6 @@ export class ChatGPTController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Create project error', {
-                userId,
-                projectName: project?.name,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             res.status(500).json({
                 success: false,
                 error: 'Failed to create project',
@@ -761,11 +604,6 @@ export class ChatGPTController {
         const startTime = Date.now();
 
         try {
-            loggingService.info('ChatGPT projects retrieval initiated', {
-                userId,
-                requestId: _req.headers['x-request-id'] as string
-            });
-
             const projects = await ProjectService.getUserProjects(userId);
 
             const projectSummary = projects.map(project => ({
@@ -779,13 +617,6 @@ export class ChatGPTController {
             }));
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('ChatGPT projects retrieved successfully', {
-                userId,
-                projectsCount: projects.length,
-                duration,
-                requestId: _req.headers['x-request-id'] as string
-            });
 
             // Log business event
             loggingService.logBusiness({
@@ -810,16 +641,6 @@ export class ChatGPTController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Get projects error', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: _req.headers['x-request-id'] as string
-            });
-
             res.status(500).json({
                 success: false,
                 error: 'Failed to get projects',
@@ -835,11 +656,6 @@ export class ChatGPTController {
         const startTime = Date.now();
 
         try {
-            loggingService.info('ChatGPT analytics retrieval initiated', {
-                userId,
-                requestId: _req.headers['x-request-id'] as string
-            });
-
             // Get user's recent usage stats
             const stats = await UsageService.getUsageStats(userId, 'monthly');
             const projects = await ProjectService.getUserProjects(userId);
@@ -848,15 +664,6 @@ export class ChatGPTController {
             const totalBudget = projects.reduce((sum, project) => sum + project.budget.amount, 0);
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('ChatGPT analytics retrieved successfully', {
-                userId,
-                totalSpending,
-                totalBudget,
-                projectsCount: projects.length,
-                duration,
-                requestId: _req.headers['x-request-id'] as string
-            });
 
             // Log business event
             loggingService.logBusiness({
@@ -891,16 +698,6 @@ export class ChatGPTController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Get analytics error', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: _req.headers['x-request-id'] as string
-            });
-
             res.status(500).json({
                 success: false,
                 error: 'Failed to get analytics',

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import { retryBedrockOperation } from '../utils/bedrockRetry';
+import { ServiceHelper } from '../utils/serviceHelper';
 import { SimulationTrackingService } from './simulationTracking.service';
 import { Usage } from '../models/Usage';
 import { loggingService } from './logging.service';
@@ -583,18 +583,12 @@ Return valid JSON array of recommendations.`;
                 })
             });
 
-            const response = await retryBedrockOperation(
+            const response = await ServiceHelper.withRetry(
                 () => bedrockClient.send(command),
                 {
                     maxRetries: 3,
-                    baseDelay: 1000,
-                    maxDelay: 15000,
-                    backoffMultiplier: 2,
-                    jitterFactor: 0.25
-                },
-                {
-                    modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-                    operation: 'generateRecommendations'
+                    delayMs: 1000,
+                    backoffMultiplier: 2
                 }
             );
             const responseBody = JSON.parse(new TextDecoder().decode(response.body));

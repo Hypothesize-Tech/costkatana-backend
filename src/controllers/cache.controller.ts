@@ -2,48 +2,25 @@ import { Response, NextFunction } from 'express';
 
 import { redisService } from '../services/redis.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
 
 export class CacheController {
 
 
-  static async getCacheStats(req: any, res: Response, next: NextFunction): Promise<void> {
+  static async getCacheStats(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     const startTime = Date.now();
-    const userId = req.user?.id || req.userId;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getCacheStats', req);
 
     try {
-      loggingService.info('Cache stats request initiated', {
-        userId,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      if (!userId) {
-        loggingService.warn('Cache stats request failed - no user authentication', {
-          requestId: req.headers['x-request-id'] as string
-        });
-
-        res.status(401).json({
-          success: false,
-          message: 'Authentication required',
-        });
-        return;
-      }
 
       // Get Redis stats only
       const redisStats = await redisService.getCacheStats();
       
       const duration = Date.now() - startTime;
-
-      loggingService.info('Cache stats retrieved successfully', {
-        userId,
-        duration,
-        totalHits: redisStats.hits,
-        totalMisses: redisStats.misses,
-        totalRequests: redisStats.totalRequests,
-        hitRate: (redisStats.hits / (redisStats.totalRequests || 1)) * 100,
-        costSaved: redisStats.costSaved,
-        tokensSaved: redisStats.tokensSaved || 0,
-        requestId: req.headers['x-request-id'] as string
-      });
 
       // Log business event
       loggingService.logBusiness({
@@ -59,6 +36,11 @@ export class CacheController {
           costSaved: redisStats.costSaved,
           tokensSaved: redisStats.tokensSaved || 0
         }
+      });
+
+      ControllerHelper.logRequestSuccess('getCacheStats', req, startTime, {
+        totalHits: redisStats.hits,
+        totalMisses: redisStats.misses
       });
       
       res.json({
@@ -85,44 +67,23 @@ export class CacheController {
         },
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Cache stats retrieval failed', {
-        userId,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      next(error);
+      ControllerHelper.handleError('getCacheStats', error, req, res, startTime);
     }
   }
 
-  static async clearCache(req: any, res: Response, next: NextFunction): Promise<void> {
+  static async clearCache(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     const startTime = Date.now();
-    const userId = req.user?.id || req.userId;
     const { model, provider } = req.query;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('clearCache', req, {
+      model: model as string || 'all',
+      provider: provider as string || 'all'
+    });
 
     try {
-      loggingService.info('Cache clear request initiated', {
-        userId,
-        model: model as string || 'all',
-        provider: provider as string || 'all',
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      if (!userId) {
-        loggingService.warn('Cache clear request failed - no user authentication', {
-          requestId: req.headers['x-request-id'] as string
-        });
-
-        res.status(401).json({
-          success: false,
-          message: 'Authentication required',
-        });
-        return;
-      }
       
       // Clear Redis cache only
       const clearedRedis = await redisService.clearCache({
@@ -132,15 +93,6 @@ export class CacheController {
       });
 
       const duration = Date.now() - startTime;
-
-      loggingService.info('Cache cleared successfully', {
-        userId,
-        model: model as string || 'all',
-        provider: provider as string || 'all',
-        duration,
-        clearedEntries: clearedRedis || 0,
-        requestId: req.headers['x-request-id'] as string
-      });
 
       // Log business event
       loggingService.logBusiness({
@@ -155,6 +107,10 @@ export class CacheController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('clearCache', req, startTime, {
+        clearedEntries: clearedRedis || 0
+      });
+
       res.json({
         success: true,
         message: 'Redis cache cleared successfully',
@@ -163,58 +119,28 @@ export class CacheController {
         }
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Cache clear failed', {
-        userId,
-        model: model as string || 'all',
-        provider: provider as string || 'all',
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      next(error);
+      ControllerHelper.handleError('clearCache', error, req, res, startTime);
     }
   }
 
   /**
    * Export cache data for backup
    */
-  static async exportCache(req: any, res: Response, next: NextFunction): Promise<void> {
+  static async exportCache(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     const startTime = Date.now();
-    const userId = req.user?.id || req.userId;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('exportCache', req);
 
     try {
-      loggingService.info('Cache export request initiated', {
-        userId,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      if (!userId) {
-        loggingService.warn('Cache export request failed - no user authentication', {
-          requestId: req.headers['x-request-id'] as string
-        });
-
-        res.status(401).json({
-          success: false,
-          message: 'Authentication required',
-        });
-        return;
-      }
 
       const cacheData = await redisService.exportCache();
       
-      const duration = Date.now() - startTime;
       const exportedEntries = cacheData.entries?.length || 0;
 
-      loggingService.info('Cache exported successfully', {
-        userId,
-        duration,
-        exportedEntries,
-        requestId: req.headers['x-request-id'] as string
-      });
+      const duration = Date.now() - startTime;
 
       // Log business event
       loggingService.logBusiness({
@@ -226,6 +152,10 @@ export class CacheController {
           exportedEntries
         }
       });
+
+      ControllerHelper.logRequestSuccess('exportCache', req, startTime, {
+        exportedEntries
+      });
       
       res.json({
         success: true,
@@ -233,55 +163,27 @@ export class CacheController {
         exportedAt: new Date().toISOString()
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Cache export failed', {
-        userId,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      next(error);
+      ControllerHelper.handleError('exportCache', error, req, res, startTime);
     }
   }
 
   /**
    * Import cache data from backup
    */
-  static async importCache(req: any, res: Response, next: NextFunction): Promise<void> {
+  static async importCache(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     const startTime = Date.now();
-    const userId = req.user?.id || req.userId;
     const { entries } = req.body;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('importCache', req, {
+      entriesCount: entries?.length || 0
+    });
 
     try {
-      loggingService.info('Cache import request initiated', {
-        userId,
-        entriesCount: entries?.length || 0,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      if (!userId) {
-        loggingService.warn('Cache import request failed - no user authentication', {
-          requestId: req.headers['x-request-id'] as string
-        });
-
-        res.status(401).json({
-          success: false,
-          message: 'Authentication required',
-        });
-        return;
-      }
       
       if (!entries || !Array.isArray(entries)) {
-        loggingService.warn('Cache import failed - invalid data format', {
-          userId,
-          entriesCount: entries?.length || 0,
-          isArray: Array.isArray(entries),
-          requestId: req.headers['x-request-id'] as string
-        });
-
         res.status(400).json({
           success: false,
           error: 'Invalid cache data format'
@@ -293,13 +195,6 @@ export class CacheController {
       
       const duration = Date.now() - startTime;
 
-      loggingService.info('Cache imported successfully', {
-        userId,
-        duration,
-        importedEntries: entries.length,
-        requestId: req.headers['x-request-id'] as string
-      });
-
       // Log business event
       loggingService.logBusiness({
         event: 'cache_imported',
@@ -310,62 +205,36 @@ export class CacheController {
           importedEntries: entries.length
         }
       });
+
+      ControllerHelper.logRequestSuccess('importCache', req, startTime, {
+        importedEntries: entries.length
+      });
       
       res.json({
         success: true,
         message: `Imported ${entries.length} cache entries successfully`
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Cache import failed', {
-        userId,
-        entriesCount: entries?.length || 0,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      next(error);
+      ControllerHelper.handleError('importCache', error, req, res, startTime);
     }
   }
 
   /**
    * Warmup cache with predefined queries
    */
-  static async warmupCache(req: any, res: Response, next: NextFunction): Promise<void> {
+  static async warmupCache(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     const startTime = Date.now();
-    const userId = req.user?.id || req.userId;
     const { queries } = req.body;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('warmupCache', req, {
+      queriesCount: queries?.length || 0
+    });
 
     try {
-      loggingService.info('Cache warmup request initiated', {
-        userId,
-        queriesCount: queries?.length || 0,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      if (!userId) {
-        loggingService.warn('Cache warmup request failed - no user authentication', {
-          requestId: req.headers['x-request-id'] as string
-        });
-
-        res.status(401).json({
-          success: false,
-          message: 'Authentication required',
-        });
-        return;
-      }
-      
       if (!queries || !Array.isArray(queries)) {
-        loggingService.warn('Cache warmup failed - invalid data format', {
-          userId,
-          queriesCount: queries?.length || 0,
-          isArray: Array.isArray(queries),
-          requestId: req.headers['x-request-id'] as string
-        });
-
         res.status(400).json({
           success: false,
           error: 'Invalid warmup data format'
@@ -377,13 +246,6 @@ export class CacheController {
       
       const duration = Date.now() - startTime;
 
-      loggingService.info('Cache warmup completed successfully', {
-        userId,
-        duration,
-        warmedUpEntries: queries.length,
-        requestId: req.headers['x-request-id'] as string
-      });
-
       // Log business event
       loggingService.logBusiness({
         event: 'cache_warmed_up',
@@ -394,24 +256,17 @@ export class CacheController {
           warmedUpEntries: queries.length
         }
       });
+
+      ControllerHelper.logRequestSuccess('warmupCache', req, startTime, {
+        warmedUpEntries: queries.length
+      });
       
       res.json({
         success: true,
         message: `Warmed up cache with ${queries.length} entries`
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Cache warmup failed', {
-        userId,
-        queriesCount: queries?.length || 0,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      next(error);
+      ControllerHelper.handleError('warmupCache', error, req, res, startTime);
     }
   }
 }

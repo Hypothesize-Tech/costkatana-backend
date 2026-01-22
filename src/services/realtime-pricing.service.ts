@@ -1,7 +1,7 @@
 import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { bedrockClient, AWS_CONFIG } from '../config/aws';
 import { loggingService } from './logging.service';
-import { retryBedrockOperation } from '../utils/bedrockRetry';
+import { ServiceHelper } from '../utils/serviceHelper';
 import { WebScraperService } from './web-scraper.service';
 import { AIModelPricing } from '../models/AIModelPricing';
 
@@ -242,18 +242,12 @@ export class RealtimePricingService {
                 body: JSON.stringify(payload),
             });
 
-            const response = await retryBedrockOperation(
+            const response = await ServiceHelper.withRetry(
                 () => bedrockClient.send(command),
                 {
                     maxRetries: 3,
-                    baseDelay: 1000,
-                    maxDelay: 15000,
-                    backoffMultiplier: 2,
-                    jitterFactor: 0.25
-                },
-                {
-                    modelId: AWS_CONFIG.bedrock.modelId,
-                    operation: 'extractPricingData'
+                    delayMs: 1000,
+                    backoffMultiplier: 2
                 }
             );
             const responseBody = JSON.parse(new TextDecoder().decode(response.body));

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { ckqlService } from '../services/ckql.service';
 import { telemetryVectorizationService } from '../services/telemetryVectorization.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
 
 export class CKQLController {
   /**
@@ -48,26 +49,17 @@ export class CKQLController {
         offset: parseInt(offset) || 0
       });
 
-      const duration = Date.now() - startTime;
-
-      loggingService.info('CKQL query executed successfully', {
-        queryLength: query.length,
-        tenantId: tenant_id,
-        workspaceId: workspace_id,
-        duration,
+      ControllerHelper.logRequestSuccess('executeQuery', req as AuthenticatedRequest, startTime, {
         executionTime: result.executionTime,
         totalCount: result.totalCount,
-        resultsCount: result.results?.length || 0,
-        hasInsights: !!result.insights,
-        hasSuggestedFilters: !!result.query.suggestedFilters,
-        requestId: req.headers['x-request-id'] as string
+        resultsCount: result.results?.length || 0
       });
 
       // Log business event
       loggingService.logBusiness({
         event: 'ckql_query_executed',
         category: 'ckql_operations',
-        value: duration,
+        value: Date.now() - startTime,
         metadata: {
           queryLength: query.length,
           tenantId: tenant_id,
@@ -90,18 +82,7 @@ export class CKQLController {
         suggested_filters: result.query.suggestedFilters
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('CKQL query execution failed', {
-        queryLength: query?.length || 0,
-        tenantId: tenant_id,
-        workspaceId: workspace_id,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
+      ControllerHelper.handleError('executeQuery', error, req as AuthenticatedRequest, res, startTime);
       return res.status(500).json({
         success: false,
         error: 'Failed to execute query',
@@ -139,21 +120,15 @@ export class CKQLController {
 
       const suggestions = CKQLController.generateSuggestions(partial_query);
 
-      const duration = Date.now() - startTime;
-
-      loggingService.info('CKQL suggestions generated successfully', {
-        partialQuery: partial_query,
-        partialQueryLength: partial_query.length,
-        suggestionsCount: suggestions.length,
-        duration,
-        requestId: req.headers['x-request-id'] as string
+      ControllerHelper.logRequestSuccess('getSuggestions', req as AuthenticatedRequest, startTime, {
+        suggestionsCount: suggestions.length
       });
 
       // Log business event
       loggingService.logBusiness({
         event: 'ckql_suggestions_generated',
         category: 'ckql_operations',
-        value: duration,
+        value: Date.now() - startTime,
         metadata: {
           partialQuery: partial_query,
           partialQueryLength: partial_query.length,
@@ -166,17 +141,7 @@ export class CKQLController {
         suggestions
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Failed to get query suggestions', {
-        partialQuery: partial_query,
-        partialQueryLength: partial_query?.length || 0,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
+      ControllerHelper.handleError('getSuggestions', error, req as AuthenticatedRequest, res, startTime);
       return res.status(500).json({
         success: false,
         error: 'Failed to get suggestions'
@@ -207,24 +172,16 @@ export class CKQLController {
         forceReprocess: force_reprocess
       });
 
-      const duration = Date.now() - startTime;
-
-      loggingService.info('Telemetry vectorization started successfully', {
-        timeframe,
-        tenantId: tenant_id,
-        workspaceId: workspace_id,
-        forceReprocess: force_reprocess,
+      ControllerHelper.logRequestSuccess('startVectorization', req as AuthenticatedRequest, startTime, {
         jobId: job.id,
-        jobStatus: job.status,
-        duration,
-        requestId: req.headers['x-request-id'] as string
+        jobStatus: job.status
       });
 
       // Log business event
       loggingService.logBusiness({
         event: 'telemetry_vectorization_started',
         category: 'ckql_operations',
-        value: duration,
+        value: Date.now() - startTime,
         metadata: {
           timeframe,
           tenantId: tenant_id,
@@ -240,19 +197,7 @@ export class CKQLController {
         job
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Failed to start vectorization', {
-        timeframe,
-        tenantId: tenant_id,
-        workspaceId: workspace_id,
-        forceReprocess: force_reprocess,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
+      ControllerHelper.handleError('startVectorization', error, req as AuthenticatedRequest, res, startTime);
       return res.status(500).json({
         success: false,
         error: error instanceof Error ? error.message : 'Failed to start vectorization'
@@ -281,23 +226,16 @@ export class CKQLController {
         workspace_id
       });
 
-      const duration = Date.now() - startTime;
-
-      loggingService.info('Vectorization status retrieved successfully', {
-        tenantId: tenant_id,
-        workspaceId: workspace_id,
-        duration,
+      ControllerHelper.logRequestSuccess('getVectorizationStatus', req as AuthenticatedRequest, startTime, {
         jobStatus: job?.status,
-        jobId: job?.id,
-        hasStats: !!stats,
-        requestId: req.headers['x-request-id'] as string
+        jobId: job?.id
       });
 
       // Log business event
       loggingService.logBusiness({
         event: 'vectorization_status_retrieved',
         category: 'ckql_operations',
-        value: duration,
+        value: Date.now() - startTime,
         metadata: {
           tenantId: tenant_id,
           workspaceId: workspace_id,
@@ -313,17 +251,7 @@ export class CKQLController {
         statistics: stats
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Failed to get vectorization status', {
-        tenantId: tenant_id,
-        workspaceId: workspace_id,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
+      ControllerHelper.handleError('getVectorizationStatus', error, req as AuthenticatedRequest, res, startTime);
       return res.status(500).json({
         success: false,
         error: 'Failed to get vectorization status'
@@ -344,19 +272,15 @@ export class CKQLController {
 
       const cancelled = await telemetryVectorizationService.cancelVectorization();
 
-      const duration = Date.now() - startTime;
-
-      loggingService.info('Vectorization cancellation completed', {
-        duration,
-        cancelled,
-        requestId: _req.headers['x-request-id'] as string
+      ControllerHelper.logRequestSuccess('cancelVectorization', _req as AuthenticatedRequest, startTime, {
+        cancelled
       });
 
       // Log business event
       loggingService.logBusiness({
         event: 'vectorization_cancelled',
         category: 'ckql_operations',
-        value: duration,
+        value: Date.now() - startTime,
         metadata: {
           cancelled
         }
@@ -367,15 +291,7 @@ export class CKQLController {
         cancelled
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Failed to cancel vectorization', {
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: _req.headers['x-request-id'] as string
-      });
-
+      ControllerHelper.handleError('cancelVectorization', error, _req as AuthenticatedRequest, res, startTime);
       return res.status(500).json({
         success: false,
         error: 'Failed to cancel vectorization'
@@ -418,21 +334,15 @@ export class CKQLController {
         generated_at: new Date().toISOString()
       }));
 
-      const duration = Date.now() - startTime;
-
-      loggingService.info('Cost narratives generated successfully', {
-        recordIdsCount: record_ids.length,
-        recordIds: record_ids,
-        narrativesCount: narratives.length,
-        duration,
-        requestId: req.headers['x-request-id'] as string
+      ControllerHelper.logRequestSuccess('getCostNarratives', req as AuthenticatedRequest, startTime, {
+        narrativesCount: narratives.length
       });
 
       // Log business event
       loggingService.logBusiness({
         event: 'cost_narratives_generated',
         category: 'ckql_operations',
-        value: duration,
+        value: Date.now() - startTime,
         metadata: {
           recordIdsCount: record_ids.length,
           recordIds: record_ids,
@@ -445,17 +355,7 @@ export class CKQLController {
         narratives
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Failed to get cost narratives', {
-        recordIdsCount: record_ids?.length || 0,
-        recordIds: record_ids,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
+      ControllerHelper.handleError('getCostNarratives', error, req as AuthenticatedRequest, res, startTime);
       return res.status(500).json({
         success: false,
         error: 'Failed to get cost narratives'
@@ -522,20 +422,16 @@ export class CKQLController {
         }
       ];
 
-      const duration = Date.now() - startTime;
-
-      loggingService.info('Example queries retrieved successfully', {
-        duration,
+      ControllerHelper.logRequestSuccess('getExampleQueries', _req as AuthenticatedRequest, startTime, {
         categoriesCount: examples.length,
-        totalQueriesCount: examples.reduce((sum, cat) => sum + cat.queries.length, 0),
-        requestId: _req.headers['x-request-id'] as string
+        totalQueriesCount: examples.reduce((sum, cat) => sum + cat.queries.length, 0)
       });
 
       // Log business event
       loggingService.logBusiness({
         event: 'example_queries_retrieved',
         category: 'ckql_operations',
-        value: duration,
+        value: Date.now() - startTime,
         metadata: {
           categoriesCount: examples.length,
           totalQueriesCount: examples.reduce((sum, cat) => sum + cat.queries.length, 0)
@@ -547,15 +443,7 @@ export class CKQLController {
         examples
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Failed to get example queries', {
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: _req.headers['x-request-id'] as string
-      });
-
+      ControllerHelper.handleError('getExampleQueries', error, _req as AuthenticatedRequest, res, startTime);
       return res.status(500).json({
         success: false,
         error: 'Failed to get example queries'

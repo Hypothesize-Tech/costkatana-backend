@@ -1,5 +1,5 @@
 import { Schema, model, Document, Types } from 'mongoose';
-import crypto from 'crypto';
+import { EncryptionService } from '../utils/encryption';
 
 // Interface for Vercel project data
 export interface IVercelProject {
@@ -179,15 +179,8 @@ vercelConnectionSchema.index({ teamId: 1 }, { sparse: true });
 
 // Method to encrypt access token
 vercelConnectionSchema.methods.encryptToken = function(token: string): string {
-    const algorithm = 'aes-256-cbc';
-    const key = Buffer.from(process.env.ENCRYPTION_KEY ?? 'default-encryption-key-change-this-in-production', 'utf8').slice(0, 32);
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv(algorithm, key, iv);
-    
-    let encrypted = cipher.update(token, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-    
-    return iv.toString('hex') + ':' + encrypted;
+    const { encrypted, iv } = EncryptionService.encryptCBC(token);
+    return `${iv}:${encrypted}`;
 };
 
 // Method to decrypt access token
@@ -196,22 +189,13 @@ vercelConnectionSchema.methods.decryptToken = function(this: IVercelConnection):
         throw new Error('Access token is not available');
     }
     
-    const algorithm = 'aes-256-cbc';
-    const key = Buffer.from(process.env.ENCRYPTION_KEY ?? 'default-encryption-key-change-this-in-production', 'utf8').slice(0, 32);
-    
     const parts: string[] = this.accessToken.split(':');
     if (parts.length !== 2) {
         throw new Error('Invalid access token format');
     }
     
-    const iv = Buffer.from(parts[0], 'hex');
-    const encrypted = parts[1];
-    
-    const decipher = crypto.createDecipheriv(algorithm, key, iv);
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    
-    return decrypted;
+    const [iv, encrypted] = parts;
+    return EncryptionService.decryptCBC(encrypted, iv);
 };
 
 // Method to decrypt refresh token
@@ -220,49 +204,27 @@ vercelConnectionSchema.methods.decryptRefreshToken = function(this: IVercelConne
         return undefined;
     }
     
-    const algorithm = 'aes-256-cbc';
-    const key = Buffer.from(process.env.ENCRYPTION_KEY ?? 'default-encryption-key-change-this-in-production', 'utf8').slice(0, 32);
-    
     const parts: string[] = this.refreshToken.split(':');
     if (parts.length !== 2) {
         throw new Error('Invalid refresh token format');
     }
     
-    const iv = Buffer.from(parts[0], 'hex');
-    const encrypted = parts[1];
-    
-    const decipher = crypto.createDecipheriv(algorithm, key, iv);
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    
-    return decrypted;
+    const [iv, encrypted] = parts;
+    return EncryptionService.decryptCBC(encrypted, iv);
 };
 
 // Pre-save hook to encrypt token if modified
 vercelConnectionSchema.pre('save', function(next) {
-    const algorithm = 'aes-256-cbc';
-    const key = Buffer.from(process.env.ENCRYPTION_KEY ?? 'default-encryption-key-change-this-in-production', 'utf8').slice(0, 32);
-    
     // Encrypt access token if modified and not already encrypted
     if (this.isModified('accessToken') && !this.accessToken.includes(':')) {
-        const iv = crypto.randomBytes(16);
-        const cipher = crypto.createCipheriv(algorithm, key, iv);
-        
-        let encrypted = cipher.update(this.accessToken, 'utf8', 'hex');
-        encrypted += cipher.final('hex');
-        
-        this.accessToken = iv.toString('hex') + ':' + encrypted;
+        const { encrypted, iv } = EncryptionService.encryptCBC(this.accessToken);
+        this.accessToken = `${iv}:${encrypted}`;
     }
     
     // Encrypt refresh token if modified and not already encrypted
     if (this.refreshToken && this.isModified('refreshToken') && !this.refreshToken.includes(':')) {
-        const iv = crypto.randomBytes(16);
-        const cipher = crypto.createCipheriv(algorithm, key, iv);
-        
-        let encrypted = cipher.update(this.refreshToken, 'utf8', 'hex');
-        encrypted += cipher.final('hex');
-        
-        this.refreshToken = iv.toString('hex') + ':' + encrypted;
+        const { encrypted, iv } = EncryptionService.encryptCBC(this.refreshToken);
+        this.refreshToken = `${iv}:${encrypted}`;
     }
     
     next();

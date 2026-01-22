@@ -1,32 +1,23 @@
 import { Request, Response } from 'express';
 import { AutoSimulationService, AutoSimulationSettings } from '../services/autoSimulation.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class AutoSimulationController {
     
     /**
      * Get user's auto-simulation settings
      */
-    static async getUserSettings(req: Request, res: Response): Promise<Response> {
+    static async getUserSettings(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getUserSettings', req);
 
         try {
-            loggingService.info('Auto-simulation settings request initiated', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Auto-simulation settings request failed - no user authentication', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'User authentication required' 
-                });
-            }
 
             const settings = await AutoSimulationService.getUserSettings(userId);
             
@@ -53,17 +44,10 @@ export class AutoSimulationController {
                 }
             };
 
-            const duration = Date.now() - startTime;
             const hasCustomSettings = !!settings;
 
-            loggingService.info('Auto-simulation settings retrieved successfully', {
-                userId,
-                duration,
-                hasCustomSettings,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             // Log business event
+            const duration = Date.now() - startTime;
             loggingService.logBusiness({
                 event: 'auto_simulation_settings_retrieved',
                 category: 'simulation_management',
@@ -74,55 +58,37 @@ export class AutoSimulationController {
                 }
             });
 
+            ControllerHelper.logRequestSuccess('getUserSettings', req, startTime, {
+                hasCustomSettings
+            });
+
             return res.status(200).json({
                 success: true,
                 data: settings || defaultSettings
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Auto-simulation settings retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Internal server error'
-            });
+            ControllerHelper.handleError('getUserSettings', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Update user's auto-simulation settings
      */
-    static async updateUserSettings(req: Request, res: Response): Promise<Response> {
+    static async updateUserSettings(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
         const settings = req.body as Partial<AutoSimulationSettings>;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('updateUserSettings', req, {
+            hasTriggers: !!settings.triggers,
+            hasAutoOptimize: !!settings.autoOptimize,
+            hasNotifications: !!settings.notifications
+        });
 
         try {
-            loggingService.info('Auto-simulation settings update initiated', {
-                userId,
-                hasTriggers: !!settings.triggers,
-                hasAutoOptimize: !!settings.autoOptimize,
-                hasNotifications: !!settings.notifications,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Auto-simulation settings update failed - no user authentication', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'User authentication required' 
-                });
-            }
             
             // Validate settings
             if (settings.triggers?.costThreshold !== undefined && settings.triggers.costThreshold < 0) {
@@ -169,15 +135,6 @@ export class AutoSimulationController {
 
             const duration = Date.now() - startTime;
 
-            loggingService.info('Auto-simulation settings updated successfully', {
-                userId,
-                duration,
-                hasTriggers: !!settings.triggers,
-                hasAutoOptimize: !!settings.autoOptimize,
-                hasNotifications: !!settings.notifications,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             // Log business event
             loggingService.logBusiness({
                 event: 'auto_simulation_settings_updated',
@@ -191,54 +148,38 @@ export class AutoSimulationController {
                 }
             });
 
+            ControllerHelper.logRequestSuccess('updateUserSettings', req, startTime, {
+                hasTriggers: !!settings.triggers,
+                hasAutoOptimize: !!settings.autoOptimize,
+                hasNotifications: !!settings.notifications
+            });
+
             return res.status(200).json({
                 success: true,
                 message: 'Settings updated successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Auto-simulation settings update failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Internal server error'
-            });
+            ControllerHelper.handleError('updateUserSettings', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Get user's simulation queue
      */
-    static async getUserQueue(req: Request, res: Response): Promise<Response> {
+    static async getUserQueue(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
         const { status, limit = 20 } = req.query;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getUserQueue', req, {
+            status: status as string,
+            limit: parseInt(limit as string)
+        });
 
         try {
-            loggingService.info('Auto-simulation queue request initiated', {
-                userId,
-                status: status as string,
-                limit: parseInt(limit as string),
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Auto-simulation queue request failed - no user authentication', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'User authentication required' 
-                });
-            }
 
             const queue = await AutoSimulationService.getUserQueue(
                 userId,
@@ -247,15 +188,6 @@ export class AutoSimulationController {
             );
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Auto-simulation queue retrieved successfully', {
-                userId,
-                duration,
-                status: status as string,
-                limit: parseInt(limit as string),
-                queueLength: queue.length,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Log business event
             loggingService.logBusiness({
@@ -270,46 +202,41 @@ export class AutoSimulationController {
                 }
             });
 
+            ControllerHelper.logRequestSuccess('getUserQueue', req, startTime, {
+                queueLength: queue.length,
+                status: status as string
+            });
+
             return res.status(200).json({
                 success: true,
                 data: queue
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Auto-simulation queue retrieval failed', {
-                userId,
-                status: status as string,
-                limit: parseInt(limit as string),
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Internal server error'
-            });
+            ControllerHelper.handleError('getUserQueue', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Handle optimization approval/rejection
      */
-    static async handleOptimizationApproval(req: Request, res: Response): Promise<Response> {
+    static async handleOptimizationApproval(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
         const { queueItemId } = req.params;
         const { approved, selectedOptimizations } = req.body;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('handleOptimizationApproval', req, {
+            queueItemId,
+            approved
+        });
 
         try {
-            loggingService.info('Optimization approval handling initiated', {
-                queueItemId,
-                approved,
-                hasSelectedOptimizations: !!selectedOptimizations,
-                selectedOptimizationsCount: selectedOptimizations?.length || 0,
-                requestId: req.headers['x-request-id'] as string
-            });
+            if (queueItemId) {
+                ServiceHelper.validateObjectId(queueItemId, 'queueItemId');
+            }
 
             if (!queueItemId) {
                 loggingService.warn('Optimization approval failed - missing queue item ID', {
@@ -343,15 +270,6 @@ export class AutoSimulationController {
 
             const duration = Date.now() - startTime;
 
-            loggingService.info('Optimization approval handled successfully', {
-                queueItemId,
-                approved,
-                duration,
-                hasSelectedOptimizations: !!selectedOptimizations,
-                selectedOptimizationsCount: selectedOptimizations?.length || 0,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             // Log business event
             loggingService.logBusiness({
                 event: 'optimization_approval_handled',
@@ -365,51 +283,43 @@ export class AutoSimulationController {
                 }
             });
 
+            ControllerHelper.logRequestSuccess('handleOptimizationApproval', req, startTime, {
+                queueItemId,
+                approved
+            });
+
             return res.status(200).json({
                 success: true,
                 message: approved ? 'Optimization approved' : 'Optimization rejected'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Optimization approval handling failed', {
-                queueItemId,
-                approved,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Internal server error'
-            });
+            ControllerHelper.handleError('handleOptimizationApproval', error, req, res, startTime, { queueItemId });
+            return res;
         }
     }
 
     /**
      * Manually trigger simulation for a usage
      */
-    static async triggerSimulation(req: Request, res: Response): Promise<Response> {
+    static async triggerSimulation(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
         const { usageId } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('triggerSimulation', req, { usageId });
 
         try {
-            loggingService.info('Manual simulation trigger initiated', {
-                usageId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!usageId) {
-                loggingService.warn('Manual simulation trigger failed - missing usage ID', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(400).json({
                     success: false,
                     message: 'Usage ID is required'
                 });
+            }
+
+            if (usageId) {
+                ServiceHelper.validateObjectId(usageId, 'usageId');
             }
 
             const queueItemId = await AutoSimulationService.queueForSimulation(usageId);
@@ -428,13 +338,6 @@ export class AutoSimulationController {
 
             const duration = Date.now() - startTime;
 
-            loggingService.info('Manual simulation triggered successfully', {
-                usageId,
-                queueItemId,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             // Log business event
             loggingService.logBusiness({
                 event: 'manual_simulation_triggered',
@@ -446,49 +349,33 @@ export class AutoSimulationController {
                 }
             });
 
+            ControllerHelper.logRequestSuccess('triggerSimulation', req, startTime, {
+                usageId,
+                queueItemId
+            });
+
             return res.status(201).json({
                 success: true,
                 message: 'Simulation queued successfully',
                 data: { queueItemId }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Manual simulation trigger failed', {
-                usageId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Internal server error'
-            });
+            ControllerHelper.handleError('triggerSimulation', error, req, res, startTime, { usageId });
+            return res;
         }
     }
 
     /**
      * Process queue manually (admin endpoint)
      */
-    static async processQueue(_req: Request, res: Response): Promise<Response> {
+    static async processQueue(_req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
 
         try {
-            loggingService.info('Queue processing initiated manually', {
-                requestId: _req.headers['x-request-id'] as string
-            });
-
             // This could be restricted to admin users
             await AutoSimulationService.processQueue();
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Queue processing completed successfully', {
-                duration,
-                requestId: _req.headers['x-request-id'] as string
-            });
 
             // Log business event
             loggingService.logBusiness({
@@ -500,24 +387,15 @@ export class AutoSimulationController {
                 }
             });
 
+            ControllerHelper.logRequestSuccess('processQueue', _req, startTime);
+
             return res.status(200).json({
                 success: true,
                 message: 'Queue processing initiated'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Queue processing failed', {
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: _req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Internal server error'
-            });
+            ControllerHelper.handleError('processQueue', error, _req, res, startTime);
+            return res;
         }
     }
 }

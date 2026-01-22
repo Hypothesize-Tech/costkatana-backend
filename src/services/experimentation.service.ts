@@ -8,6 +8,7 @@ import mongoose from 'mongoose';
 import { AIRouterService } from './aiRouter.service'; 
 import { EventEmitter } from 'events';
 import { AICostTrackingService } from './aiCostTracking.service';
+import { BaseService } from '../shared/BaseService';
 
 export interface ExperimentResult {
     id: string;
@@ -94,14 +95,13 @@ export interface ComparisonProgress {
     error?: string;
 }
 
-export class ExperimentationService {
+export class ExperimentationService extends BaseService {
     // Static event emitter for SSE progress updates
     private static progressEmitter = new EventEmitter();
     
     // Track active sessions for security validation
     private static activeSessions = new Map<string, { userId: string, createdAt: Date }>();
 
-    // Circuit breaker for AI service reliability
     private static circuitBreaker = {
         failures: new Map<string, number>(),
         lastFailure: new Map<string, number>(),
@@ -124,6 +124,13 @@ export class ExperimentationService {
             ExperimentationService.circuitBreaker.lastFailure.set(service, Date.now());
         }
     };
+
+    constructor() {
+        super('ExperimentationService', {
+            max: 500,
+            ttl: 300000 // 5 minutes
+        });
+    }
 
 
 

@@ -5,6 +5,8 @@ import { ModelRecommendationService } from '../services/modelRecommendation.serv
 import { loggingService } from '../services/logging.service';
 import { ReferenceImageAnalysisService } from '../services/referenceImageAnalysis.service';
 import { PromptTemplate } from '../models/PromptTemplate';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class PromptTemplateController {
     // Background processing queue
@@ -29,43 +31,24 @@ export class PromptTemplateController {
     /**
      * Create a new prompt template
      */
-    static async createTemplate(req: any, res: Response): Promise<void> {
+    static async createTemplate(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('createTemplate', req);
 
         try {
-            PromptTemplateController.conditionalLog('info', 'Prompt template creation initiated', {
-                userId,
-                requestId,
-                templateName: req.body?.name,
-                templateCategory: req.body?.category
-            });
-
-            if (!userId) {
-                PromptTemplateController.conditionalLog('warn', 'Prompt template creation failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
 
             const templateData = req.body;
             const template = await PromptTemplateService.createTemplate(userId, templateData);
-            const duration = Date.now() - startTime;
-
-            PromptTemplateController.conditionalLog('info', 'Prompt template created successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('createTemplate', req, startTime, {
                 templateId: template._id,
-                templateName: template.name,
-                requestId
+                templateName: template.name
             });
 
             // Queue background business event logging
+            const duration = Date.now() - startTime;
             PromptTemplateController.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'prompt_template_created',
@@ -86,28 +69,21 @@ export class PromptTemplateController {
                 message: 'Prompt template created successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            PromptTemplateController.conditionalLog('error', 'Prompt template creation failed', {
-                userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                duration
-            });
-
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to create template'
-            });
+            ControllerHelper.handleError('createTemplate', error, req, res, startTime);
         }
     }
 
     /**
      * Get accessible prompt templates
      */
-    static async getTemplates(req: any, res: Response): Promise<void> {
+    static async getTemplates(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getTemplates', req);
+
         try {
-            const userId = req.user!.id;
             PromptTemplateController.conditionalLog('info', 'GET prompt templates request', { userId });
 
             const {
@@ -133,7 +109,7 @@ export class PromptTemplateController {
 
             const result = await PromptTemplateService.getTemplates(filters);
 
-            PromptTemplateController.conditionalLog('info', 'Templates retrieved successfully', {
+            ControllerHelper.logRequestSuccess('getTemplates', req, startTime, {
                 templatesCount: result.templates?.length || 0,
                 total: result.total,
                 page: result.page
@@ -151,35 +127,37 @@ export class PromptTemplateController {
 
             res.json(response);
         } catch (error: any) {
-            PromptTemplateController.conditionalLog('error', 'Error getting prompt templates', {
-                error: error.message || 'Unknown error'
-            });
-            res.status(500).json({
-                success: false,
-                error: error.message || 'Failed to get templates'
-            });
+            ControllerHelper.handleError('getTemplates', error, req, res, startTime);
         }
     }
 
     /**
      * Get a specific prompt template
      */
-    static async getTemplate(req: any, res: Response): Promise<void> {
+    static async getTemplate(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getTemplate', req);
+
         try {
             const { templateId } = req.params;
-            const userId = req.user!.id;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
+            
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
 
             const template = await PromptTemplateService.getTemplateById(templateId, userId);
+
+            ControllerHelper.logRequestSuccess('getTemplate', req, startTime, {
+                templateId
+            });
 
             res.json({
                 success: true,
                 data: template
             });
         } catch (error: any) {
-            loggingService.error('Error getting prompt template:', error);
-            res.status(404).json({
-                success: false,
-                error: error.message || 'Template not found'
+            ControllerHelper.handleError('getTemplate', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
         }
     }
@@ -187,10 +165,16 @@ export class PromptTemplateController {
     /**
      * Use a prompt template (legacy - just fills variables)
      */
-    static async useTemplate(req: any, res: Response): Promise<void> {
+    static async useTemplate(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('useTemplate', req);
+
         try {
             const { templateId } = req.params;
-            const userId = req.user!.id;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
+            
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
             const { variables } = req.body;
 
             const result = await PromptTemplateService.useTemplate(
@@ -199,15 +183,17 @@ export class PromptTemplateController {
                 variables
             );
 
+            ControllerHelper.logRequestSuccess('useTemplate', req, startTime, {
+                templateId
+            });
+
             res.json({
                 success: true,
                 data: result
             });
         } catch (error: any) {
-            loggingService.error('Error using prompt template:', error);
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to use template'
+            ControllerHelper.handleError('useTemplate', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
         }
     }
@@ -215,10 +201,16 @@ export class PromptTemplateController {
     /**
      * Update a prompt template
      */
-    static async updateTemplate(req: any, res: Response): Promise<void> {
+    static async updateTemplate(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('updateTemplate', req);
+
         try {
             const { templateId } = req.params;
-            const userId = req.user!.id;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
+            
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
             const updates = req.body;
 
             const template = await PromptTemplateService.updateTemplate(
@@ -227,16 +219,18 @@ export class PromptTemplateController {
                 updates
             );
 
+            ControllerHelper.logRequestSuccess('updateTemplate', req, startTime, {
+                templateId
+            });
+
             res.json({
                 success: true,
                 data: template,
                 message: 'Template updated successfully'
             });
         } catch (error: any) {
-            loggingService.error('Error updating prompt template:', error);
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to update template'
+            ControllerHelper.handleError('updateTemplate', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
         }
     }
@@ -244,22 +238,30 @@ export class PromptTemplateController {
     /**
      * Delete a prompt template
      */
-    static async deleteTemplate(req: any, res: Response): Promise<void> {
+    static async deleteTemplate(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('deleteTemplate', req);
+
         try {
             const { templateId } = req.params;
-            const userId = req.user!.id;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
+            
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
 
             await PromptTemplateService.deleteTemplate(templateId, userId);
+
+            ControllerHelper.logRequestSuccess('deleteTemplate', req, startTime, {
+                templateId
+            });
 
             res.json({
                 success: true,
                 message: 'Template deleted successfully'
             });
         } catch (error: any) {
-            loggingService.error('Error deleting prompt template:', error);
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to delete template'
+            ControllerHelper.handleError('deleteTemplate', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
         }
     }
@@ -267,27 +269,16 @@ export class PromptTemplateController {
     /**
      * Duplicate a prompt template
      */
-    static async duplicateTemplate(req: any, res: Response): Promise<void> {
+    static async duplicateTemplate(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const { templateId } = req.params;
-        const requestId = req.headers['x-request-id'] as string;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('duplicateTemplate', req);
 
         try {
-            PromptTemplateController.conditionalLog('info', 'Template duplication initiated', {
-                userId,
-                templateId,
-                requestId,
-                customizations: req.body
-            });
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
+            const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
 
             const customizations = req.body;
 
@@ -297,15 +288,10 @@ export class PromptTemplateController {
                 customizations
             );
 
-            const duration = Date.now() - startTime;
-
-            PromptTemplateController.conditionalLog('info', 'Template duplicated successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('duplicateTemplate', req, startTime, {
                 templateId,
                 duplicatedTemplateId: duplicatedTemplate._id,
-                duplicatedTemplateName: duplicatedTemplate.name,
-                duration,
-                requestId
+                duplicatedTemplateName: duplicatedTemplate.name
             });
 
             res.status(201).json({
@@ -314,19 +300,8 @@ export class PromptTemplateController {
                 message: 'Template duplicated successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            PromptTemplateController.conditionalLog('error', 'Template duplication failed', {
-                userId,
-                templateId,
-                requestId,
-                error: error.message || 'Unknown error',
-                duration
-            });
-
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to duplicate template'
+            ControllerHelper.handleError('duplicateTemplate', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
         }
     }
@@ -334,10 +309,16 @@ export class PromptTemplateController {
     /**
      * Add feedback to a prompt template
      */
-    static async addFeedback(req: any, res: Response): Promise<void> {
+    static async addFeedback(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('addFeedback', req);
+
         try {
             const { templateId } = req.params;
-            const userId = req.user!.id;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
+            
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
             const { rating, comment } = req.body;
 
             await PromptTemplateService.addTemplateFeedback(
@@ -347,15 +328,17 @@ export class PromptTemplateController {
                 comment
             );
 
+            ControllerHelper.logRequestSuccess('addFeedback', req, startTime, {
+                templateId
+            });
+
             res.json({
                 success: true,
                 message: 'Feedback added successfully'
             });
         } catch (error: any) {
-            loggingService.error('Error adding template feedback:', error);
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to add feedback'
+            ControllerHelper.handleError('addFeedback', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
         }
     }
@@ -363,21 +346,27 @@ export class PromptTemplateController {
     /**
      * Get template analytics
      */
-    static async getTemplateAnalytics(req: any, res: Response): Promise<void> {
+    static async getTemplateAnalytics(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getTemplateAnalytics', req);
+
         try {
             const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
 
             const analytics = await PromptTemplateService.getTemplateAnalytics(templateId);
+
+            ControllerHelper.logRequestSuccess('getTemplateAnalytics', req, startTime, {
+                templateId
+            });
 
             res.json({
                 success: true,
                 data: analytics
             });
         } catch (error: any) {
-            loggingService.error('Error getting template analytics:', error);
-            res.status(500).json({
-                success: false,
-                error: error.message || 'Failed to get analytics'
+            ControllerHelper.handleError('getTemplateAnalytics', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
         }
     }
@@ -385,7 +374,10 @@ export class PromptTemplateController {
     /**
      * Get popular templates
      */
-    static async getPopularTemplates(req: any, res: Response): Promise<void> {
+    static async getPopularTemplates(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getPopularTemplates', req);
+
         try {
             const { category, limit } = req.query;
 
@@ -394,23 +386,27 @@ export class PromptTemplateController {
                 limit ? parseInt(limit as string) : 10
             );
 
+            ControllerHelper.logRequestSuccess('getPopularTemplates', req, startTime, {
+                templatesCount: templates.length,
+                category
+            });
+
             res.json({
                 success: true,
                 data: templates
             });
         } catch (error: any) {
-            loggingService.error('Error getting popular templates:', error);
-            res.status(500).json({
-                success: false,
-                error: error.message || 'Failed to get popular templates'
-            });
+            ControllerHelper.handleError('getPopularTemplates', error, req, res, startTime);
         }
     }
 
     /**
      * Get trending templates
      */
-    static async getTrendingTemplates(req: any, res: Response): Promise<void> {
+    static async getTrendingTemplates(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getTrendingTemplates', req);
+
         try {
             const { period, category, limit } = req.query;
 
@@ -420,26 +416,37 @@ export class PromptTemplateController {
                 limit ? parseInt(limit as string) : 10
             );
 
+            ControllerHelper.logRequestSuccess('getTrendingTemplates', req, startTime, {
+                templatesCount: templates.length,
+                period,
+                category
+            });
+
             res.json({
                 success: true,
                 data: templates
             });
         } catch (error: any) {
-            loggingService.error('Error getting trending templates:', error);
-            res.status(500).json({
-                success: false,
-                error: error.message || 'Failed to get trending templates'
-            });
+            ControllerHelper.handleError('getTrendingTemplates', error, req, res, startTime);
         }
     }
 
     /**
      * AI: Generate template from intent
      */
-    static async generateFromIntent(req: any, res: Response): Promise<void> {
+    static async generateFromIntent(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        let intent: string | undefined;
+        let category: string | undefined;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('generateFromIntent', req);
+
         try {
-            const userId = req.user!.id;
-            const { intent, category, context, constraints } = req.body;
+            intent = req.body.intent;
+            category = req.body.category;
+            const { context, constraints } = req.body;
 
             // Check AI circuit breaker
             if (PromptTemplateController.isAiCircuitBreakerOpen()) {
@@ -463,7 +470,7 @@ export class PromptTemplateController {
 
             const generationPromise = PromptTemplateService.generateTemplateFromIntent(
                 userId,
-                intent,
+                intent as string,
                 {
                     category,
                     details: context,
@@ -476,17 +483,27 @@ export class PromptTemplateController {
             // Reset failure count on success
             PromptTemplateController.aiFailureCount = 0;
 
+            ControllerHelper.logRequestSuccess('generateFromIntent', req, startTime, {
+                intent,
+                category
+            });
+
             res.json({
                 success: true,
                 data: result
             });
         } catch (error: any) {
-            PromptTemplateController.recordAiFailure(); 
-            PromptTemplateController.conditionalLog('error', 'Error generating template from intent', {
-                error: error.message || 'Unknown error'
-            });
+            PromptTemplateController.recordAiFailure();
             
             if (error.message === 'AI generation timeout') {
+                const duration = Date.now() - startTime;
+                loggingService.error('AI generation timeout', {
+                    userId,
+                    intent,
+                    category,
+                    duration,
+                    requestId: req.headers['x-request-id'] as string
+                });
                 res.status(408).json({
                     success: false,
                     message: 'AI generation took too long. Please try again with a simpler request.'
@@ -494,9 +511,9 @@ export class PromptTemplateController {
                 return;
             }
             
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to generate template'
+            ControllerHelper.handleError('generateFromIntent', error, req, res, startTime, {
+                intent,
+                category
             });
         }
     }
@@ -504,9 +521,14 @@ export class PromptTemplateController {
     /**
      * AI: Detect variables in content
      */
-    static async detectVariables(req: any, res: Response): Promise<void> {
+    static async detectVariables(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('detectVariables', req);
+
         try {
-            const userId = req.user!.id;
             const { content, autoFillDefaults, validateTypes } = req.body;
 
             const result = await PromptTemplateService.detectVariables(
@@ -518,26 +540,30 @@ export class PromptTemplateController {
                 }
             );
 
+            ControllerHelper.logRequestSuccess('detectVariables', req, startTime);
+
             res.json({
                 success: true,
                 data: result
             });
         } catch (error: any) {
-            loggingService.error('Error detecting variables:', error);
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to detect variables'
-            });
+            ControllerHelper.handleError('detectVariables', error, req, res, startTime);
         }
     }
 
     /**
      * AI: Optimize template
      */
-    static async optimizeTemplate(req: any, res: Response): Promise<void> {
+    static async optimizeTemplate(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('optimizeTemplate', req);
+
         try {
-            const userId = req.user!.id;
             const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
+            
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
             const { optimizationType, targetModel, preserveIntent } = req.body;
 
             const result = await PromptTemplateService.optimizeTemplate(
@@ -550,15 +576,18 @@ export class PromptTemplateController {
                 }
             );
 
+            ControllerHelper.logRequestSuccess('optimizeTemplate', req, startTime, {
+                templateId,
+                optimizationType
+            });
+
             res.json({
                 success: true,
                 data: result
             });
         } catch (error: any) {
-            loggingService.error('Error optimizing template:', error);
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to optimize template'
+            ControllerHelper.handleError('optimizeTemplate', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
         }
     }
@@ -566,40 +595,51 @@ export class PromptTemplateController {
     /**
      * AI: Get template recommendations
      */
-    static async getRecommendations(req: any, res: Response): Promise<void> {
+    static async getRecommendations(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getRecommendations', req);
+
         try {
-            const userId = req.user!.id;
             const { currentProject, taskType } = req.query;
 
             const recommendations = await PromptTemplateService.getRecommendations(
                 userId,
                 {
-                    currentProject,
-                    taskType
+                    currentProject: currentProject as string | undefined,
+                    taskType: taskType as string | undefined
                 }
             );
+
+            ControllerHelper.logRequestSuccess('getRecommendations', req, startTime, {
+                recommendationsCount: recommendations.length
+            });
 
             res.json({
                 success: true,
                 data: recommendations
             });
         } catch (error: any) {
-            loggingService.error('Error getting recommendations:', error);
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to get recommendations'
-            });
+            ControllerHelper.handleError('getRecommendations', error, req, res, startTime);
         }
     }
 
     /**
      * AI: Predict template effectiveness
      */
-    static async predictEffectiveness(req: any, res: Response): Promise<void> {
+    static async predictEffectiveness(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('predictEffectiveness', req);
+
         try {
             const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
+            
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
             const { variables } = req.body;
-            const userId = req.user!.id;
 
             const effectiveness = await PromptTemplateService.predictEffectiveness(
                 templateId,
@@ -607,15 +647,17 @@ export class PromptTemplateController {
                 variables
             );
 
+            ControllerHelper.logRequestSuccess('predictEffectiveness', req, startTime, {
+                templateId
+            });
+
             res.json({
                 success: true,
                 data: effectiveness
             });
         } catch (error: any) {
-            loggingService.error('Error predicting effectiveness:', error);
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to predict effectiveness'
+            ControllerHelper.handleError('predictEffectiveness', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
         }
     }
@@ -623,21 +665,27 @@ export class PromptTemplateController {
     /**
      * AI: Get template insights
      */
-    static async getInsights(req: any, res: Response): Promise<void> {
+    static async getInsights(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getInsights', req);
+
         try {
             const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
 
             const insights = await PromptTemplateService.getInsights(templateId);
+
+            ControllerHelper.logRequestSuccess('getInsights', req, startTime, {
+                templateId
+            });
 
             res.json({
                 success: true,
                 data: insights
             });
         } catch (error: any) {
-            loggingService.error('Error getting insights:', error);
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to get insights'
+            ControllerHelper.handleError('getInsights', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
         }
     }
@@ -645,52 +693,66 @@ export class PromptTemplateController {
     /**
      * AI: Semantic search templates
      */
-    static async searchSemantic(req: any, res: Response): Promise<void> {
+    static async searchSemantic(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('searchSemantic', req);
+
         try {
-            const userId = req.user!.id;
             const { query, limit = 10 } = req.query;
 
             const results = await PromptTemplateService.searchSemantic(
-                query,
+                query as string,
                 userId,
-                parseInt(limit)
+                parseInt(limit as string)
             );
+
+            ControllerHelper.logRequestSuccess('searchSemantic', req, startTime, {
+                query,
+                resultsCount: results.length
+            });
 
             res.json({
                 success: true,
                 data: results
             });
         } catch (error: any) {
-            loggingService.error('Error in semantic search:', error);
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to search templates'
-            });
+            ControllerHelper.handleError('searchSemantic', error, req, res, startTime);
         }
     }
 
     /**
      * AI: Personalize template
      */
-    static async personalizeTemplate(req: any, res: Response): Promise<void> {
+    static async personalizeTemplate(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('personalizeTemplate', req);
+
         try {
-            const userId = req.user!.id;
             const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
+            
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
 
             const personalized = await PromptTemplateService.personalizeTemplate(
                 templateId,
                 userId
             );
 
+            ControllerHelper.logRequestSuccess('personalizeTemplate', req, startTime, {
+                templateId
+            });
+
             res.json({
                 success: true,
                 data: personalized
             });
         } catch (error: any) {
-            loggingService.error('Error personalizing template:', error);
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to personalize template'
+            ControllerHelper.handleError('personalizeTemplate', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
         }
     }
@@ -698,10 +760,16 @@ export class PromptTemplateController {
     /**
      * AI: Apply optimization to template
      */
-    static async applyOptimization(req: any, res: Response): Promise<void> {
+    static async applyOptimization(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('applyOptimization', req);
+
         try {
-            const userId = req.user!.id;
             const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
+            
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
             const { optimizedContent, metadata } = req.body;
 
             const updated = await PromptTemplateService.applyOptimization(
@@ -711,18 +779,18 @@ export class PromptTemplateController {
                 metadata
             );
 
+            ControllerHelper.logRequestSuccess('applyOptimization', req, startTime, {
+                templateId
+            });
+
             res.json({
                 success: true,
                 data: updated
             });
         } catch (error: any) {
             PromptTemplateController.recordAiFailure();
-            PromptTemplateController.conditionalLog('error', 'Error applying optimization', {
-                error: error.message || 'Unknown error'
-            });
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to apply optimization'
+            ControllerHelper.handleError('applyOptimization', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
         }
     }
@@ -787,26 +855,14 @@ export class PromptTemplateController {
      * POST /api/prompt-templates/visual-compliance
      * Create a visual compliance template
      */
-    static async createVisualComplianceTemplate(req: any, res: Response): Promise<void> {
+    static async createVisualComplianceTemplate(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('createVisualComplianceTemplate', req);
 
         try {
-            loggingService.info('Visual compliance template creation initiated', {
-                userId,
-                requestId,
-                templateName: req.body?.name,
-                industry: req.body?.industry
-            });
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
 
             const { name, description, content, complianceCriteria, imageVariables, industry, mode, metaPromptPresetId, projectId, referenceImage } = req.body;
 
@@ -855,15 +911,10 @@ export class PromptTemplateController {
                 referenceImage
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Visual compliance template created successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('createVisualComplianceTemplate', req, startTime, {
                 templateId: template._id,
                 templateName: template.name,
-                industry,
-                requestId
+                industry
             });
 
             // Trigger automatic feature extraction if reference image exists
@@ -903,18 +954,9 @@ export class PromptTemplateController {
                 message: 'Visual compliance template created successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Visual compliance template creation failed', {
-                userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                duration
-            });
-
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to create visual compliance template'
+            ControllerHelper.handleError('createVisualComplianceTemplate', error, req, res, startTime, {
+                templateName: req.body?.name,
+                industry: req.body?.industry
             });
         }
     }
@@ -923,26 +965,16 @@ export class PromptTemplateController {
      * POST /api/prompt-templates/:id/use-visual
      * Use visual compliance template with images
      */
-    static async useVisualTemplate(req: any, res: Response): Promise<void> {
+    static async useVisualTemplate(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const templateId = req.params.templateId;
-        const requestId = req.headers['x-request-id'] as string;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('useVisualTemplate', req);
 
         try {
-            loggingService.info('Visual template usage initiated', {
-                userId,
-                templateId,
-                requestId
-            });
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
+            const templateId = req.params.templateId;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
 
             const { textVariables, imageVariables, projectId } = req.body;
 
@@ -957,15 +989,10 @@ export class PromptTemplateController {
                 projectId
             );
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Visual template executed successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('useVisualTemplate', req, startTime, {
                 templateId,
-                duration,
                 complianceScore: result.compliance_score,
-                passFail: result.pass_fail,
-                requestId
+                passFail: result.pass_fail
             });
 
             res.status(200).json({
@@ -974,19 +1001,8 @@ export class PromptTemplateController {
                 message: 'Visual compliance check completed successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Visual template execution failed', {
-                userId,
-                templateId,
-                requestId,
-                error: error.message || 'Unknown error',
-                duration
-            });
-
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to execute visual template'
+            ControllerHelper.handleError('useVisualTemplate', error, req, res, startTime, {
+                templateId: req.params.templateId
             });
         }
     }
@@ -995,26 +1011,16 @@ export class PromptTemplateController {
      * POST /api/prompt-templates/:id/upload-image
      * Upload image for template variable
      */
-    static async uploadTemplateImage(req: any, res: Response): Promise<void> {
+    static async uploadTemplateImage(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const templateId = req.params.id;
-        const requestId = req.headers['x-request-id'] as string;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('uploadTemplateImage', req);
 
         try {
-            loggingService.info('Template image upload initiated', {
-                userId,
-                templateId,
-                requestId
-            });
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
+            const templateId = req.params.id;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
 
             const { variableName, imageData, mimeType } = req.body;
 
@@ -1040,15 +1046,10 @@ export class PromptTemplateController {
                 mimeType
             );
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Template image uploaded successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('uploadTemplateImage', req, startTime, {
                 templateId,
                 variableName,
-                duration,
-                s3Url: result.s3Url,
-                requestId
+                s3Url: result.s3Url
             });
 
             res.status(200).json({
@@ -1057,19 +1058,8 @@ export class PromptTemplateController {
                 message: 'Image uploaded successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Template image upload failed', {
-                userId,
-                templateId,
-                requestId,
-                error: error.message || 'Unknown error',
-                duration
-            });
-
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to upload image'
+            ControllerHelper.handleError('uploadTemplateImage', error, req, res, startTime, {
+                templateId: req.params.id
             });
         }
     }
@@ -1102,11 +1092,16 @@ export class PromptTemplateController {
     /**
      * Execute a prompt template with AI
      */
-    static async executeTemplate(req: any, res: Response): Promise<void> {
+    static async executeTemplate(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('executeTemplate', req);
+
         try {
             const { templateId } = req.params;
-            const userId = req.user!.id;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
             const {
                 variables = {},
                 executionMode = 'recommended',
@@ -1115,13 +1110,6 @@ export class PromptTemplateController {
                 enableOptimization = false
             } = req.body;
 
-            PromptTemplateController.conditionalLog('info', 'Template execution initiated', {
-                userId,
-                templateId,
-                executionMode,
-                modelId,
-                hasCompareWith: !!compareWith
-            });
 
             const result = await TemplateExecutionService.executeTemplate({
                 templateId,
@@ -1133,12 +1121,10 @@ export class PromptTemplateController {
                 enableOptimization
             });
 
-            const duration = Date.now() - startTime;
-
-            PromptTemplateController.conditionalLog('info', 'Template execution completed', {
-                userId,
+            ControllerHelper.logRequestSuccess('executeTemplate', req, startTime, {
                 templateId,
-                duration
+                executionMode,
+                modelId
             });
 
             res.json({
@@ -1147,17 +1133,8 @@ export class PromptTemplateController {
                 message: 'Template executed successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            loggingService.error('Error executing prompt template', {
-                error: error instanceof Error ? error.message : String(error),
-                duration,
-                userId: req.user?.id,
+            ControllerHelper.handleError('executeTemplate', error, req, res, startTime, {
                 templateId: req.params.templateId
-            });
-            
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to execute template'
             });
         }
     }
@@ -1165,9 +1142,13 @@ export class PromptTemplateController {
     /**
      * Get model recommendation for a template
      */
-    static async getModelRecommendation(req: any, res: Response): Promise<void> {
+    static async getModelRecommendation(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getModelRecommendation', req);
+
         try {
             const templateId = req.params.templateId as string;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
 
             // Find template without strict authorization check for recommendations
             const template = await PromptTemplate.findById(templateId);
@@ -1182,20 +1163,17 @@ export class PromptTemplateController {
             // Get recommendations
             const recommendations = await ModelRecommendationService.recommendModel(template);
 
+            ControllerHelper.logRequestSuccess('getModelRecommendation', req, startTime, {
+                templateId
+            });
+
             res.json({
                 success: true,
                 data: recommendations
             });
         } catch (error: any) {
-            loggingService.error('Error getting model recommendation', {
-                error: error instanceof Error ? error.message : String(error),
-                userId: req.user?.id,
+            ControllerHelper.handleError('getModelRecommendation', error, req, res, startTime, {
                 templateId: req.params.templateId
-            });
-            
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to get model recommendation'
             });
         }
     }
@@ -1203,10 +1181,16 @@ export class PromptTemplateController {
     /**
      * Get execution history for a template
      */
-    static async getExecutionHistory(req: any, res: Response): Promise<void> {
+    static async getExecutionHistory(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getExecutionHistory', req);
+
         try {
             const { templateId } = req.params;
-            const userId = req.user!.id;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
+            
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
             const limit = parseInt(req.query.limit as string) || 10;
 
             const history = await TemplateExecutionService.getExecutionHistory(
@@ -1215,20 +1199,18 @@ export class PromptTemplateController {
                 limit
             );
 
+            ControllerHelper.logRequestSuccess('getExecutionHistory', req, startTime, {
+                templateId,
+                historyCount: history.length
+            });
+
             res.json({
                 success: true,
                 data: history
             });
         } catch (error: any) {
-            loggingService.error('Error getting execution history', {
-                error: error instanceof Error ? error.message : String(error),
-                userId: req.user?.id,
+            ControllerHelper.handleError('getExecutionHistory', error, req, res, startTime, {
                 templateId: req.params.templateId
-            });
-            
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to get execution history'
             });
         }
     }
@@ -1236,25 +1218,27 @@ export class PromptTemplateController {
     /**
      * Get execution statistics for a template
      */
-    static async getExecutionStats(req: any, res: Response): Promise<void> {
+    static async getExecutionStats(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getExecutionStats', req);
+
         try {
             const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
 
             const stats = await TemplateExecutionService.getExecutionStats(templateId);
+
+            ControllerHelper.logRequestSuccess('getExecutionStats', req, startTime, {
+                templateId
+            });
 
             res.json({
                 success: true,
                 data: stats
             });
         } catch (error: any) {
-            loggingService.error('Error getting execution stats', {
-                error: error instanceof Error ? error.message : String(error),
+            ControllerHelper.handleError('getExecutionStats', error, req, res, startTime, {
                 templateId: req.params.templateId
-            });
-            
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to get execution stats'
             });
         }
     }

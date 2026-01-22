@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { PerformanceCostAnalysisService } from '../services/performanceCostAnalysis.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class PerformanceCostAnalysisController {
     // Background processing queue
@@ -18,25 +20,14 @@ export class PerformanceCostAnalysisController {
      * Analyze cost-performance correlation
      * POST /api/performance-cost/analyze
      */
-    static async analyzeCostPerformanceCorrelation(req: any, res: Response): Promise<void> {
+    static async analyzeCostPerformanceCorrelation(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('analyzeCostPerformanceCorrelation', req);
 
         try {
-            loggingService.info('Cost-performance correlation analysis initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Cost-performance correlation analysis failed - unauthorized', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
 
             const {
                 startDate,
@@ -93,10 +84,7 @@ export class PerformanceCostAnalysisController {
             };
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Cost-performance correlation analysis completed successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('analyzeCostPerformanceCorrelation', req, startTime, {
                 startDate,
                 endDate,
                 services,
@@ -110,8 +98,7 @@ export class PerformanceCostAnalysisController {
                 averageLatency: summary.averageLatency,
                 averageQualityScore: summary.averageQualityScore,
                 hasBestPerforming: !!summary.bestPerforming,
-                hasWorstPerforming: !!summary.worstPerforming,
-                requestId: req.headers['x-request-id'] as string
+                hasWorstPerforming: !!summary.worstPerforming
             });
 
             // Log business event
@@ -148,36 +135,42 @@ export class PerformanceCostAnalysisController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Cost-performance correlation analysis failed', {
-                userId,
-                hasUserId: !!userId,
-                startDate: req.body.startDate,
-                endDate: req.body.endDate,
-                services: req.body.services,
-                models: req.body.models,
-                tags: req.body.tags,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (error.message === 'Request timeout') {
+                const duration = Date.now() - startTime;
+                loggingService.error('Cost-performance correlation analysis failed', {
+                    userId,
+                    startDate: req.body.startDate,
+                    endDate: req.body.endDate,
+                    services: req.body.services,
+                    models: req.body.models,
+                    tags: req.body.tags,
+                    error: error.message,
+                    duration,
+                    requestId: req.headers['x-request-id'] as string
+                });
                 res.status(408).json({ 
                     success: false,
                     message: 'Request timeout - analysis took too long. Please try again with a smaller date range.' 
                 });
             } else if (error.message === 'Database circuit breaker is open') {
+                const duration = Date.now() - startTime;
+                loggingService.error('Cost-performance correlation analysis failed', {
+                    userId,
+                    error: error.message,
+                    duration,
+                    requestId: req.headers['x-request-id'] as string
+                });
                 res.status(503).json({ 
                     success: false,
                     message: 'Service temporarily unavailable. Please try again later.' 
                 });
             } else {
-                res.status(500).json({ 
-                    success: false,
-                    message: 'Internal server error' 
+                ControllerHelper.handleError('analyzeCostPerformanceCorrelation', error, req, res, startTime, {
+                    startDate: req.body.startDate,
+                    endDate: req.body.endDate,
+                    services: req.body.services,
+                    models: req.body.models,
+                    tags: req.body.tags
                 });
             }
         }
@@ -187,25 +180,14 @@ export class PerformanceCostAnalysisController {
      * Compare services and models
      * POST /api/performance-cost/compare
      */
-    static async compareServices(req: any, res: Response): Promise<void> {
+    static async compareServices(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('compareServices', req);
 
         try {
-            loggingService.info('Service comparison analysis initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Service comparison analysis failed - unauthorized', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
 
             const {
                 startDate,
@@ -244,10 +226,7 @@ export class PerformanceCostAnalysisController {
             const comparison = await Promise.race([comparisonPromise, timeoutPromise]);
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Service comparison analysis completed successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('compareServices', req, startTime, {
                 startDate,
                 endDate,
                 useCase,
@@ -256,8 +235,7 @@ export class PerformanceCostAnalysisController {
                 hasServices: !!comparison.services && comparison.services.length > 0,
                 hasBestValue: !!comparison.bestValue,
                 recommendationsCount: comparison.recommendations.length,
-                hasRecommendations: !!comparison.recommendations && comparison.recommendations.length > 0,
-                requestId: req.headers['x-request-id'] as string
+                hasRecommendations: !!comparison.recommendations && comparison.recommendations.length > 0
             });
 
             // Log business event
@@ -291,22 +269,12 @@ export class PerformanceCostAnalysisController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Service comparison analysis failed', {
-                userId,
-                hasUserId: !!userId,
+            ControllerHelper.handleError('compareServices', error, req, res, startTime, {
                 startDate: req.body.startDate,
                 endDate: req.body.endDate,
                 useCase: req.body.useCase,
-                tags: req.body.tags,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                tags: req.body.tags
             });
-
-            res.status(500).json({ message: 'Internal server error' });
         }
     }
 
@@ -314,25 +282,14 @@ export class PerformanceCostAnalysisController {
      * Get performance trends
      * GET /api/performance-cost/trends
      */
-    static async getPerformanceTrends(req: any, res: Response): Promise<void> {
+    static async getPerformanceTrends(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getPerformanceTrends', req);
 
         try {
-            loggingService.info('Performance trends retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Performance trends retrieval failed - unauthorized', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
 
             const {
                 startDate,
@@ -386,10 +343,7 @@ export class PerformanceCostAnalysisController {
             };
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Performance trends retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getPerformanceTrends', req, startTime, {
                 startDate,
                 endDate,
                 service,
@@ -405,8 +359,7 @@ export class PerformanceCostAnalysisController {
                 highSeverityAlerts: trendSummary.highSeverityAlerts,
                 averageCost: trendSummary.averageCost,
                 averageLatency: trendSummary.averageLatency,
-                averageQualityScore: trendSummary.averageQualityScore,
-                requestId: req.headers['x-request-id'] as string
+                averageQualityScore: trendSummary.averageQualityScore
             });
 
             // Log business event
@@ -448,23 +401,13 @@ export class PerformanceCostAnalysisController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Performance trends retrieval failed', {
-                userId,
-                hasUserId: !!userId,
+            ControllerHelper.handleError('getPerformanceTrends', error, req, res, startTime, {
                 startDate: req.query.startDate,
                 endDate: req.query.endDate,
                 service: req.query.service,
                 model: req.query.model,
-                granularity: req.query.granularity,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                granularity: req.query.granularity
             });
-
-            res.status(500).json({ message: 'Internal server error' });
         }
     }
 
@@ -472,25 +415,14 @@ export class PerformanceCostAnalysisController {
      * Identify optimization opportunities
      * POST /api/performance-cost/optimization-opportunities
      */
-    static async identifyOptimizationOpportunities(req: any, res: Response): Promise<void> {
+    static async identifyOptimizationOpportunities(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('identifyOptimizationOpportunities', req);
 
         try {
-            loggingService.info('Optimization opportunities identification initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Optimization opportunities identification failed - unauthorized', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
 
             const {
                 startDate,
@@ -534,10 +466,7 @@ export class PerformanceCostAnalysisController {
             };
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Optimization opportunities identified successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('identifyOptimizationOpportunities', req, startTime, {
                 startDate,
                 endDate,
                 minSavings,
@@ -550,8 +479,7 @@ export class PerformanceCostAnalysisController {
                 lowRiskOpportunities: summary.lowRiskOpportunities,
                 quickWins: summary.quickWins,
                 opportunityTypesCount: summary.opportunityTypes.length,
-                averageImplementationComplexity: summary.averageImplementationComplexity,
-                requestId: req.headers['x-request-id'] as string
+                averageImplementationComplexity: summary.averageImplementationComplexity
             });
 
             // Log business event
@@ -590,22 +518,12 @@ export class PerformanceCostAnalysisController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Optimization opportunities identification failed', {
-                userId,
-                hasUserId: !!userId,
+            ControllerHelper.handleError('identifyOptimizationOpportunities', error, req, res, startTime, {
                 startDate: req.body.startDate,
                 endDate: req.body.endDate,
                 minSavings: req.body.minSavings,
-                tags: req.body.tags,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                tags: req.body.tags
             });
-
-            res.status(500).json({ message: 'Internal server error' });
         }
     }
 
@@ -613,25 +531,14 @@ export class PerformanceCostAnalysisController {
      * Get detailed performance metrics
      * GET /api/performance-cost/detailed-metrics
      */
-    static async getDetailedMetrics(req: any, res: Response): Promise<void> {
+    static async getDetailedMetrics(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getDetailedMetrics', req);
 
         try {
-            loggingService.info('Detailed performance metrics retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Detailed performance metrics retrieval failed - unauthorized', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
 
             const {
                 service,
@@ -685,17 +592,13 @@ export class PerformanceCostAnalysisController {
             );
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Detailed performance metrics retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getDetailedMetrics', req, startTime, {
                 service,
                 model,
                 startDate,
                 endDate,
                 tags,
-                hasMetrics: !!metrics,
-                requestId: req.headers['x-request-id'] as string
+                hasMetrics: !!metrics
             });
 
             // Log business event
@@ -725,23 +628,13 @@ export class PerformanceCostAnalysisController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Detailed performance metrics retrieval failed', {
-                userId,
-                hasUserId: !!userId,
+            ControllerHelper.handleError('getDetailedMetrics', error, req, res, startTime, {
                 service: req.query.service,
                 model: req.query.model,
                 startDate: req.query.startDate,
                 endDate: req.query.endDate,
-                tags: req.query.tags,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                tags: req.query.tags
             });
-
-            res.status(500).json({ message: 'Internal server error' });
         }
     }
 
@@ -749,25 +642,14 @@ export class PerformanceCostAnalysisController {
      * Get cost-performance efficiency score
      * GET /api/performance-cost/efficiency-score
      */
-    static async getEfficiencyScore(req: any, res: Response): Promise<void> {
+    static async getEfficiencyScore(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getEfficiencyScore', req);
 
         try {
-            loggingService.info('Efficiency score retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Efficiency score retrieval failed - unauthorized', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
 
             const {
                 service,
@@ -868,10 +750,7 @@ export class PerformanceCostAnalysisController {
             };
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Efficiency score retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getEfficiencyScore', req, startTime, {
                 service,
                 model,
                 startDate,
@@ -882,8 +761,7 @@ export class PerformanceCostAnalysisController {
                 optimizationPotential: efficiencyAnalysis.optimizationPotential,
                 hasBenchmarks: !!efficiencyAnalysis.benchmarks,
                 improvementActionsCount: efficiencyAnalysis.improvementActions.length,
-                hasImprovementActions: efficiencyAnalysis.improvementActions.length > 0,
-                requestId: req.headers['x-request-id'] as string
+                hasImprovementActions: efficiencyAnalysis.improvementActions.length > 0
             });
 
             // Log business event
@@ -916,22 +794,12 @@ export class PerformanceCostAnalysisController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Efficiency score retrieval failed', {
-                userId,
-                hasUserId: !!userId,
+            ControllerHelper.handleError('getEfficiencyScore', error, req, res, startTime, {
                 service: req.query.service,
                 model: req.query.model,
                 startDate: req.query.startDate,
-                endDate: req.query.endDate,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                endDate: req.query.endDate
             });
-
-            res.status(500).json({ message: 'Internal server error' });
         }
     }
 
@@ -939,25 +807,14 @@ export class PerformanceCostAnalysisController {
      * Get performance heatmap data
      * GET /api/performance-cost/heatmap
      */
-    static async getPerformanceHeatmap(req: any, res: Response): Promise<void> {
+    static async getPerformanceHeatmap(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getPerformanceHeatmap', req);
 
         try {
-            loggingService.info('Performance heatmap retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Performance heatmap retrieval failed - unauthorized', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
 
             const {
                 startDate,
@@ -1009,10 +866,7 @@ export class PerformanceCostAnalysisController {
             };
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Performance heatmap retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getPerformanceHeatmap', req, startTime, {
                 startDate,
                 endDate,
                 granularity,
@@ -1021,8 +875,7 @@ export class PerformanceCostAnalysisController {
                 hasTrends: !!trends && trends.length > 0,
                 heatmapDataCount: heatmapData.length,
                 hasHeatmapData: !!heatmapData && heatmapData.length > 0,
-                intensityRanges,
-                requestId: req.headers['x-request-id'] as string
+                intensityRanges
             });
 
             // Log business event
@@ -1065,22 +918,12 @@ export class PerformanceCostAnalysisController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Performance heatmap retrieval failed', {
-                userId,
-                hasUserId: !!userId,
+            ControllerHelper.handleError('getPerformanceHeatmap', error, req, res, startTime, {
                 startDate: req.query.startDate,
                 endDate: req.query.endDate,
                 granularity: req.query.granularity,
-                metric: req.query.metric,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                metric: req.query.metric
             });
-
-            res.status(500).json({ message: 'Internal server error' });
         }
     }
 
@@ -1088,25 +931,14 @@ export class PerformanceCostAnalysisController {
      * Get cost-performance trade-off analysis
      * POST /api/performance-cost/tradeoff-analysis
      */
-    static async getTradeoffAnalysis(req: any, res: Response): Promise<void> {
+    static async getTradeoffAnalysis(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getTradeoffAnalysis', req);
 
         try {
-            loggingService.info('Trade-off analysis initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Trade-off analysis failed - unauthorized', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
 
             const {
                 services,
@@ -1173,10 +1005,7 @@ export class PerformanceCostAnalysisController {
             }).sort((a, b) => b.weightedScore - a.weightedScore);
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Trade-off analysis completed successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getTradeoffAnalysis', req, startTime, {
                 startDate,
                 endDate,
                 services,
@@ -1188,8 +1017,7 @@ export class PerformanceCostAnalysisController {
                 hasTradeoffAnalysis: !!tradeoffAnalysis && tradeoffAnalysis.length > 0,
                 bestOption: tradeoffAnalysis[0],
                 topTierCount: tradeoffAnalysis.filter(t => t.weightedScore > 0.8).length,
-                averageScore: tradeoffAnalysis.reduce((sum, t) => sum + t.weightedScore, 0) / tradeoffAnalysis.length,
-                requestId: req.headers['x-request-id'] as string
+                averageScore: tradeoffAnalysis.reduce((sum, t) => sum + t.weightedScore, 0) / tradeoffAnalysis.length
             });
 
             // Log business event
@@ -1232,23 +1060,13 @@ export class PerformanceCostAnalysisController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Trade-off analysis failed', {
-                userId,
-                hasUserId: !!userId,
+            ControllerHelper.handleError('getTradeoffAnalysis', error, req, res, startTime, {
                 startDate: req.body.startDate,
                 endDate: req.body.endDate,
                 services: req.body.services,
                 models: req.body.models,
-                priorityWeights: req.body.priorityWeights,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                priorityWeights: req.body.priorityWeights
             });
-
-            res.status(500).json({ message: 'Internal server error' });
         }
     }
 

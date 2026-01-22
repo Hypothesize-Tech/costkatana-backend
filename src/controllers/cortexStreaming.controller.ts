@@ -8,6 +8,8 @@
 
 import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 // Import services
 import { CortexStreamingOrchestratorService } from '../services/cortexStreamingOrchestrator.service';
@@ -105,14 +107,21 @@ export class CortexStreamingController {
     /**
      * Start a new streaming execution
      */
-    public async startStreaming(req: Request, res: Response): Promise<void> {
+    public async startStreaming(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('startStreaming', req);
+
         try {
-            const { text, sessionId, userId, config, options }: StreamingRequest = req.body;
+            const { text, sessionId, config, options }: StreamingRequest = req.body;
 
             // Validate request
-            if (!text || !sessionId || !userId) {
+            if (!text || !sessionId) {
                 res.status(400).json({
-                    error: 'Missing required fields: text, sessionId, userId'
+                    error: 'Missing required fields: text, sessionId'
                 });
                 return;
             }
@@ -187,22 +196,30 @@ export class CortexStreamingController {
 
             res.write(`data: ${JSON.stringify(response)}\n\n`);
 
-        } catch (error) {
-            console.error('Streaming execution failed:', error);
-            res.status(500).json({
-                error: 'Failed to start streaming execution',
-                details: error instanceof Error ? error.message : String(error)
+            ControllerHelper.logRequestSuccess('startStreaming', req, startTime, {
+                executionId
             });
+
+        } catch (error) {
+            if (!res.headersSent) {
+                ControllerHelper.handleError('startStreaming', error, req, res, startTime);
+            }
         }
     }
 
     /**
      * Get streaming execution status
      */
-    public async getStreamingStatus(req: Request, res: Response): Promise<void> {
-        try {
-            const { executionId } = req.params;
+    public async getStreamingStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { executionId } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getStreamingStatus', req, { executionId });
 
+        try {
             if (!executionId) {
                 res.status(400).json({ error: 'Execution ID is required' });
                 return;
@@ -249,24 +266,28 @@ export class CortexStreamingController {
                 }
             };
 
+            ControllerHelper.logRequestSuccess('getStreamingStatus', req, startTime, { executionId });
+
             res.json(response);
 
         } catch (error) {
-            console.error('Failed to get streaming status:', error);
-            res.status(500).json({
-                error: 'Failed to get streaming status',
-                details: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('getStreamingStatus', error, req, res, startTime, { executionId });
         }
     }
 
     /**
      * Pause streaming execution
      */
-    public async pauseStreaming(req: Request, res: Response): Promise<void> {
-        try {
-            const { executionId } = req.params;
+    public async pauseStreaming(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { executionId } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('pauseStreaming', req, { executionId });
 
+        try {
             if (!executionId) {
                 res.status(400).json({ error: 'Execution ID is required' });
                 return;
@@ -279,6 +300,8 @@ export class CortexStreamingController {
                 this.loggerService.logExecutionPaused(executionId, 'User requested pause');
             }
 
+            ControllerHelper.logRequestSuccess('pauseStreaming', req, startTime, { executionId });
+
             res.json({
                 success: true,
                 message: 'Execution paused successfully',
@@ -286,21 +309,23 @@ export class CortexStreamingController {
             });
 
         } catch (error) {
-            console.error('Failed to pause streaming:', error);
-            res.status(500).json({
-                error: 'Failed to pause streaming execution',
-                details: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('pauseStreaming', error, req, res, startTime, { executionId });
         }
     }
 
     /**
      * Resume streaming execution
      */
-    public async resumeStreaming(req: Request, res: Response): Promise<void> {
-        try {
-            const { executionId } = req.params;
+    public async resumeStreaming(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { executionId } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('resumeStreaming', req, { executionId });
 
+        try {
             if (!executionId) {
                 res.status(400).json({ error: 'Execution ID is required' });
                 return;
@@ -313,6 +338,8 @@ export class CortexStreamingController {
                 this.loggerService.logExecutionResumed(executionId, 'User requested resume');
             }
 
+            ControllerHelper.logRequestSuccess('resumeStreaming', req, startTime, { executionId });
+
             res.json({
                 success: true,
                 message: 'Execution resumed successfully',
@@ -320,21 +347,23 @@ export class CortexStreamingController {
             });
 
         } catch (error) {
-            console.error('Failed to resume streaming:', error);
-            res.status(500).json({
-                error: 'Failed to resume streaming execution',
-                details: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('resumeStreaming', error, req, res, startTime, { executionId });
         }
     }
 
     /**
      * Cancel streaming execution
      */
-    public async cancelStreaming(req: Request, res: Response): Promise<void> {
-        try {
-            const { executionId } = req.params;
+    public async cancelStreaming(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { executionId } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('cancelStreaming', req, { executionId });
 
+        try {
             if (!executionId) {
                 res.status(400).json({ error: 'Execution ID is required' });
                 return;
@@ -350,6 +379,8 @@ export class CortexStreamingController {
             // Clean up handshake if exists
             await this.handshakeService.cancelHandshake(executionId);
 
+            ControllerHelper.logRequestSuccess('cancelStreaming', req, startTime, { executionId });
+
             res.json({
                 success: true,
                 message: 'Execution cancelled successfully',
@@ -357,21 +388,23 @@ export class CortexStreamingController {
             });
 
         } catch (error) {
-            console.error('Failed to cancel streaming:', error);
-            res.status(500).json({
-                error: 'Failed to cancel streaming execution',
-                details: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('cancelStreaming', error, req, res, startTime, { executionId });
         }
     }
 
     /**
      * Get streaming execution result
      */
-    public async getStreamingResult(req: Request, res: Response): Promise<void> {
-        try {
-            const { executionId } = req.params;
+    public async getStreamingResult(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { executionId } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getStreamingResult', req, { executionId });
 
+        try {
             if (!executionId) {
                 res.status(400).json({ error: 'Execution ID is required' });
                 return;
@@ -421,14 +454,12 @@ export class CortexStreamingController {
                 }
             };
 
+            ControllerHelper.logRequestSuccess('getStreamingResult', req, startTime, { executionId });
+
             res.json(response);
 
         } catch (error) {
-            console.error('Failed to get streaming result:', error);
-            res.status(500).json({
-                error: 'Failed to get streaming result',
-                details: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('getStreamingResult', error, req, res, startTime, { executionId });
         }
     }
 
@@ -439,11 +470,17 @@ export class CortexStreamingController {
     /**
      * Confirm current chunk in long handshake
      */
-    public async confirmChunk(req: Request, res: Response): Promise<void> {
-        try {
-            const { executionId } = req.params;
-            const { chunkId, approved, modifications } = req.body;
+    public async confirmChunk(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { executionId } = req.params;
+        const { chunkId, approved, modifications } = req.body;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('confirmChunk', req, { executionId, chunkId });
 
+        try {
             if (!executionId || !chunkId) {
                 res.status(400).json({
                     error: 'Execution ID and chunk ID are required'
@@ -459,6 +496,8 @@ export class CortexStreamingController {
             );
 
             if (result.success) {
+                ControllerHelper.logRequestSuccess('confirmChunk', req, startTime, { executionId, chunkId });
+
                 res.json({
                     success: true,
                     message: result.message,
@@ -472,21 +511,23 @@ export class CortexStreamingController {
             }
 
         } catch (error) {
-            console.error('Failed to confirm chunk:', error);
-            res.status(500).json({
-                error: 'Failed to confirm chunk',
-                details: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('confirmChunk', error, req, res, startTime, { executionId, chunkId });
         }
     }
 
     /**
      * Get current chunk for user confirmation
      */
-    public async getCurrentChunk(req: Request, res: Response): Promise<void> {
-        try {
-            const { executionId } = req.params;
+    public async getCurrentChunk(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { executionId } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getCurrentChunk', req, { executionId });
 
+        try {
             if (!executionId) {
                 res.status(400).json({ error: 'Execution ID is required' });
                 return;
@@ -499,6 +540,8 @@ export class CortexStreamingController {
                 return;
             }
 
+            ControllerHelper.logRequestSuccess('getCurrentChunk', req, startTime, { executionId });
+
             res.json({
                 chunkId: chunk.id,
                 type: chunk.type,
@@ -510,11 +553,7 @@ export class CortexStreamingController {
             });
 
         } catch (error) {
-            console.error('Failed to get current chunk:', error);
-            res.status(500).json({
-                error: 'Failed to get current chunk',
-                details: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('getCurrentChunk', error, req, res, startTime, { executionId });
         }
     }
 
@@ -525,11 +564,17 @@ export class CortexStreamingController {
     /**
      * Get execution logs
      */
-    public async getExecutionLogs(req: Request, res: Response): Promise<void> {
-        try {
-            const { executionId } = req.params;
-            const { limit = 100, level, category } = req.query;
+    public async getExecutionLogs(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { executionId } = req.params;
+        const { limit = 100, level, category } = req.query;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getExecutionLogs', req, { executionId });
 
+        try {
             if (!executionId) {
                 res.status(400).json({ error: 'Execution ID is required' });
                 return;
@@ -540,6 +585,11 @@ export class CortexStreamingController {
                 limit: Number(limit),
                 level: level as any,
                 category: category as string
+            });
+
+            ControllerHelper.logRequestSuccess('getExecutionLogs', req, startTime, {
+                executionId,
+                totalCount: logs.length
             });
 
             res.json({
@@ -558,23 +608,23 @@ export class CortexStreamingController {
             });
 
         } catch (error) {
-            console.error('Failed to get execution logs:', error);
-            res.status(500).json({
-                error: 'Failed to get execution logs',
-                details: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('getExecutionLogs', error, req, res, startTime, { executionId });
         }
     }
 
     /**
      * Get streaming statistics
      */
-    public async getStreamingStats(_req: Request, res: Response): Promise<void> {
+    public async getStreamingStats(_req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+
         try {
             const orchestratorStats = this.streamingOrchestrator.getExecutionStats();
             const loggerStats = this.loggerService.getLogStats();
             const continuityStats = this.continuityService.getRecoveryStats();
             const handshakeStats = this.handshakeService.getHandshakeStats();
+
+            ControllerHelper.logRequestSuccess('getStreamingStats', _req, startTime);
 
             res.json({
                 orchestrator: orchestratorStats,
@@ -585,11 +635,7 @@ export class CortexStreamingController {
             });
 
         } catch (error) {
-            console.error('Failed to get streaming stats:', error);
-            res.status(500).json({
-                error: 'Failed to get streaming statistics',
-                details: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('getStreamingStats', error, _req, res, startTime);
         }
     }
 
@@ -785,7 +831,9 @@ export class CortexStreamingController {
     /**
      * Health check endpoint
      */
-    public async healthCheck(_req: Request, res: Response): Promise<void> {
+    public async healthCheck(_req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+
         try {
             const stats = this.streamingOrchestrator.getExecutionStats();
             const activeConnections = this.activeConnections.size;
@@ -810,21 +858,21 @@ export class CortexStreamingController {
             });
 
         } catch (error) {
-            res.status(500).json({
-                status: 'unhealthy',
-                error: error instanceof Error ? error.message : String(error),
-                timestamp: new Date()
-            });
+            ControllerHelper.handleError('healthCheck', error, _req, res, startTime);
         }
     }
 
     /**
      * Reset streaming system (admin only)
      */
-    public async resetSystem(_req: Request, res: Response): Promise<void> {
+    public async resetSystem(_req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+
         try {
             // This would reset all active executions and clear caches
             // Implementation would depend on admin authorization
+
+            ControllerHelper.logRequestSuccess('resetSystem', _req, startTime);
 
             res.json({
                 success: true,
@@ -833,10 +881,7 @@ export class CortexStreamingController {
             });
 
         } catch (error) {
-            res.status(500).json({
-                error: 'Failed to reset system',
-                details: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('resetSystem', error, _req, res, startTime);
         }
     }
 }

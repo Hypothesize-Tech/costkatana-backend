@@ -1,11 +1,8 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { agentService, AgentQuery } from '../services/agent.service';
 import { validationResult } from 'express-validator';
 import { loggingService } from '../services/logging.service';
-
-interface AuthenticatedRequest extends Request {
-    userId?: string;
-}
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
 
 export class AgentController {
     /**
@@ -13,48 +10,20 @@ export class AgentController {
      */
     static async query(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.userId;
+        
+        // Check validation errors first
+        if (ControllerHelper.sendValidationErrors(req, res)) {
+            return;
+        }
+
+        if (!ControllerHelper.requireAuth(req, res)) {
+            return;
+        }
+        const userId = req.userId!;
         const { query, context } = req.body;
+        ControllerHelper.logRequestStart('query', req);
 
         try {
-            loggingService.info('Agent query initiated', {
-                userId,
-                queryLength: query?.length || 0,
-                hasContext: !!context,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            // Check validation errors
-            const errors = validationResult(req);
-            if (!errors.isEmpty()) {
-                loggingService.warn('Agent query validation failed', {
-                    userId,
-                    errors: errors.array(),
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(400).json({
-                    success: false,
-                    error: 'Validation failed',
-                    details: errors.array()
-                });
-                return;
-            }
-
-            if (!userId) {
-                loggingService.warn('Agent query attempted without authentication', {
-                    ip: req.ip,
-                    userAgent: req.headers['user-agent'],
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
-
             // Build agent query
             const agentQuery: AgentQuery = {
                 userId,
@@ -62,51 +31,32 @@ export class AgentController {
                 context
             };
 
-            loggingService.info('Executing agent query', {
-                userId,
-                queryType: context?.type || 'general',
-                requestId: req.headers['x-request-id'] as string
-            });
-
             // Execute agent query
             const result = await agentService.query(agentQuery);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Agent query completed', {
-                userId,
+            ControllerHelper.logRequestSuccess('query', req, startTime, {
                 success: result.success,
-                duration,
                 responseLength: result.response?.length || 0,
-                requestId: req.headers['x-request-id'] as string
+                queryType: context?.type || 'general'
             });
 
-            // Log business metrics
-            loggingService.logBusiness({
-                event: 'agent_query_completed',
-                category: 'agent_interaction',
-                value: duration,
-                metadata: {
+            ControllerHelper.logBusinessEvent(
+                'agent_query_completed',
+                'agent_interaction',
+                userId,
+                undefined,
+                {
                     success: result.success,
                     queryLength: query?.length || 0,
-                    responseLength: result.response?.length || 0,
-                    userId
+                    responseLength: result.response?.length || 0
                 }
-            });
+            );
 
+            // Keep existing response format (backward compatibility)
             res.status(result.success ? 200 : 500).json(result);
 
         } catch (error) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Agent query failed', {
-                userId,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('query', error, req, res, startTime);
             console.error('Agent query error:', error);
             next(error);
         }
@@ -117,30 +67,12 @@ export class AgentController {
      */
     static async streamQuery(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.userId;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { query, context } = req.body;
+        ControllerHelper.logRequestStart('streamQuery', req);
 
         try {
-            loggingService.info('Agent stream query initiated', {
-                userId,
-                queryLength: query?.length || 0,
-                hasContext: !!context,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Agent stream query attempted without authentication', {
-                    ip: req.ip,
-                    userAgent: req.headers['user-agent'],
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
 
             // Set up Server-Sent Events
             res.writeHead(200, {
@@ -170,23 +102,8 @@ export class AgentController {
                 // Send thinking message
                 res.write(`data: ${JSON.stringify({ type: 'thinking', message: 'Analyzing your query...' })}\n\n`);
 
-                loggingService.info('Processing agent stream query', {
-                    userId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 // Execute agent query
                 const result = await agentService.query(agentQuery);
-
-                const duration = Date.now() - startTime;
-
-                loggingService.info('Agent stream query completed', {
-                    userId,
-                    success: result.success,
-                    duration,
-                    responseLength: result.response?.length || 0,
-                    requestId: req.headers['x-request-id'] as string
-                });
 
                 // Send final result
                 res.write(`data: ${JSON.stringify({ 
@@ -194,30 +111,24 @@ export class AgentController {
                     data: result 
                 })}\n\n`);
 
-                // Log business metrics
-                loggingService.logBusiness({
-                    event: 'agent_stream_query_completed',
-                    category: 'agent_interaction',
-                    value: duration,
-                    metadata: {
+                ControllerHelper.logRequestSuccess('streamQuery', req, startTime, {
+                    success: result.success,
+                    responseLength: result.response?.length || 0
+                });
+
+                ControllerHelper.logBusinessEvent(
+                    'agent_stream_query_completed',
+                    'agent_interaction',
+                    userId,
+                    Date.now() - startTime,
+                    {
                         success: result.success,
                         queryLength: query?.length || 0,
-                        responseLength: result.response?.length || 0,
-                        userId
+                        responseLength: result.response?.length || 0
                     }
-                });
+                );
 
             } catch (error) {
-                const duration = Date.now() - startTime;
-                
-                loggingService.error('Agent stream query processing failed', {
-                    userId,
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    stack: error instanceof Error ? error.stack : undefined,
-                    duration,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.write(`data: ${JSON.stringify({ 
                     type: 'error', 
                     error: error instanceof Error ? error.message : 'Unknown error' 
@@ -228,24 +139,8 @@ export class AgentController {
             res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
             res.end();
 
-            loggingService.info('Agent stream connection closed', {
-                userId,
-                totalDuration: Date.now() - startTime,
-                requestId: req.headers['x-request-id'] as string
-            });
-
         } catch (error) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Agent stream query failed', {
-                userId,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            console.error('Agent stream error:', error);
+            ControllerHelper.handleError('streamQuery', error, req, res, startTime);
             next(error);
         }
     }
@@ -255,20 +150,13 @@ export class AgentController {
      */
     static async getStatus(_req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
+        ControllerHelper.logRequestStart('getStatus', _req);
 
         try {
-            loggingService.info('Agent status request initiated', {
-                requestId: _req.headers['x-request-id'] as string
-            });
-
             const status = agentService.getStatus();
             
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Agent status retrieved successfully', {
-                duration,
-                statusKeys: Object.keys(status),
-                requestId: _req.headers['x-request-id'] as string
+            ControllerHelper.logRequestSuccess('getStatus', _req, startTime, {
+                statusKeys: Object.keys(status)
             });
 
             res.json({
@@ -276,16 +164,7 @@ export class AgentController {
                 data: status
             });
         } catch (error) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Agent status retrieval failed', {
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                duration,
-                requestId: _req.headers['x-request-id'] as string
-            });
-
-            console.error('Agent status error:', error);
+            ControllerHelper.handleError('getStatus', error, _req, res, startTime);
             next(error);
         }
     }
@@ -295,52 +174,30 @@ export class AgentController {
      */
     static async initialize(_req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
+        ControllerHelper.logRequestStart('initialize', _req);
 
         try {
-            loggingService.info('Agent initialization requested', {
-                requestId: _req.headers['x-request-id'] as string,
-                userAgent: _req.headers['user-agent']
-            });
-
             // Check if user has admin rights (you might want to add this check)
             await agentService.initialize();
             
-            const duration = Date.now() - startTime;
+            ControllerHelper.logRequestSuccess('initialize', _req, startTime);
 
-            loggingService.info('Agent initialized successfully', {
-                duration,
-                requestId: _req.headers['x-request-id'] as string
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'agent_initialized',
-                category: 'system_operation',
-                value: duration,
-                metadata: {
+            ControllerHelper.logBusinessEvent(
+                'agent_initialized',
+                'system_operation',
+                _req.userId || 'system',
+                Date.now() - startTime,
+                {
                     timestamp: new Date().toISOString()
                 }
-            });
+            );
             
             res.json({
                 success: true,
                 message: 'Agent initialized successfully'
             });
         } catch (error) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Agent initialization failed', {
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                duration,
-                requestId: _req.headers['x-request-id'] as string
-            });
-
-            console.error('Agent initialization error:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to initialize agent'
-            });
+            ControllerHelper.handleError('initialize', error, _req, res, startTime);
         }
     }
 
@@ -351,22 +208,10 @@ export class AgentController {
         const startTime = Date.now();
         const userId = req.userId;
         const { insight, metadata, rating } = req.body;
+        ControllerHelper.logRequestStart('addFeedback', req);
 
         try {
-            loggingService.info('Agent feedback submission initiated', {
-                userId,
-                hasInsight: !!insight,
-                rating,
-                metadataKeys: metadata ? Object.keys(metadata) : [],
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!insight) {
-                loggingService.warn('Agent feedback submission failed - missing insight', {
-                    userId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Insight content is required'
@@ -381,44 +226,30 @@ export class AgentController {
                 timestamp: new Date().toISOString()
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Agent feedback added successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('addFeedback', req, startTime, {
                 rating,
-                insightLength: insight.length,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                insightLength: insight.length
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'agent_feedback_added',
-                category: 'user_engagement',
-                value: rating || 0,
-                metadata: {
+            ControllerHelper.logBusinessEvent(
+                'agent_feedback_added',
+                'user_engagement',
+                userId!,
+                undefined,
+                {
                     insightLength: insight.length,
-                    duration,
-                    userId
+                    rating: rating || 0
                 }
-            });
+            );
 
+            // Keep existing response format (backward compatibility)
             res.json({
                 success: true,
                 message: 'Feedback added successfully'
             });
 
         } catch (error) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Agent feedback submission failed', {
-                userId,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('addFeedback', error, req, res, startTime);
             console.error('Agent feedback error:', error);
             next(error);
         }
@@ -429,51 +260,28 @@ export class AgentController {
      */
     static async getConversationHistory(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.userId;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { conversationId } = req.query;
+        ControllerHelper.logRequestStart('getConversationHistory', req);
 
         try {
-            loggingService.info('Agent conversation history request initiated', {
-                userId,
-                conversationId: conversationId as string,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Agent conversation history attempted without authentication', {
-                    ip: req.ip,
-                    userAgent: req.headers['user-agent'],
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
-
             // This would integrate with your existing conversation service
             // For now, we'll return a placeholder response
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Agent conversation history retrieved', {
-                userId,
-                conversationId: conversationId as string,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.logRequestSuccess('getConversationHistory', req, startTime, {
+                conversationId: conversationId as string
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'conversation_history_accessed',
-                category: 'data_access',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'conversation_history_accessed',
+                'data_access',
+                userId,
+                Date.now() - startTime,
+                {
                     conversationId: conversationId as string
                 }
-            });
+            );
 
             res.json({
                 success: true,
@@ -486,18 +294,7 @@ export class AgentController {
             });
 
         } catch (error) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Agent conversation history retrieval failed', {
-                userId,
-                conversationId: conversationId as string,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            console.error('Agent conversation history error:', error);
+            ControllerHelper.handleError('getConversationHistory', error, req, res, startTime);
             next(error);
         }
     }
@@ -507,12 +304,9 @@ export class AgentController {
      */
     static async getSuggestedQueries(_req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
+        ControllerHelper.logRequestStart('getSuggestedQueries', _req);
 
         try {
-            loggingService.info('Agent suggested queries request initiated', {
-                requestId: _req.headers['x-request-id'] as string
-            });
-
             // Generate contextual suggestions based on user's data and new capabilities
             const suggestions = [
                 "Create a new AI project for my chatbot",
@@ -530,25 +324,21 @@ export class AgentController {
             // Shuffle and take 4 suggestions
             const shuffled = suggestions.sort(() => 0.5 - Math.random());
             
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Agent suggested queries generated successfully', {
-                duration,
+            ControllerHelper.logRequestSuccess('getSuggestedQueries', _req, startTime, {
                 totalSuggestions: suggestions.length,
-                returnedSuggestions: 4,
-                requestId: _req.headers['x-request-id'] as string
+                returnedSuggestions: 4
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'suggested_queries_generated',
-                category: 'user_assistance',
-                value: duration,
-                metadata: {
+            ControllerHelper.logBusinessEvent(
+                'suggested_queries_generated',
+                'user_assistance',
+                _req.userId || 'anonymous',
+                Date.now() - startTime,
+                {
                     totalSuggestions: suggestions.length,
                     returnedSuggestions: 4
                 }
-            });
+            );
             
             res.json({
                 success: true,
@@ -576,16 +366,7 @@ export class AgentController {
             });
 
         } catch (error) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Agent suggested queries generation failed', {
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                duration,
-                requestId: _req.headers['x-request-id'] as string
-            });
-
-            console.error('Agent suggestions error:', error);
+            ControllerHelper.handleError('getSuggestedQueries', error, _req, res, startTime);
             next(error);
         }
     }
@@ -595,30 +376,12 @@ export class AgentController {
      */
     static async startProjectWizard(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.userId;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { projectType, quickStart } = req.body;
+        ControllerHelper.logRequestStart('startProjectWizard', req);
 
         try {
-            loggingService.info('Agent project wizard initiated', {
-                userId,
-                projectType,
-                quickStart: !!quickStart,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Agent project wizard attempted without authentication', {
-                    ip: req.ip,
-                    userAgent: req.headers['user-agent'],
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
 
             let wizardPrompt = "I'd like to help you create a new AI project! ";
             
@@ -638,37 +401,26 @@ export class AgentController {
                 }
             };
 
-            loggingService.info('Processing project wizard initial query', {
-                userId,
-                projectType,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             // Get agent response
             const result = await agentService.query(agentQuery);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Agent project wizard started successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('startProjectWizard', req, startTime, {
                 projectType,
-                success: result.success,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                quickStart: !!quickStart,
+                success: result.success
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'project_wizard_started',
-                category: 'project_management',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'project_wizard_started',
+                'project_management',
+                userId,
+                Date.now() - startTime,
+                {
                     projectType,
                     quickStart: !!quickStart,
                     success: result.success
                 }
-            });
+            );
 
             res.json({
                 success: true,
@@ -689,18 +441,7 @@ export class AgentController {
             });
 
         } catch (error) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Agent project wizard start failed', {
-                userId,
-                projectType,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            console.error('Project wizard error:', error);
+            ControllerHelper.handleError('startProjectWizard', error, req, res, startTime);
             next(error);
         }
     }
@@ -710,30 +451,12 @@ export class AgentController {
      */
     static async continueProjectWizard(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.userId;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { response, wizardState } = req.body;
+        ControllerHelper.logRequestStart('continueProjectWizard', req);
 
         try {
-            loggingService.info('Agent project wizard continuation initiated', {
-                userId,
-                currentStep: wizardState?.step || 1,
-                hasResponse: !!response,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Agent project wizard continuation attempted without authentication', {
-                    ip: req.ip,
-                    userAgent: req.headers['user-agent'],
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
 
             // Build conversational query based on wizard state
             let wizardPrompt = `User response: "${response}". `;
@@ -758,42 +481,30 @@ export class AgentController {
                 }
             };
 
-            loggingService.info('Processing project wizard continuation query', {
-                userId,
-                currentStep: wizardState?.step || 1,
-                nextStep: (wizardState?.step || 1) + 1,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const result = await agentService.query(agentQuery);
 
-            const duration = Date.now() - startTime;
             const nextStep = (wizardState?.step || 1) + 1;
             const isComplete = (wizardState?.step || 1) >= 4;
 
-            loggingService.info('Agent project wizard continuation completed', {
-                userId,
+            ControllerHelper.logRequestSuccess('continueProjectWizard', req, startTime, {
                 currentStep: wizardState?.step || 1,
                 nextStep,
                 isComplete,
-                success: result.success,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                success: result.success
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: isComplete ? 'project_wizard_completed' : 'project_wizard_step_completed',
-                category: 'project_management',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                isComplete ? 'project_wizard_completed' : 'project_wizard_step_completed',
+                'project_management',
+                userId,
+                Date.now() - startTime,
+                {
                     currentStep: wizardState?.step || 1,
                     nextStep,
                     isComplete,
                     success: result.success
                 }
-            });
+            );
 
             res.json({
                 success: true,
@@ -808,18 +519,7 @@ export class AgentController {
             });
 
         } catch (error) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Agent project wizard continuation failed', {
-                userId,
-                currentStep: wizardState?.step || 1,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                stack: error instanceof Error ? error.stack : undefined,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            console.error('Project wizard continuation error:', error);
+            ControllerHelper.handleError('continueProjectWizard', error, req, res, startTime);
             next(error);
         }
     }

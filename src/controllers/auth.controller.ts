@@ -4,6 +4,8 @@ import { registerSchema, loginSchema } from '../utils/validators';
 import { loggingService } from '../services/logging.service';
 import { config } from '../config';
 import { User } from '../models/User';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export interface IUser {
     _id?: string;
@@ -51,16 +53,13 @@ export interface IUser {
 }
 
 export class AuthController {
-    static async register(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async register(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
         const { email, name } = req.body;
 
+        ControllerHelper.logRequestStart('register', req, { email, name });
+
         try {
-            loggingService.info('User registration initiated', {
-                email,
-                name,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Validate input
             const validatedData = registerSchema.parse(req.body);
@@ -159,15 +158,13 @@ export class AuthController {
         return;
     }
 
-    static async login(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async login(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
         const { email } = req.body;
 
+        ControllerHelper.logRequestStart('login', req, { email });
+
         try {
-            loggingService.info('User login initiated', {
-                email,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Validate input
             const { email: validatedEmail, password } = loginSchema.parse(req.body);
@@ -290,16 +287,6 @@ export class AuthController {
                 },
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('User login failed', {
-                email,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (error.message === 'Invalid credentials') {
                 res.status(401).json({
                     success: false,
@@ -316,6 +303,7 @@ export class AuthController {
                 return;
             }
 
+            ControllerHelper.handleError('login', error, req, res, startTime, { email });
             next(error);
         }
         return;
@@ -594,16 +582,6 @@ export class AuthController {
                 ...(config.env === 'development' && { resetUrl }),
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Forgot password request failed', {
-                email,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             // Don't reveal if user exists or not
             res.json({
                 success: true,
@@ -613,26 +591,20 @@ export class AuthController {
         return;
     }
 
-    static async resetPassword(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async resetPassword(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
         const { token } = req.params;
         const { password } = req.body;
 
+        ControllerHelper.logRequestStart('resetPassword', req, {
+            hasToken: !!token,
+            hasPassword: !!password,
+            passwordLength: password?.length || 0
+        });
+
         try {
-            loggingService.info('Password reset initiated', {
-                hasToken: !!token,
-                hasPassword: !!password,
-                passwordLength: password?.length || 0,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             if (!token || !password) {
-                loggingService.warn('Password reset failed - missing token or password', {
-                    hasToken: !!token,
-                    hasPassword: !!password,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     message: 'Token and password are required',
@@ -641,11 +613,6 @@ export class AuthController {
             }
 
             if (password.length < 8) {
-                loggingService.warn('Password reset failed - password too short', {
-                    passwordLength: password.length,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     message: 'Password must be at least 8 characters',
@@ -655,42 +622,25 @@ export class AuthController {
 
             await AuthService.resetPassword(token, password);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Password reset completed successfully', {
+            ControllerHelper.logRequestSuccess('resetPassword', req, startTime, {
                 hasToken: true,
-                passwordLength: password.length,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                passwordLength: password.length
             });
 
             // Log business event
-            loggingService.logBusiness({
-                event: 'password_reset',
-                category: 'user_management',
-                value: duration,
-                metadata: {
-                    hasToken: true,
-                    passwordLength: password.length
-                }
-            });
+            ControllerHelper.logBusinessEvent(
+                'password_reset',
+                'user_management',
+                req.userId || 'unknown',
+                Date.now() - startTime,
+                { hasToken: true, passwordLength: password.length }
+            );
 
             res.json({
                 success: true,
                 message: 'Password reset successful',
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Password reset failed', {
-                hasToken: !!token,
-                hasPassword: !!password,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (error.message === 'Invalid or expired reset token') {
                 res.status(400).json({
                     success: false,
@@ -699,33 +649,30 @@ export class AuthController {
                 return;
             }
 
+            ControllerHelper.handleError('resetPassword', error, req, res, startTime, {
+                hasToken: !!token,
+                hasPassword: !!password
+            });
             next(error);
         }
         return;
     }
 
-    static async changePassword(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async changePassword(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { oldPassword, newPassword } = req.body;
 
+        ControllerHelper.logRequestStart('changePassword', req, {
+            hasOldPassword: !!oldPassword,
+            hasNewPassword: !!newPassword,
+            newPasswordLength: newPassword?.length || 0
+        });
+
         try {
-            loggingService.info('Password change initiated', {
-                userId,
-                hasOldPassword: !!oldPassword,
-                hasNewPassword: !!newPassword,
-                newPasswordLength: newPassword?.length || 0,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             if (!oldPassword || !newPassword) {
-                loggingService.warn('Password change failed - missing old or new password', {
-                    userId,
-                    hasOldPassword: !!oldPassword,
-                    hasNewPassword: !!newPassword,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     message: 'Old password and new password are required',
@@ -734,12 +681,6 @@ export class AuthController {
             }
 
             if (newPassword.length < 8) {
-                loggingService.warn('Password change failed - new password too short', {
-                    userId,
-                    newPasswordLength: newPassword.length,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     message: 'New password must be at least 8 characters',
@@ -749,43 +690,24 @@ export class AuthController {
 
             await AuthService.changePassword(userId, oldPassword, newPassword);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Password change completed successfully', {
-                userId,
-                newPasswordLength: newPassword.length,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.logRequestSuccess('changePassword', req, startTime, {
+                newPasswordLength: newPassword.length
             });
 
             // Log business event
-            loggingService.logBusiness({
-                event: 'password_changed',
-                category: 'user_management',
-                value: duration,
-                metadata: {
-                    userId,
-                    newPasswordLength: newPassword.length
-                }
-            });
+            ControllerHelper.logBusinessEvent(
+                'password_changed',
+                'user_management',
+                userId,
+                Date.now() - startTime,
+                { newPasswordLength: newPassword.length }
+            );
 
             res.json({
                 success: true,
                 message: 'Password changed successfully',
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Password change failed', {
-                userId,
-                hasOldPassword: !!oldPassword,
-                hasNewPassword: !!newPassword,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (error.message === 'Invalid current password') {
                 res.status(401).json({
                     success: false,
@@ -794,6 +716,10 @@ export class AuthController {
                 return;
             }
 
+            ControllerHelper.handleError('changePassword', error, req, res, startTime, {
+                hasOldPassword: !!oldPassword,
+                hasNewPassword: !!newPassword
+            });
             next(error);
         }
         return;

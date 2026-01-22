@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
-import crypto from 'crypto';
+import { EncryptionService } from '../utils/encryption';
 
 /**
  * AWS Connection Model - Enterprise Grade Security
@@ -100,35 +100,39 @@ export interface IAWSConnection extends Document {
 
 // Encryption key from environment (should be in secrets manager in production)
 const ENCRYPTION_KEY = process.env.AWS_CONNECTION_ENCRYPTION_KEY ?? 'costkatana-default-key-change-in-prod';
-const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 
+/**
+ * Encrypt external ID using scrypt-based key derivation
+ * Format: iv:authTag:encrypted:salt
+ */
 function encrypt(text: string): string {
-  const iv = crypto.randomBytes(16);
-  const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
-  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, key, iv);
-  
-  let encrypted = cipher.update(text, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  
-  const authTag = cipher.getAuthTag();
-  
-  return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
+  const result = EncryptionService.encryptGCMWithScrypt(text, ENCRYPTION_KEY);
+  return `${result.iv}:${result.authTag}:${result.encrypted}:${result.salt}`;
 }
 
+/**
+ * Decrypt external ID with scrypt-based key derivation
+ * Supports format: iv:authTag:encrypted:salt
+ */
 function decrypt(encryptedText: string): string {
-  const [ivHex, authTagHex, encrypted] = encryptedText.split(':');
+  const parts = encryptedText.split(':');
   
-  const iv = Buffer.from(ivHex, 'hex');
-  const authTag = Buffer.from(authTagHex, 'hex');
-  const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
+  // Support new format: iv:authTag:encrypted:salt (4 parts)
+  if (parts.length === 4) {
+    const [iv, authTag, encrypted, salt] = parts;
+    return EncryptionService.decryptGCMWithScrypt(encrypted, iv, authTag, salt, ENCRYPTION_KEY);
+  }
   
-  const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, key, iv);
-  decipher.setAuthTag(authTag);
+  // Legacy format support: iv:authTag:encrypted (3 parts - old scrypt format without explicit salt)
+  // This handles existing encrypted data that may be in the old format
+  if (parts.length === 3) {
+    const [iv, authTag, encrypted] = parts;
+    // Use fixed 'salt' as the salt value for legacy compatibility
+    const legacySalt = Buffer.from('salt').toString('hex');
+    return EncryptionService.decryptGCMWithScrypt(encrypted, iv, authTag, legacySalt, ENCRYPTION_KEY);
+  }
   
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  
-  return decrypted;
+  throw new Error('Invalid encrypted format for AWS external ID');
 }
 
 const allowedServiceSchema = new Schema<IAllowedService>({

@@ -7,10 +7,12 @@ import { RealtimeUpdateService } from '../services/realtime-update.service';
 import { calculateCost } from '../utils/pricing'; 
 import { sanitizeModelName } from '../utils/optimizationUtils';
 import { extractErrorDetails } from '../utils/helpers';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret';
 
-export function getUserIdFromToken(req: any): string | null {
+export function getUserIdFromToken(req: AuthenticatedRequest): string | null {
     const authHeader = req.headers.authorization || '';
     const token = authHeader.replace(/^Bearer\s+/, '');
     if (!token) return null;
@@ -48,21 +50,15 @@ export class UsageController {
     static {
         this.startBackgroundProcessor();
     }
-    static async trackUsage(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async trackUsage(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
         const startTime = Date.now();
-        const requestId = req.headers['x-request-id'] as string;
-        const userId = req.user?.id || req.userId;
-
+        
         try {
-            loggingService.info('Usage tracking initiated', {
-                requestId,
-                userId
-            });
-
-            // Validate authentication
-            if (!UsageController.validateAuthentication(userId, requestId, res)) {
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('trackUsage', req);
 
             // Check circuit breaker
             if (UsageController.isDbCircuitBreakerOpen()) {
@@ -149,20 +145,12 @@ export class UsageController {
                 });
             }
 
-            loggingService.info('Usage tracked successfully', {
-                requestId,
-                duration,
-                userId,
-                usageId: usage?._id,
-                cost: usage?.cost
-            });
-
             // Queue background business event logging
             UsageController.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'usage_tracked',
                     category: 'usage',
-                    value: duration,
+                    value: Date.now() - startTime,
                     metadata: {
                         userId,
                         usageId: usage?._id,
@@ -173,6 +161,12 @@ export class UsageController {
                         optimizationApplied: usage?.optimizationApplied
                     }
                 });
+            });
+
+            ControllerHelper.logRequestSuccess('trackUsage', req, startTime, {
+                usageId: usage?._id,
+                cost: usage?.cost,
+                totalTokens: usage?.totalTokens
             });
 
             res.status(201).json({
@@ -187,12 +181,11 @@ export class UsageController {
             });
         } catch (error: any) {
             UsageController.recordDbFailure();
-            const duration = Date.now() - startTime;
             
             if (error.message === 'Service temporarily unavailable') {
                 loggingService.warn('Usage service unavailable', {
-                    requestId,
-                    duration
+                    requestId: req.headers['x-request-id'] as string,
+                    duration: Date.now() - startTime
                 });
                 
                 res.status(503).json({
@@ -203,19 +196,34 @@ export class UsageController {
                 return;
             }
             
-            loggingService.error('Usage tracking failed', {
-                requestId,
-                userId,
-                error: error.message || 'Unknown error',
-                duration
-            });
-            
-            next(error);
+            ControllerHelper.handleError('trackUsage', error, req, res, startTime);
         }
     }
 
-    static async trackUsageFromSDK(req: any, res: Response): Promise<void> {
+    static async trackUsageFromSDK(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
         try {
+            // Get userId from JWT token or request
+            let userId = getUserIdFromToken(req);
+            if (!userId) {
+                userId = req.user?.id || req.user?._id || req.userId;
+            }
+            if (!userId) {
+                loggingService.error('No user ID found in request or token', {
+                    requestId: req.headers['x-request-id'] as string,
+                    hasUser: !!req.user,
+                    hasUserId: !!req.userId,
+                    hasToken: !!req.headers.authorization
+                });
+                res.status(401).json({
+                    success: false,
+                    error: 'User authentication required'
+                });
+                return;
+            }
+            req.userId = userId; // Set userId for ControllerHelper
+            ControllerHelper.logRequestStart('trackUsageFromSDK', req);
 
             // Normalize payload
             let body = { ...req.body };
@@ -247,25 +255,6 @@ export class UsageController {
             }
             
 
-            // Get userId from JWT token
-            let userId = getUserIdFromToken(req);
-            if (!userId) {
-                userId = req.user?.id || req.user?._id || req.userId;
-            }
-            if (!userId) {
-                loggingService.error('No user ID found in request or token', {
-                    requestId: req.headers['x-request-id'] as string,
-                    hasUser: !!req.user,
-                    hasUserId: !!req.userId,
-                    hasToken: !!req.headers.authorization
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User authentication required'
-                });
-                return;
-            }
-            console.log('Found userId:', userId);
             // Validate transformed data
             const validationResult = sdkTrackUsageSchema.safeParse(body);
             if (!validationResult.success) {
@@ -474,6 +463,12 @@ export class UsageController {
                 });
             }
 
+            ControllerHelper.logRequestSuccess('trackUsageFromSDK', req, startTime, {
+                usageId: usage?._id,
+                cost: usage?.cost,
+                totalTokens: usage?.totalTokens
+            });
+
             res.status(201).json({
                 success: true,
                 message: 'Usage tracked successfully from SDK',
@@ -484,34 +479,27 @@ export class UsageController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Track usage from SDK failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
-            console.error('Full error:', error);
+            ControllerHelper.handleError('trackUsageFromSDK', error, req, res, startTime);
             // Always return a response
-            res.status(500).json({
-                success: false,
-                error: 'Failed to track usage',
-                message: error.message || 'Internal server error'
-            });
+            if (!res.headersSent) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to track usage',
+                    message: error.message || 'Internal server error'
+                });
+            }
         }
     }
 
-    static async getUsage(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async getUsage(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            // Handle both authenticated and unauthenticated requests
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getUsage', req);
             
             const { page, limit, sort, order } = paginationSchema.parse(req.query);
 
@@ -641,34 +629,34 @@ export class UsageController {
                 });
             }
 
+            ControllerHelper.logRequestSuccess('getUsage', req, startTime, {
+                resultCount: result.data.length,
+                hasSearchQuery: !!searchQuery
+            });
+
             res.json({
                 success: true,
                 data: result.data,
                 pagination: result.pagination,
             });
         } catch (error: any) {
-            loggingService.error('Get usage failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
+            ControllerHelper.handleError('getUsage', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async getUsageByProject(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async getUsageByProject(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getUsageByProject', req);
+            
             const { projectId } = req.params;
+            ServiceHelper.validateObjectId(projectId, 'projectId');
             const { page, limit, sort, order } = paginationSchema.parse(req.query);
 
             const filters = {
@@ -690,67 +678,65 @@ export class UsageController {
                 order,
             });
 
+            ControllerHelper.logRequestSuccess('getUsageByProject', req, startTime, {
+                projectId,
+                resultCount: result.data.length
+            });
+
             res.json({
                 success: true,
                 data: result.data,
                 pagination: result.pagination,
             });
         } catch (error: any) {
-            loggingService.error('Get usage by project failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
-                projectId: req.params.projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('getUsageByProject', error, req, res, startTime, {
+                projectId: req.params.projectId
             });
             next(error);
         }
     }
 
-    static async getUsageStats(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async getUsageStats(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getUsageStats', req);
             const period = (req.query.period as 'daily' | 'weekly' | 'monthly') || 'monthly';
             const projectId = req.query.projectId as string;
 
             const stats = await UsageService.getUsageStats(userId, period, projectId);
+
+            ControllerHelper.logRequestSuccess('getUsageStats', req, startTime, {
+                period: req.query.period,
+                projectId: req.query.projectId
+            });
 
             res.json({
                 success: true,
                 data: stats,
             });
         } catch (error: any) {
-            loggingService.error('Get usage stats failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
+            ControllerHelper.handleError('getUsageStats', error, req, res, startTime, {
                 period: req.query.period,
-                projectId: req.query.projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                projectId: req.query.projectId
             });
             next(error);
         }
     }
 
-    static async bulkUploadUsage(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async bulkUploadUsage(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('bulkUploadUsage', req);
             const { usageData } = req.body;
 
             if (!Array.isArray(usageData)) {
@@ -780,6 +766,12 @@ export class UsageController {
             
             const errors: any[] = []; // Will be populated by service if needed
 
+            ControllerHelper.logRequestSuccess('bulkUploadUsage', req, startTime, {
+                totalRecords: usageData.length,
+                successful: results.length,
+                failed: errors.length
+            });
+
             res.json({
                 success: true,
                 message: `Processed ${usageData.length} usage records`,
@@ -791,29 +783,25 @@ export class UsageController {
                 },
             });
         } catch (error: any) {
-            loggingService.error('Bulk upload usage failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
-                usageDataCount: req.body?.usageData?.length || 0,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('bulkUploadUsage', error, req, res, startTime, {
+                usageDataCount: req.body?.usageData?.length || 0
             });
             next(error);
         }
     }
 
-    static async updateUsage(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async updateUsage(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('updateUsage', req);
+            
             const { usageId } = req.params;
+            ServiceHelper.validateObjectId(usageId, 'usageId');
             const updateData = req.body;
 
             // Validate that the usage belongs to the user
@@ -828,35 +816,35 @@ export class UsageController {
 
             const updatedUsage = await UsageService.updateUsage(usageId, updateData);
 
+            ControllerHelper.logRequestSuccess('updateUsage', req, startTime, {
+                usageId
+            });
+
             res.json({
                 success: true,
                 message: 'Usage updated successfully',
                 data: updatedUsage,
             });
         } catch (error: any) {
-            loggingService.error('Update usage failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
-                usageId: req.params.usageId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('updateUsage', error, req, res, startTime, {
+                usageId: req.params.usageId
             });
             next(error);
         }
     }
 
-    static async deleteUsage(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async deleteUsage(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('deleteUsage', req);
+            
             const { usageId } = req.params;
+            ServiceHelper.validateObjectId(usageId, 'usageId');
 
             // Validate that the usage belongs to the user
             const existingUsage = await UsageService.getUsageById(usageId, userId);
@@ -870,64 +858,61 @@ export class UsageController {
 
             await UsageService.deleteUsage(usageId);
 
+            ControllerHelper.logRequestSuccess('deleteUsage', req, startTime, {
+                usageId
+            });
+
             res.json({
                 success: true,
                 message: 'Usage deleted successfully',
             });
         } catch (error: any) {
-            loggingService.error('Delete usage failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
-                usageId: req.params.usageId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('deleteUsage', error, req, res, startTime, {
+                usageId: req.params.usageId
             });
             next(error);
         }
     }
 
-    static async detectAnomalies(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async detectAnomalies(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('detectAnomalies', req);
             const projectId = req.query.projectId as string;
 
             const anomalies = await UsageService.detectAnomalies(userId, projectId);
+
+            ControllerHelper.logRequestSuccess('detectAnomalies', req, startTime, {
+                projectId: req.query.projectId,
+                anomalyCount: anomalies.length
+            });
 
             res.json({
                 success: true,
                 data: anomalies,
             });
         } catch (error: any) {
-            loggingService.error('Detect anomalies failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
-                projectId: req.query.projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('detectAnomalies', error, req, res, startTime, {
+                projectId: req.query.projectId
             });
             next(error);
         }
     }
 
-    static async searchUsage(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async searchUsage(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('searchUsage', req);
             const { q, page, limit, projectId } = req.query;
 
             if (!q) {
@@ -945,36 +930,36 @@ export class UsageController {
                 projectId as string
             );
 
+            ControllerHelper.logRequestSuccess('searchUsage', req, startTime, {
+                searchQuery: req.query.q,
+                projectId: req.query.projectId,
+                resultCount: result.data.length
+            });
+
             res.json({
                 success: true,
                 data: result.data,
                 pagination: result.pagination,
             });
         } catch (error: any) {
-            loggingService.error('Search usage failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
+            ControllerHelper.handleError('searchUsage', error, req, res, startTime, {
                 searchQuery: req.query.q,
-                projectId: req.query.projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                projectId: req.query.projectId
             });
             next(error);
         }
         return;
     }
 
-    static async exportUsage(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async exportUsage(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('exportUsage', req);
             const format = (req.query.format as 'json' | 'csv') || 'json';
 
             const filters = {
@@ -1011,93 +996,91 @@ export class UsageController {
                 res.setHeader('Content-Disposition', 'attachment; filename=usage-export.json');
                 res.json(result.data);
             }
-        } catch (error: any) {
-            loggingService.error('Export usage failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
+            
+            ControllerHelper.logRequestSuccess('exportUsage', req, startTime, {
                 format: req.query.format,
                 projectId: req.query.projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                recordCount: result.data.length
+            });
+        } catch (error: any) {
+            ControllerHelper.handleError('exportUsage', error, req, res, startTime, {
+                format: req.query.format,
+                projectId: req.query.projectId
             });
             next(error);
         }
     }
 
-    static async getRealTimeUsageSummary(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async getRealTimeUsageSummary(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getRealTimeUsageSummary', req);
             const { projectId } = req.query;
 
-            const summary = await UsageService.getRealTimeUsageSummary(userId, projectId);
+            const summary = await UsageService.getRealTimeUsageSummary(userId, projectId as string | undefined);
+
+            ControllerHelper.logRequestSuccess('getRealTimeUsageSummary', req, startTime, {
+                projectId: req.query.projectId
+            });
 
             res.json({
                 success: true,
                 data: summary
             });
         } catch (error: any) {
-            loggingService.error('Get real-time usage summary failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
-                projectId: req.query.projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+            ControllerHelper.handleError('getRealTimeUsageSummary', error, req, res, startTime, {
+                projectId: req.query.projectId
             });
             next(error);
         }
     }
 
-    static async getRealTimeRequests(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async getRealTimeRequests(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getRealTimeRequests', req);
             const { projectId, limit = 100 } = req.query;
 
-            const requests = await UsageService.getRealTimeRequests(userId, projectId, parseInt(limit as string));
+            const requests = await UsageService.getRealTimeRequests(userId, projectId as string | undefined, parseInt(limit as string));
+
+            ControllerHelper.logRequestSuccess('getRealTimeRequests', req, startTime, {
+                projectId: req.query.projectId,
+                limit: req.query.limit,
+                requestCount: requests.length
+            });
 
             res.json({
                 success: true,
                 data: requests
             });
         } catch (error: any) {
-            loggingService.error('Get real-time requests failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
+            ControllerHelper.handleError('getRealTimeRequests', error, req, res, startTime, {
                 projectId: req.query.projectId,
-                limit: req.query.limit,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                limit: req.query.limit
             });
             next(error);
         }
     }
 
-    static async getUsageAnalytics(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async getUsageAnalytics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getUsageAnalytics', req);
             const { 
                 timeRange, 
                 status, 
@@ -1121,37 +1104,39 @@ export class UsageController {
 
             const analytics = await Promise.race([analyticsPromise, timeoutPromise]);
 
+            ControllerHelper.logRequestSuccess('getUsageAnalytics', req, startTime, {
+                timeRange: req.query.timeRange,
+                status: req.query.status,
+                model: req.query.model,
+                service: req.query.service,
+                projectId: req.query.projectId
+            });
+
             res.json({
                 success: true,
                 data: analytics
             });
         } catch (error: any) {
-            loggingService.error('Get usage analytics failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
+            ControllerHelper.handleError('getUsageAnalytics', error, req, res, startTime, {
                 timeRange: req.query.timeRange,
                 status: req.query.status,
                 model: req.query.model,
                 service: req.query.service,
-                projectId: req.query.projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                projectId: req.query.projectId
             });
             next(error);
         }
     }
 
-    static async getCLIAnalytics(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async getCLIAnalytics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getCLIAnalytics', req);
 
             const { days = 30, project, user } = req.query;
             const daysNum = parseInt(days as string) || 30;
@@ -1162,35 +1147,35 @@ export class UsageController {
                 user: user as string
             });
 
+            ControllerHelper.logRequestSuccess('getCLIAnalytics', req, startTime, {
+                days: req.query.days,
+                project: req.query.project,
+                user: req.query.user
+            });
+
             res.json({
                 success: true,
                 data: analytics
             });
         } catch (error: any) {
-            loggingService.error('Get CLI analytics failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
+            ControllerHelper.handleError('getCLIAnalytics', error, req, res, startTime, {
                 days: req.query.days,
                 project: req.query.project,
-                user: req.query.user,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                user: req.query.user
             });
             next(error);
         }
     }
 
-    static async getPropertyAnalytics(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async getPropertyAnalytics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getPropertyAnalytics', req);
 
             const { groupBy, startDate, endDate, projectId } = req.query;
 
@@ -1210,36 +1195,37 @@ export class UsageController {
 
             const analytics = await UsageService.getPropertyAnalytics(userId, options);
 
+            ControllerHelper.logRequestSuccess('getPropertyAnalytics', req, startTime, {
+                groupBy: req.query.groupBy,
+                startDate: req.query.startDate,
+                endDate: req.query.endDate,
+                projectId: req.query.projectId
+            });
+
             res.json({
                 success: true,
                 data: analytics,
             });
         } catch (error: any) {
-            loggingService.error('Get property analytics failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
+            ControllerHelper.handleError('getPropertyAnalytics', error, req, res, startTime, {
                 groupBy: req.query.groupBy,
                 startDate: req.query.startDate,
                 endDate: req.query.endDate,
-                projectId: req.query.projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                projectId: req.query.projectId
             });
             next(error);
         }
     }
 
-    static async getAvailableProperties(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async getAvailableProperties(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getAvailableProperties', req);
 
             const { startDate, endDate, projectId } = req.query;
 
@@ -1251,37 +1237,39 @@ export class UsageController {
 
             const properties = await UsageService.getAvailableProperties(userId, options);
 
+            ControllerHelper.logRequestSuccess('getAvailableProperties', req, startTime, {
+                startDate: req.query.startDate,
+                endDate: req.query.endDate,
+                projectId: req.query.projectId,
+                propertyCount: properties.length
+            });
+
             res.json({
                 success: true,
                 data: properties,
             });
         } catch (error: any) {
-            loggingService.error('Get available properties failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
+            ControllerHelper.handleError('getAvailableProperties', error, req, res, startTime, {
                 startDate: req.query.startDate,
                 endDate: req.query.endDate,
-                projectId: req.query.projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                projectId: req.query.projectId
             });
             next(error);
         }
     }
 
-    static async updateUsageProperties(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+    static async updateUsageProperties(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
         try {
-            const userId = req.user?.id || req.userId;
-            
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('updateUsageProperties', req);
 
             const { usageId } = req.params;
+            ServiceHelper.validateObjectId(usageId, 'usageId');
             const properties = req.body;
 
             if (!usageId) {
@@ -1307,6 +1295,11 @@ export class UsageController {
                 });
             }
 
+            ControllerHelper.logRequestSuccess('updateUsageProperties', req, startTime, {
+                usageId,
+                propertiesCount: Object.keys(properties).length
+            });
+
             res.json({
                 success: true,
                 message: 'Usage properties updated successfully',
@@ -1317,14 +1310,9 @@ export class UsageController {
                 },
             });
         } catch (error: any) {
-            loggingService.error('Update usage properties failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id || req.userId,
-                hasUserId: !!(req.user?.id || req.userId),
+            ControllerHelper.handleError('updateUsageProperties', error, req, res, startTime, {
                 usageId: req.params.usageId,
-                propertiesCount: req.body ? Object.keys(req.body).length : 0,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                propertiesCount: req.body ? Object.keys(req.body).length : 0
             });
             next(error);
         }
@@ -1334,7 +1322,9 @@ export class UsageController {
      * SSE endpoint for real-time usage updates
      * GET /api/usage/stream
      */
-    static async streamUsageUpdates(req: any, res: Response): Promise<void> {
+    static async streamUsageUpdates(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
         try {
             const userId = req.userId || req.query.userId;
             
@@ -1342,19 +1332,15 @@ export class UsageController {
                 res.status(401).json({ message: 'User ID is required' });
                 return;
             }
-
-            loggingService.info('Initializing SSE connection for user', {
-                requestId: req.headers['x-request-id'] as string,
-                userId,
-                hasUserId: !!userId
-            });
+            req.userId = userId as string; // Ensure userId is set
+            ControllerHelper.logRequestStart('streamUsageUpdates', req);
             
             // Initialize SSE connection
-            RealtimeUpdateService.initializeSSEConnection(userId, res);
+            RealtimeUpdateService.initializeSSEConnection(userId as string, res);
             
             // Send initial usage data
-            const recentUsage = await UsageService.getRecentUsageForUser(userId, 5);
-            const stats = await UsageService.getUsageStats(userId, 'daily');
+            const recentUsage = await UsageService.getRecentUsageForUser(userId as string, 5);
+            const stats = await UsageService.getUsageStats(userId as string, 'daily');
             
             res.write(`data: ${JSON.stringify({
                 type: 'initial_data',
@@ -1365,15 +1351,12 @@ export class UsageController {
                 timestamp: new Date().toISOString()
             })}\n\n`);
 
+            ControllerHelper.logRequestSuccess('streamUsageUpdates', req, startTime);
         } catch (error: any) {
-            loggingService.error('SSE stream error', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.userId || req.query.userId,
-                hasUserId: !!(req.userId || req.query.userId),
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
-            res.status(500).json({ message: 'SSE stream error' });
+            ControllerHelper.handleError('streamUsageUpdates', error, req, res, startTime);
+            if (!res.headersSent) {
+                res.status(500).json({ message: 'SSE stream error' });
+            }
         }
     }
 

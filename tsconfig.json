@@ -23,7 +23,16 @@
       "declaration": true,
       "declarationMap": true,
       "typeRoots": ["./node_modules/@types", "./src/types"],
-      "downlevelIteration": true
+      "downlevelIteration": true,
+      "baseUrl": "./src",
+      "paths": {
+        "@services/*": ["services/*"],
+        "@models/*": ["models/*"],
+        "@middleware/*": ["middleware/*"],
+        "@utils/*": ["utils/*"],
+        "@mcp/*": ["mcp/*"],
+        "@types/*": ["types/*"]
+      }
     },
     "include": ["src/**/*"],
     "exclude": ["node_modules", "dist", "tests", "src/observability/selfHealingSpanProcessor.ts", "src/tests/**/*", "**/*.test.ts", "**/*.spec.ts"]

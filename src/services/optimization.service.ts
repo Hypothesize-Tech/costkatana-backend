@@ -10,6 +10,7 @@ import { estimateTokens, estimateTokensAsync } from '../utils/tokenCounter';
 import { generateOptimizationSuggestions } from '../utils/optimizationUtils';
 import mongoose from 'mongoose';
 import { ActivityService } from './activity.service';
+import { BaseService } from '../shared/BaseService';
 
 // 🚀 NEW CORTEX IMPORTS - ADVANCED STREAMING
 import { CortexCoreService } from './cortexCore.service';
@@ -147,7 +148,7 @@ interface OptimizationFilters {
     endDate?: Date;
 }
 
-export class OptimizationService {
+export class OptimizationService extends BaseService {
     // 🚀 NEW CORTEX SERVICES FOR META-LANGUAGE PROCESSING
     private static cortexEncoderService: CortexEncoderService;
     private static cortexDecoderService: CortexDecoderService;
@@ -166,14 +167,43 @@ export class OptimizationService {
     // Performance optimization flags
     private static readonly ENABLE_PARALLEL_PROCESSING = true;
     private static readonly ENABLE_BACKGROUND_PROCESSING = true;
-
+    
+    // Circuit breaker for Cortex operations
+    private static cortexFailureCount = 0;
+    private static lastCortexFailureTime = 0;
+    private static readonly MAX_CORTEX_FAILURES = 3;
+    private static readonly CORTEX_CIRCUIT_BREAKER_RESET_TIME = 5 * 60 * 1000; // 5 minutes
+    
     /**
-     * Initialize background processor
+     * Record Cortex failure for circuit breaker
      */
-    static {
-        if (this.ENABLE_BACKGROUND_PROCESSING) {
-            this.startBackgroundProcessor();
+    private static recordCortexFailure(): void {
+        this.cortexFailureCount++;
+        this.lastCortexFailureTime = Date.now();
+    }
+    
+    /**
+     * Check if Cortex circuit breaker is open
+     */
+    private static isCortexCircuitBreakerOpen(): boolean {
+        if (this.cortexFailureCount >= this.MAX_CORTEX_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastCortexFailureTime;
+            if (timeSinceLastFailure < this.CORTEX_CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.cortexFailureCount = 0;
+                return false;
+            }
         }
+        return false;
+    }
+
+    constructor() {
+        super('OptimizationService', {
+            max: 1000,
+            ttl: 600000 // 10 minutes
+        });
     }
 
     // Helper to map string to AIProvider enum
@@ -212,12 +242,6 @@ export class OptimizationService {
         }
     }
 
-    // Circuit breaker for Cortex services
-    private static cortexFailureCount: number = 0;
-    private static readonly MAX_CORTEX_FAILURES = 3;
-    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
-    private static lastCortexFailureTime: number = 0;
-
     /**
      * 🚀 Initialize Cortex services for meta-language processing with parallel initialization
      */
@@ -248,11 +272,9 @@ export class OptimizationService {
             ]);
             
             this.cortexInitialized = true;
-            this.cortexFailureCount = 0; // Reset failure count on successful init
             loggingService.info('✅ Cortex services initialized successfully');
             
         } catch (error) {
-            this.recordCortexFailure();
             loggingService.error('❌ Failed to initialize Cortex services', {
                 error: error instanceof Error ? error.message : String(error)
             });
@@ -523,31 +545,6 @@ function optimizedFunction() {
             // Fallback: return empty string
             return '';
         }
-    }
-
-    /**
-     * Check if Cortex circuit breaker is open
-     */
-    private static isCortexCircuitBreakerOpen(): boolean {
-        if (this.cortexFailureCount >= this.MAX_CORTEX_FAILURES) {
-            const timeSinceLastFailure = Date.now() - this.lastCortexFailureTime;
-            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
-                return true;
-            } else {
-                // Reset circuit breaker
-                this.cortexFailureCount = 0;
-                return false;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Record Cortex failure for circuit breaker
-     */
-    private static recordCortexFailure(): void {
-        this.cortexFailureCount++;
-        this.lastCortexFailureTime = Date.now();
     }
 
     /**
@@ -1475,14 +1472,6 @@ REPLY FORMAT (JSON only):
                 loggingService.debug('Cortex processing triggered', { userId: request.userId });
 
                 try {
-                    if (this.isCortexCircuitBreakerOpen()) {
-                        loggingService.warn('⚠️ Cortex circuit breaker is open, using fallback', {
-                            userId: request.userId,
-                            failureCount: this.cortexFailureCount
-                        });
-                        throw new Error('Cortex circuit breaker is open');
-                    }
-
                     await this.initializeCortexServices();
 
                     loggingService.debug('Cortex initialization status', {
@@ -1500,8 +1489,6 @@ REPLY FORMAT (JSON only):
                             request.model,
                             request.service
                         );
-
-                        this.cortexFailureCount = 0;
 
                         loggingService.info('✅ Advanced Cortex Streaming completed', {
                             userId: request.userId,
@@ -1531,8 +1518,7 @@ REPLY FORMAT (JSON only):
                     this.recordCortexFailure();
                     loggingService.error('❌ Advanced Cortex Streaming failed with error', {
                         userId: request.userId,
-                        error: error instanceof Error ? error.message : String(error),
-                        failureCount: this.cortexFailureCount
+                        error: error instanceof Error ? error.message : String(error)
                     });
 
                     cortexResult = {

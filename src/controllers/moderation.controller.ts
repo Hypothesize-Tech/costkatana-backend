@@ -2,6 +2,8 @@ import { Response } from 'express';
 import { loggingService } from '../services/logging.service';
 import { ThreatLog } from '../models/ThreatLog';
 import mongoose from 'mongoose';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class ModerationController {
     // ObjectId memoization per request
@@ -14,25 +16,15 @@ export class ModerationController {
      * Get comprehensive moderation analytics
      * GET /api/moderation/analytics
      */
-    static async getModerationAnalytics(req: any, res: Response): Promise<void> {
+    static async getModerationAnalytics(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId: string = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getModerationAnalytics', req);
 
         try {
-            loggingService.info('Moderation analytics retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Moderation analytics retrieval failed - authentication required', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
 
             const {
                 startDate,
@@ -40,17 +32,6 @@ export class ModerationController {
                 includeInputModeration = true,
                 includeOutputModeration = true
             } = req.query;
-
-            loggingService.info('Moderation analytics retrieval processing started', {
-                userId,
-                startDate,
-                endDate,
-                hasStartDate: !!startDate,
-                hasEndDate: !!endDate,
-                includeInputModeration: Boolean(includeInputModeration),
-                includeOutputModeration: Boolean(includeOutputModeration),
-                requestId: req.headers['x-request-id'] as string
-            });
 
             const dateRange = startDate && endDate ? {
                 start: new Date(startDate as string),
@@ -99,38 +80,29 @@ export class ModerationController {
                 blockRateByModel: blockRateByModel
             };
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Moderation analytics retrieved successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getModerationAnalytics', req, startTime, {
                 startDate,
                 endDate,
-                hasStartDate: !!startDate,
-                hasEndDate: !!endDate,
                 includeInputModeration: Boolean(includeInputModeration),
                 includeOutputModeration: Boolean(includeOutputModeration),
-                duration,
                 totalThreats: stats.totalThreats,
                 totalCostSaved: stats.totalCostSaved,
                 inputThreats: stats.inputThreats,
                 outputThreats: stats.outputThreats,
                 hasTrendAnalytics: !!trendAnalytics && trendAnalytics.length > 0,
                 hasRouteAnalytics: !!routeAnalytics && routeAnalytics.length > 0,
-                hasCategoryAnalytics: !!categoryAnalytics && categoryAnalytics.length > 0,
-                requestId: req.headers['x-request-id'] as string
+                hasCategoryAnalytics: !!categoryAnalytics && categoryAnalytics.length > 0
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'moderation_analytics_retrieved',
                 category: 'moderation_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     startDate,
                     endDate,
-                    hasStartDate: !!startDate,
-                    hasEndDate: !!endDate,
                     includeInputModeration: Boolean(includeInputModeration),
                     includeOutputModeration: Boolean(includeOutputModeration),
                     totalThreats: stats.totalThreats,
@@ -166,24 +138,11 @@ export class ModerationController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Moderation analytics retrieval failed', {
-                userId,
+            ControllerHelper.handleError('getModerationAnalytics', error, req, res, startTime, {
                 startDate: req.query.startDate,
                 endDate: req.query.endDate,
                 includeInputModeration: req.query.includeInputModeration,
-                includeOutputModeration: req.query.includeOutputModeration,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve moderation analytics',
-                message: error.message
+                includeOutputModeration: req.query.includeOutputModeration
             });
         }
     }
@@ -192,25 +151,15 @@ export class ModerationController {
      * Get moderation threat samples for audit
      * GET /api/moderation/threats
      */
-    static async getModerationThreats(req: any, res: Response): Promise<void> {
+    static async getModerationThreats(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId: string = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getModerationThreats', req);
 
         try {
-            loggingService.info('Moderation threats retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Moderation threats retrieval failed - authentication required', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
 
             const {
                 page = '1',
@@ -223,20 +172,6 @@ export class ModerationController {
                 sortOrder = 'desc'
             } = req.query;
 
-            loggingService.info('Moderation threats retrieval processing started', {
-                userId,
-                page,
-                limit,
-                category,
-                stage,
-                startDate,
-                endDate,
-                hasStartDate: !!startDate,
-                hasEndDate: !!endDate,
-                sortBy,
-                sortOrder,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             const pageNum = parseInt(page as string);
             const limitNum = Math.min(parseInt(limit as string), 100); // Cap at 100
@@ -307,33 +242,25 @@ export class ModerationController {
             // Sanitize sensitive data for frontend display (optimized processing)
             const sanitizedThreats = ModerationController.sanitizeThreatsData(threats);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Moderation threats retrieved successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getModerationThreats', req, startTime, {
                 page,
                 limit,
                 category,
                 stage,
                 startDate,
                 endDate,
-                hasStartDate: !!startDate,
-                hasEndDate: !!endDate,
                 sortBy,
                 sortOrder,
-                duration,
                 threatsCount: threats.length,
                 totalCount,
-                totalPages,
-                hasThreats: !!threats && threats.length > 0,
-                requestId: req.headers['x-request-id'] as string
+                totalPages
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'moderation_threats_retrieved',
                 category: 'moderation_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     page,
@@ -342,14 +269,11 @@ export class ModerationController {
                     stage,
                     startDate,
                     endDate,
-                    hasStartDate: !!startDate,
-                    hasEndDate: !!endDate,
                     sortBy,
                     sortOrder,
                     threatsCount: threats.length,
                     totalCount,
-                    totalPages,
-                    hasThreats: !!threats && threats.length > 0
+                    totalPages
                 }
             });
 
@@ -372,10 +296,7 @@ export class ModerationController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Moderation threats retrieval failed', {
-                userId,
+            ControllerHelper.handleError('getModerationThreats', error, req, res, startTime, {
                 page: req.query.page,
                 limit: req.query.limit,
                 category: req.query.category,
@@ -383,17 +304,7 @@ export class ModerationController {
                 startDate: req.query.startDate,
                 endDate: req.query.endDate,
                 sortBy: req.query.sortBy,
-                sortOrder: req.query.sortOrder,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve moderation threats',
-                message: error.message
+                sortOrder: req.query.sortOrder
             });
         }
     }
@@ -402,30 +313,15 @@ export class ModerationController {
      * Get moderation configuration
      * GET /api/moderation/config
      */
-    static async getModerationConfig(req: any, res: Response): Promise<void> {
+    static async getModerationConfig(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId: string = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getModerationConfig', req);
 
         try {
-            loggingService.info('Moderation configuration retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Moderation configuration retrieval failed - authentication required', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
-
-            loggingService.info('Moderation configuration retrieval processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Get user's moderation settings (would typically be stored in User model or Settings)
             // For now, return default configuration
@@ -454,20 +350,15 @@ export class ModerationController {
                 }
             };
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Moderation configuration retrieved successfully', {
-                userId,
-                duration,
-                hasConfig: !!defaultConfig,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.logRequestSuccess('getModerationConfig', req, startTime, {
+                hasConfig: !!defaultConfig
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'moderation_configuration_retrieved',
                 category: 'moderation_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     hasConfig: !!defaultConfig
@@ -479,21 +370,7 @@ export class ModerationController {
                 data: defaultConfig
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Moderation configuration retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve moderation configuration',
-                message: error.message
-            });
+            ControllerHelper.handleError('getModerationConfig', error, req, res, startTime);
         }
     }
 
@@ -501,37 +378,20 @@ export class ModerationController {
      * Update moderation configuration
      * PUT /api/moderation/config
      */
-    static async updateModerationConfig(req: any, res: Response): Promise<void> {
+    static async updateModerationConfig(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId: string = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
         const config = req.body;
+        
+        ControllerHelper.logRequestStart('updateModerationConfig', req, {
+            hasConfig: !!config,
+            configKeys: config ? Object.keys(config) : []
+        });
 
         try {
-            loggingService.info('Moderation configuration update initiated', {
-                userId,
-                hasUserId: !!userId,
-                hasConfig: !!config,
-                configKeys: config ? Object.keys(config) : [],
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Moderation configuration update failed - authentication required', {
-                    hasConfig: !!config,
-                    configKeys: config ? Object.keys(config) : [],
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
-
-            loggingService.info('Moderation configuration update processing started', {
-                userId,
-                hasConfig: !!config,
-                configKeys: config ? Object.keys(config) : [],
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Configuration persistence will be implemented in future versions
             // For now, validate and return success
@@ -541,21 +401,16 @@ export class ModerationController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Moderation configuration updated successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('updateModerationConfig', req, startTime, {
                 hasConfig: !!config,
-                configKeys: config ? Object.keys(config) : [],
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                configKeys: config ? Object.keys(config) : []
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'moderation_configuration_updated',
                 category: 'moderation_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     hasConfig: !!config,
@@ -569,22 +424,9 @@ export class ModerationController {
                 data: config
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Moderation configuration update failed', {
-                userId,
+            ControllerHelper.handleError('updateModerationConfig', error, req, res, startTime, {
                 hasConfig: !!config,
-                configKeys: config ? Object.keys(config) : [],
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to update moderation configuration',
-                message: error.message
+                configKeys: config ? Object.keys(config) : []
             });
         }
     }
@@ -593,51 +435,23 @@ export class ModerationController {
      * Appeal a moderation decision
      * POST /api/moderation/appeal
      */
-    static async appealModerationDecision(req: any, res: Response): Promise<void> {
+    static async appealModerationDecision(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId: string = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
         const { threatId, reason, additionalContext } = req.body;
+        
+        ControllerHelper.logRequestStart('appealModerationDecision', req, {
+            threatId,
+            hasReason: !!reason,
+            hasAdditionalContext: !!additionalContext
+        });
 
         try {
-            loggingService.info('Moderation appeal submission initiated', {
-                userId,
-                hasUserId: !!userId,
-                threatId,
-                hasThreatId: !!threatId,
-                reason,
-                hasReason: !!reason,
-                additionalContext,
-                hasAdditionalContext: !!additionalContext,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Moderation appeal submission failed - authentication required', {
-                    threatId,
-                    hasThreatId: !!threatId,
-                    reason,
-                    hasReason: !!reason,
-                    additionalContext,
-                    hasAdditionalContext: !!additionalContext,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
 
             if (!threatId || !reason) {
-                loggingService.warn('Moderation appeal submission failed - missing required fields', {
-                    userId,
-                    threatId,
-                    hasThreatId: !!threatId,
-                    reason,
-                    hasReason: !!reason,
-                    additionalContext,
-                    hasAdditionalContext: !!additionalContext,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Missing required fields',
@@ -646,14 +460,7 @@ export class ModerationController {
                 return;
             }
 
-            loggingService.info('Moderation appeal submission processing started', {
-                userId,
-                threatId,
-                reason,
-                additionalContext,
-                hasAdditionalContext: !!additionalContext,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ServiceHelper.validateObjectId(threatId, 'threatId');
 
             // Find the threat log
             const threat = await ThreatLog.findById(threatId);
@@ -712,31 +519,22 @@ export class ModerationController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Moderation appeal submitted successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('appealModerationDecision', req, startTime, {
                 threatId,
-                reason,
-                additionalContext,
-                hasAdditionalContext: !!additionalContext,
-                duration,
                 hasThreat: !!threat,
-                threatUserId: threat.userId?.toString(),
-                requestId: req.headers['x-request-id'] as string
+                threatUserId: threat.userId?.toString()
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'moderation_appeal_submitted',
                 category: 'moderation_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     threatId,
                     reason,
                     additionalContext,
-                    hasAdditionalContext: !!additionalContext,
                     hasThreat: !!threat,
                     threatUserId: threat.userId?.toString()
                 }
@@ -752,26 +550,9 @@ export class ModerationController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Moderation appeal submission failed', {
-                userId,
+            ControllerHelper.handleError('appealModerationDecision', error, req, res, startTime, {
                 threatId,
-                hasThreatId: !!threatId,
-                reason,
-                hasReason: !!reason,
-                additionalContext,
-                hasAdditionalContext: !!additionalContext,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to submit appeal',
-                message: error.message
+                hasReason: !!reason
             });
         }
     }

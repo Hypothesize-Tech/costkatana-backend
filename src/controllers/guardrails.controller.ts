@@ -3,6 +3,8 @@ import { GuardrailsService } from '../services/guardrails.service';
 import { loggingService } from '../services/logging.service';
 import { z } from 'zod';
 import mongoose from 'mongoose';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 
 // Validation schemas
@@ -28,34 +30,15 @@ export class GuardrailsController {
     /**
      * Get current usage statistics for the authenticated user
      */
-    static async getUserUsage(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getUserUsage(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getUserUsage', req);
 
         try {
-            loggingService.info('User usage statistics retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('User usage statistics retrieval failed - authentication required', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
-            loggingService.info('User usage statistics retrieval processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const stats = await GuardrailsService.getUserUsageStats(userId);
             
             if (!stats) {
@@ -71,20 +54,13 @@ export class GuardrailsController {
                 return;
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('User usage statistics retrieved successfully', {
-                userId,
-                duration,
-                hasStats: !!stats,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('getUserUsage', req, startTime, { hasStats: !!stats });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'user_usage_statistics_retrieved',
                 category: 'guardrails_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     hasStats: !!stats
@@ -96,16 +72,7 @@ export class GuardrailsController {
                 data: stats
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('User usage statistics retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('getUserUsage', error, req, res, startTime);
             next(error);
         }
     }
@@ -113,46 +80,17 @@ export class GuardrailsController {
     /**
      * Check if a specific request would violate guardrails
      */
-    static async checkGuardrails(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async checkGuardrails(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
         const { requestType, amount, modelId } = checkGuardrailsSchema.parse(req.body);
+        
+        ControllerHelper.logRequestStart('checkGuardrails', req, { requestType, amount, modelId });
 
         try {
-            loggingService.info('Guardrails check initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestType,
-                amount,
-                modelId,
-                hasAmount: !!amount,
-                hasModelId: !!modelId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Guardrails check failed - authentication required', {
-                    requestType,
-                    amount,
-                    modelId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
-            loggingService.info('Guardrails check processing started', {
-                userId,
-                requestType,
-                amount,
-                modelId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const violation = await GuardrailsService.checkRequestGuardrails(
                 userId,
                 requestType,
@@ -160,25 +98,20 @@ export class GuardrailsController {
                 modelId
             );
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Guardrails check completed successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('checkGuardrails', req, startTime, {
                 requestType,
                 amount,
                 modelId,
-                duration,
                 hasViolation: !!violation,
                 violationAction: violation?.action,
-                isAllowed: !violation || violation.action === 'allow',
-                requestId: req.headers['x-request-id'] as string
+                isAllowed: !violation || violation.action === 'allow'
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'guardrails_check_completed',
                 category: 'guardrails_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     requestType,
@@ -198,19 +131,7 @@ export class GuardrailsController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Guardrails check failed', {
-                userId,
-                requestType,
-                amount,
-                modelId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('checkGuardrails', error, req, res, startTime, { requestType, amount, modelId });
             next(error);
         }
     }
@@ -325,13 +246,9 @@ export class GuardrailsController {
         const startTime = Date.now();
         const plan = req.params.plan || 'free';
 
-        try {
-            loggingService.info('Plan limits retrieval initiated', {
-                plan,
-                hasPlan: !!plan,
-                requestId: req.headers['x-request-id'] as string
-            });
+        ControllerHelper.logRequestStart('getPlanLimits', req as AuthenticatedRequest, { plan });
 
+        try {
             const limits = {
                 free: {
                     tokensPerMonth: 1_000_000,
@@ -392,20 +309,16 @@ export class GuardrailsController {
                 return;
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Plan limits retrieved successfully', {
+            ControllerHelper.logRequestSuccess('getPlanLimits', req as AuthenticatedRequest, startTime, {
                 plan,
-                duration,
-                hasLimits: !!limits[plan as keyof typeof limits],
-                requestId: req.headers['x-request-id'] as string
+                hasLimits: !!limits[plan as keyof typeof limits]
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'plan_limits_retrieved',
                 category: 'guardrails_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     plan,
                     hasLimits: !!limits[plan as keyof typeof limits]
@@ -417,16 +330,7 @@ export class GuardrailsController {
                 data: limits[plan as keyof typeof limits]
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Plan limits retrieval failed', {
-                plan,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('getPlanLimits', error, req as AuthenticatedRequest, res, startTime, { plan });
             next(error);
         }
     }
@@ -434,41 +338,17 @@ export class GuardrailsController {
     /**
      * Update user subscription plan
      */
-    static async updateSubscription(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async updateSubscription(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
         const { plan, seats } = updateSubscriptionSchema.parse(req.body);
+        
+        ControllerHelper.logRequestStart('updateSubscription', req, { plan, seats });
 
         try {
-            loggingService.info('Subscription update initiated', {
-                userId,
-                hasUserId: !!userId,
-                plan,
-                seats,
-                hasSeats: !!seats,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Subscription update failed - authentication required', {
-                    plan,
-                    seats,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
-            loggingService.info('Subscription update processing started', {
-                userId,
-                plan,
-                seats,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Define plan limits
             const planLimits = {
@@ -559,27 +439,22 @@ export class GuardrailsController {
                 }
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Subscription updated successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('updateSubscription', req, startTime, {
                 plan,
                 seats,
-                duration,
-                oldPlan: req.user.subscription?.plan,
+                oldPlan: req.user?.subscription?.plan,
                 newPlan: plan,
-                hasUser: !!user,
-                requestId: req.headers['x-request-id'] as string
+                hasUser: !!user
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'subscription_updated',
                 category: 'guardrails_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
-                    oldPlan: req.user.subscription?.plan,
+                    oldPlan: req.user?.subscription?.plan,
                     newPlan: plan,
                     seats,
                     hasUser: !!user
@@ -592,18 +467,7 @@ export class GuardrailsController {
                 data: user.subscription
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Subscription update failed', {
-                userId,
-                plan,
-                seats,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('updateSubscription', error, req, res, startTime, { plan, seats });
             next(error);
         }
     }
@@ -611,34 +475,15 @@ export class GuardrailsController {
     /**
      * Get usage alerts for the authenticated user
      */
-    static async getUsageAlerts(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getUsageAlerts(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getUsageAlerts', req);
 
         try {
-            loggingService.info('Usage alerts retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Usage alerts retrieval failed - authentication required', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
-            loggingService.info('Usage alerts retrieval processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const Alert = require('../models/Alert').Alert;
             const alerts = await Alert.find({
                 userId,
@@ -648,21 +493,16 @@ export class GuardrailsController {
             .sort('-createdAt')
             .limit(10);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Usage alerts retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getUsageAlerts', req, startTime, {
                 alertsCount: alerts.length,
-                hasAlerts: !!alerts && alerts.length > 0,
-                requestId: req.headers['x-request-id'] as string
+                hasAlerts: !!alerts && alerts.length > 0
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'usage_alerts_retrieved',
                 category: 'guardrails_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     alertsCount: alerts.length,
@@ -675,16 +515,7 @@ export class GuardrailsController {
                 data: alerts
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Usage alerts retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('getUsageAlerts', error, req, res, startTime);
             next(error);
         }
     }
@@ -692,55 +523,31 @@ export class GuardrailsController {
     /**
      * Reset monthly usage (admin only)
      */
-    static async resetMonthlyUsage(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async resetMonthlyUsage(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('resetMonthlyUsage', req);
 
         try {
-            loggingService.info('Monthly usage reset initiated', {
-                userId,
-                hasUserId: !!userId,
-                userRole: req.user?.role,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             // Only allow admins
-            if (req.user?.role !== 'admin') {
-                loggingService.warn('Monthly usage reset failed - admin access required', {
-                    userId,
-                    userRole: req.user?.role,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(403).json({
-                    success: false,
-                    message: 'Admin access required'
-                });
+            if (!ControllerHelper.requirePermission(req, res, (user) => user?.role === 'admin')) {
                 return;
             }
 
-            loggingService.info('Monthly usage reset processing started', {
-                userId,
-                userRole: req.user?.role,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             await GuardrailsService.resetMonthlyUsage();
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Monthly usage reset completed successfully', {
-                userId,
-                userRole: req.user?.role,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.logRequestSuccess('resetMonthlyUsage', req, startTime, {
+                userRole: req.user?.role
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'monthly_usage_reset_completed',
                 category: 'guardrails_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     userRole: req.user?.role
@@ -752,17 +559,7 @@ export class GuardrailsController {
                 message: 'Monthly usage reset successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Monthly usage reset failed', {
-                userId,
-                userRole: req.user?.role,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('resetMonthlyUsage', error, req, res, startTime);
             next(error);
         }
     }
@@ -770,37 +567,17 @@ export class GuardrailsController {
         /**
      * Get usage trend for the authenticated user
      */
-    static async getUsageTrend(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getUsageTrend(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
         const days = parseInt(req.query.days as string) || 7;
+        
+        ControllerHelper.logRequestStart('getUsageTrend', req, { days });
 
         try {
-            loggingService.info('Usage trend retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                days,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Usage trend retrieval failed - authentication required', {
-                    days,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
-            loggingService.info('Usage trend retrieval processing started', {
-                userId,
-                days,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             const Usage = require('../models/Usage').Usage;
             
@@ -864,22 +641,17 @@ export class GuardrailsController {
                 };
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Usage trend retrieved successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getUsageTrend', req, startTime, {
                 days,
-                duration,
                 trendLength: trend.length,
-                hasTrend: !!trend && trend.length > 0,
-                requestId: req.headers['x-request-id'] as string
+                hasTrend: !!trend && trend.length > 0
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'usage_trend_retrieved',
                 category: 'guardrails_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     days,
@@ -893,17 +665,7 @@ export class GuardrailsController {
                 data: trend
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Usage trend retrieval failed', {
-                userId,
-                days,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('getUsageTrend', error, req, res, startTime, { days });
             next(error);
         }
     }
@@ -911,35 +673,17 @@ export class GuardrailsController {
     /**
      * Get usage trend by date range for the authenticated user
      */
-    static async getUsageTrendByDateRange(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getUsageTrendByDateRange(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
         const { startDate, endDate } = req.query;
+        
+        ControllerHelper.logRequestStart('getUsageTrendByDateRange', req, { startDate, endDate });
 
         try {
-            loggingService.info('Usage trend by date range retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                startDate,
-                endDate,
-                hasStartDate: !!startDate,
-                hasEndDate: !!endDate,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Usage trend by date range retrieval failed - authentication required', {
-                    startDate,
-                    endDate,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
 
             if (!startDate || !endDate) {
                 loggingService.warn('Usage trend by date range retrieval failed - missing dates', {

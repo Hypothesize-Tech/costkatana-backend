@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { ExperimentationService } from '../services/experimentation.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class ExperimentationController {
 
@@ -8,31 +10,27 @@ export class ExperimentationController {
      * Get available models for experimentation
      * GET /api/experimentation/available-models
      */
-    static async getAvailableModels(_req: any, res: Response): Promise<void> {
+    static async getAvailableModels(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
 
         try {
-            loggingService.info('Available models retrieval initiated', {
-                requestId: _req.headers['x-request-id'] as string
-            });
+            // Log request start (no auth required for this public endpoint)
+            ControllerHelper.logRequestStart('Available models', req);
 
             // Get actually available models from AWS Bedrock
             const availableModels = await ExperimentationService.getAccessibleBedrockModels();
-            
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Available models retrieved successfully from AWS Bedrock', {
-                duration,
+            // Log success
+            ControllerHelper.logRequestSuccess('Available models', req, startTime, {
                 totalModels: availableModels.length,
-                providers: [...new Set(availableModels.map(m => m.provider))],
-                requestId: _req.headers['x-request-id'] as string
+                providers: [...new Set(availableModels.map(m => m.provider))]
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'experimentation_available_models_retrieved',
                 category: 'experimentation_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     totalModels: availableModels.length,
                     providers: [...new Set(availableModels.map(m => m.provider))],
@@ -52,14 +50,7 @@ export class ExperimentationController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Available models retrieval failed - falling back to curated models', {
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: _req.headers['x-request-id'] as string
-            });
+            // Fallback to curated models if AWS call fails
             
             // Fallback to curated safe models if AWS call fails
             const fallbackModels = [
@@ -100,7 +91,7 @@ export class ExperimentationController {
 
             loggingService.info('Fallback models provided due to AWS Bedrock API unavailability', {
                 fallbackModelsCount: fallbackModels.length,
-                requestId: _req.headers['x-request-id'] as string
+                requestId: req.headers['x-request-id'] as string
             });
 
             res.json({
@@ -120,25 +111,15 @@ export class ExperimentationController {
      * Get experiment history
      * GET /api/experimentation/history
      */
-    static async getExperimentHistory(req: any, res: Response): Promise<void> {
+    static async getExperimentHistory(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
 
         try {
-            loggingService.info('Experiment history retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Experiment history retrieval failed - user not authenticated', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
+            // Auth check using helper
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
 
             const {
                 type,
@@ -156,35 +137,28 @@ export class ExperimentationController {
                 limit: parseInt(limit as string, 10)
             };
 
-            loggingService.info('Experiment history retrieval processing started', {
-                userId,
-                filters,
-                requestId: req.headers['x-request-id'] as string
-            });
+            // Log request start
+            ControllerHelper.logRequestStart('Experiment history', req, { filters });
 
             const history = await ExperimentationService.getExperimentHistory(userId, filters);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Experiment history retrieved successfully', {
-                userId,
-                duration,
+            // Log success
+            ControllerHelper.logRequestSuccess('Experiment history', req, startTime, {
                 totalExperiments: history.length,
-                hasFilters: !!type || !!status || !!startDate || !!endDate,
-                requestId: req.headers['x-request-id'] as string
+                hasFilters: !!type || !!status || !!startDate || !!endDate
             });
 
             // Log business event
-            loggingService.logBusiness({
-                event: 'experimentation_history_retrieved',
-                category: 'experimentation_operations',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'experimentation_history_retrieved',
+                'experimentation_operations',
+                userId,
+                Date.now() - startTime,
+                {
                     totalExperiments: history.length,
                     hasFilters: !!type || !!status || !!startDate || !!endDate
                 }
-            });
+            );
 
             res.json({
                 success: true,
@@ -195,20 +169,8 @@ export class ExperimentationController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Experiment history retrieval failed', {
-                userId,
-                filters: req.query,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(400).json({
-                success: false,
-                message: 'Invalid user ID or failed to get experiment history'
+            ControllerHelper.handleError('Experiment history retrieval', error, req, res, startTime, {
+                filters: req.query
             });
         }
     }
@@ -217,55 +179,28 @@ export class ExperimentationController {
      * Run model comparison experiment
      * POST /api/experimentation/model-comparison
      */
-    static async runModelComparison(req: any, res: Response): Promise<void> {
+    static async runModelComparison(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const { prompt, models, evaluationCriteria, iterations = 1 } = req.body;
 
         try {
-            loggingService.info('Model comparison experiment initiated', {
-                userId,
-                hasUserId: !!userId,
-                hasPrompt: !!prompt,
-                modelsCount: models?.length || 0,
-                evaluationCriteria,
-                iterations,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Model comparison experiment failed - user not authenticated', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
+            // Auth check using helper
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
 
             if (!prompt || !models || !Array.isArray(models) || models.length === 0) {
-                loggingService.warn('Model comparison experiment failed - missing required fields', {
-                    userId,
-                    hasPrompt: !!prompt,
-                    hasModels: !!models,
-                    isModelsArray: Array.isArray(models),
-                    modelsLength: models?.length || 0,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(400).json({
-                    success: false,
-                    message: 'Prompt and models array are required'
-                });
+                ControllerHelper.sendError(res, 400, 'Prompt and models array are required');
                 return;
             }
 
-            loggingService.info('Model comparison experiment processing started', {
-                userId,
+            // Log request start
+            ControllerHelper.logRequestStart('Model comparison experiment', req, {
                 promptLength: prompt.length,
-                models,
+                modelsCount: models.length,
                 evaluationCriteria,
-                iterations,
-                requestId: req.headers['x-request-id'] as string
+                iterations
             });
 
             const experiment = await ExperimentationService.runModelComparison(userId, {
@@ -275,32 +210,28 @@ export class ExperimentationController {
                 iterations
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Model comparison experiment completed successfully', {
-                userId,
+            // Log success
+            ControllerHelper.logRequestSuccess('Model comparison experiment', req, startTime, {
                 experimentId: experiment.id,
-                duration,
                 promptLength: prompt.length,
                 modelsCount: models.length,
-                iterations,
-                requestId: req.headers['x-request-id'] as string
+                iterations
             });
 
             // Log business event
-            loggingService.logBusiness({
-                event: 'experimentation_model_comparison_completed',
-                category: 'experimentation_operations',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'experimentation_model_comparison_completed',
+                'experimentation_operations',
+                userId,
+                Date.now() - startTime,
+                {
                     experimentId: experiment.id,
                     promptLength: prompt.length,
                     modelsCount: models.length,
                     evaluationCriteria,
                     iterations
                 }
-            });
+            );
 
             res.json({
                 success: true,
@@ -311,23 +242,11 @@ export class ExperimentationController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Model comparison experiment failed', {
-                userId,
+            ControllerHelper.handleError('Model comparison experiment', error, req, res, startTime, {
                 hasPrompt: !!prompt,
                 modelsCount: models?.length || 0,
                 evaluationCriteria,
-                iterations,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to run model comparison'
+                iterations
             });
         }
     }
@@ -336,93 +255,48 @@ export class ExperimentationController {
      * Get experiment by ID
      * GET /api/experimentation/:experimentId
      */
-    static async getExperimentById(req: any, res: Response): Promise<void> {
+    static async getExperimentById(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const { experimentId } = req.params;
 
         try {
-            loggingService.info('Specific experiment retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                experimentId,
-                hasExperimentId: !!experimentId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Specific experiment retrieval failed - user not authenticated', {
-                    experimentId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
+            // Auth check using helper
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
 
-            loggingService.info('Specific experiment retrieval processing started', {
-                userId,
-                experimentId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            // Validate ObjectId
+            ServiceHelper.validateObjectId(experimentId, 'experimentId');
+
+            // Log request start
+            ControllerHelper.logRequestStart('Get experiment by ID', req, { experimentId });
 
             const experiment = await ExperimentationService.getExperimentById(experimentId, userId);
 
             if (!experiment) {
-                loggingService.warn('Specific experiment not found', {
-                    userId,
-                    experimentId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(404).json({
-                    success: false,
-                    message: 'Experiment not found'
-                });
+                ControllerHelper.sendError(res, 404, 'Experiment not found');
                 return;
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Specific experiment retrieved successfully', {
-                userId,
-                experimentId,
-                duration,
-                hasExperiment: !!experiment,
-                requestId: req.headers['x-request-id'] as string
+            // Log success
+            ControllerHelper.logRequestSuccess('Get experiment by ID', req, startTime, {
+                experimentId
             });
 
             // Log business event
-            loggingService.logBusiness({
-                event: 'experimentation_specific_experiment_retrieved',
-                category: 'experimentation_operations',
-                value: duration,
-                metadata: {
-                    userId,
-                    experimentId,
-                    hasExperiment: !!experiment
-                }
-            });
-
-            res.json({
-                success: true,
-                data: experiment
-            });
-        } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Specific experiment retrieval failed', {
+            ControllerHelper.logBusinessEvent(
+                'experimentation_specific_experiment_retrieved',
+                'experimentation_operations',
                 userId,
-                experimentId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
+                Date.now() - startTime,
+                { experimentId }
+            );
 
-            res.status(400).json({
-                success: false,
-                message: 'Invalid experiment ID or failed to get experiment'
+            ControllerHelper.sendSuccess(res, experiment);
+        } catch (error: any) {
+            ControllerHelper.handleError('Get experiment by ID', error, req, res, startTime, {
+                experimentId
             });
         }
     }
@@ -431,77 +305,43 @@ export class ExperimentationController {
      * Delete experiment
      * DELETE /api/experimentation/:experimentId
      */
-    static async deleteExperiment(req: any, res: Response): Promise<void> {
+    static async deleteExperiment(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const { experimentId } = req.params;
 
         try {
-            loggingService.info('Experiment deletion initiated', {
-                userId,
-                hasUserId: !!userId,
-                experimentId,
-                hasExperimentId: !!experimentId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Experiment deletion failed - user not authenticated', {
-                    experimentId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
+            // Auth check using helper
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
 
-            loggingService.info('Experiment deletion processing started', {
-                userId,
-                experimentId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            // Validate ObjectId
+            ServiceHelper.validateObjectId(experimentId, 'experimentId');
+
+            // Log request start
+            ControllerHelper.logRequestStart('Experiment deletion', req, { experimentId });
 
             await ExperimentationService.deleteExperiment(experimentId, userId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Experiment deleted successfully', {
-                userId,
-                experimentId,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+            // Log success
+            ControllerHelper.logRequestSuccess('Experiment deletion', req, startTime, {
+                experimentId
             });
 
             // Log business event
-            loggingService.logBusiness({
-                event: 'experimentation_experiment_deleted',
-                category: 'experimentation_operations',
-                value: duration,
-                metadata: {
-                    userId,
-                    experimentId
-                }
-            });
-
-            res.json({
-                success: true,
-                message: 'Experiment deleted successfully'
-            });
-        } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Experiment deletion failed', {
+            ControllerHelper.logBusinessEvent(
+                'experimentation_experiment_deleted',
+                'experimentation_operations',
                 userId,
-                experimentId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
+                Date.now() - startTime,
+                { experimentId }
+            );
 
-            res.status(400).json({
-                success: false,
-                message: 'Invalid experiment ID or failed to delete experiment'
+            ControllerHelper.sendSuccess(res, null, 'Experiment deleted successfully');
+        } catch (error: any) {
+            ControllerHelper.handleError('Experiment deletion', error, req, res, startTime, {
+                experimentId
             });
         }
     }
@@ -510,54 +350,35 @@ export class ExperimentationController {
      * Estimate experiment cost
      * POST /api/experimentation/estimate-cost
      */
-    static async estimateExperimentCost(req: any, res: Response): Promise<void> {
+    static async estimateExperimentCost(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
         const { type, parameters } = req.body;
 
         try {
-            loggingService.info('Experiment cost estimation initiated', {
+            // Log request start (no auth required for this endpoint)
+            ControllerHelper.logRequestStart('Experiment cost estimation', req, {
                 type,
-                hasParameters: !!parameters,
-                parametersKeys: parameters ? Object.keys(parameters) : [],
-                requestId: req.headers['x-request-id'] as string
+                parametersKeys: parameters ? Object.keys(parameters) : []
             });
 
             if (!type || !parameters) {
-                loggingService.warn('Experiment cost estimation failed - missing required fields', {
-                    hasType: !!type,
-                    hasParameters: !!parameters,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(400).json({
-                    success: false,
-                    message: 'Type and parameters are required'
-                });
+                ControllerHelper.sendError(res, 400, 'Type and parameters are required');
                 return;
             }
 
-            loggingService.info('Experiment cost estimation processing started', {
-                type,
-                parametersKeys: Object.keys(parameters),
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const costEstimate = await ExperimentationService.estimateExperimentCost(type, parameters);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Experiment cost estimation completed successfully', {
+            // Log success
+            ControllerHelper.logRequestSuccess('Experiment cost estimation', req, startTime, {
                 type,
-                duration,
-                hasCostEstimate: !!costEstimate,
-                requestId: req.headers['x-request-id'] as string
+                hasCostEstimate: !!costEstimate
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'experimentation_cost_estimated',
                 category: 'experimentation_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     type,
                     parametersKeys: Object.keys(parameters),
@@ -565,25 +386,11 @@ export class ExperimentationController {
                 }
             });
 
-            res.json({
-                success: true,
-                data: costEstimate
-            });
+            ControllerHelper.sendSuccess(res, costEstimate);
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Experiment cost estimation failed', {
+            ControllerHelper.handleError('Experiment cost estimation', error, req, res, startTime, {
                 type,
-                hasParameters: !!parameters,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to estimate experiment cost'
+                hasParameters: !!parameters
             });
         }
     }
@@ -592,54 +399,36 @@ export class ExperimentationController {
      * Get experiment recommendations
      * GET /api/experimentation/recommendations/:userId
      */
-    static async getExperimentRecommendations(req: any, res: Response): Promise<void> {
+    static async getExperimentRecommendations(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
 
         try {
-            loggingService.info('Experiment recommendations retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Experiment recommendations retrieval failed - user not authenticated', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
+            // Auth check using helper
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
 
-            loggingService.info('Experiment recommendations retrieval processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            // Log request start
+            ControllerHelper.logRequestStart('Experiment recommendations', req);
 
             const recommendations = await ExperimentationService.getExperimentRecommendations(userId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Experiment recommendations retrieved successfully', {
-                userId,
-                duration,
-                totalRecommendations: recommendations.length,
-                hasRecommendations: !!recommendations && recommendations.length > 0,
-                requestId: req.headers['x-request-id'] as string
+            // Log success
+            ControllerHelper.logRequestSuccess('Experiment recommendations', req, startTime, {
+                totalRecommendations: recommendations.length
             });
 
             // Log business event
-            loggingService.logBusiness({
-                event: 'experimentation_recommendations_retrieved',
-                category: 'experimentation_operations',
-                value: duration,
-                metadata: {
-                    userId,
-                    totalRecommendations: recommendations.length,
-                    hasRecommendations: !!recommendations && recommendations.length > 0
+            ControllerHelper.logBusinessEvent(
+                'experimentation_recommendations_retrieved',
+                'experimentation_operations',
+                userId,
+                Date.now() - startTime,
+                {
+                    totalRecommendations: recommendations.length
                 }
-            });
+            );
 
             res.json({
                 success: true,
@@ -650,20 +439,7 @@ export class ExperimentationController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Experiment recommendations retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get experiment recommendations'
-            });
+            ControllerHelper.handleError('Experiment recommendations retrieval', error, req, res, startTime);
         }
     }
 
@@ -675,40 +451,36 @@ export class ExperimentationController {
      * Get all what-if scenarios for user
      * GET /api/experimentation/what-if-scenarios
      */
-    static async getWhatIfScenarios(req: any, res: Response): Promise<void> {
+    static async getWhatIfScenarios(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
 
         try {
-            loggingService.info('What-if scenarios retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            // Auth check using helper
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+            const userId = req.userId!;
+
+            // Log request start
+            ControllerHelper.logRequestStart('What-if scenarios', req);
 
             const scenarios = await ExperimentationService.getWhatIfScenarios(userId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('What-if scenarios retrieved successfully', {
-                userId,
-                duration,
-                totalScenarios: scenarios.length,
-                hasScenarios: !!scenarios && scenarios.length > 0,
-                requestId: req.headers['x-request-id'] as string
+            // Log success
+            ControllerHelper.logRequestSuccess('What-if scenarios', req, startTime, {
+                totalScenarios: scenarios.length
             });
 
             // Log business event
-            loggingService.logBusiness({
-                event: 'experimentation_what_if_scenarios_retrieved',
-                category: 'experimentation_operations',
-                value: duration,
-                metadata: {
-                    userId,
-                    totalScenarios: scenarios.length,
-                    hasScenarios: !!scenarios && scenarios.length > 0
+            ControllerHelper.logBusinessEvent(
+                'experimentation_what_if_scenarios_retrieved',
+                'experimentation_operations',
+                userId,
+                Date.now() - startTime,
+                {
+                    totalScenarios: scenarios.length
                 }
-            });
+            );
 
             res.json({
                 success: true,
@@ -719,20 +491,7 @@ export class ExperimentationController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('What-if scenarios retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get what-if scenarios'
-            });
+            ControllerHelper.handleError('What-if scenarios retrieval', error, req, res, startTime);
         }
     }
 
@@ -740,55 +499,44 @@ export class ExperimentationController {
      * Create new what-if scenario
      * POST /api/experimentation/what-if-scenarios
      */
-    static async createWhatIfScenario(req: any, res: Response): Promise<void> {
+    static async createWhatIfScenario(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const scenarioData = req.body;
 
         try {
-            loggingService.info('What-if scenario creation initiated', {
-                userId,
-                hasUserId: !!userId,
-                hasScenarioData: !!scenarioData,
-                scenarioDataType: scenarioData?.type,
-                scenarioDataName: scenarioData?.name,
-                requestId: req.headers['x-request-id'] as string
-            });
+            // Auth check using helper
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+            const userId = req.userId!;
 
-            loggingService.info('What-if scenario creation processing started', {
-                userId,
+            // Log request start
+            ControllerHelper.logRequestStart('What-if scenario creation', req, {
                 scenarioDataType: scenarioData?.type,
-                scenarioDataName: scenarioData?.name,
-                scenarioDataKeys: scenarioData ? Object.keys(scenarioData) : [],
-                requestId: req.headers['x-request-id'] as string
+                scenarioDataName: scenarioData?.name
             });
             
             const scenario = await ExperimentationService.createWhatIfScenario(userId, scenarioData);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('What-if scenario created successfully', {
-                userId,
+            // Log success
+            ControllerHelper.logRequestSuccess('What-if scenario creation', req, startTime, {
                 scenarioId: scenario.id || scenario._id,
                 scenarioName: scenario.name,
-                duration,
-                hasScenario: !!scenario,
-                requestId: req.headers['x-request-id'] as string
+                scenarioType: scenario.type
             });
 
             // Log business event
-            loggingService.logBusiness({
-                event: 'experimentation_what_if_scenario_created',
-                category: 'experimentation_operations',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'experimentation_what_if_scenario_created',
+                'experimentation_operations',
+                userId,
+                Date.now() - startTime,
+                {
                     scenarioId: scenario.id || scenario._id,
                     scenarioName: scenario.name,
-                    scenarioType: scenario.type,
-                    hasScenario: !!scenario
+                    scenarioType: scenario.type
                 }
-            });
+            );
 
             res.status(201).json({
                 success: true,
@@ -796,22 +544,9 @@ export class ExperimentationController {
                 message: 'What-if scenario created successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('What-if scenario creation failed', {
-                userId,
-                hasScenarioData: !!scenarioData,
+            ControllerHelper.handleError('What-if scenario creation', error, req, res, startTime, {
                 scenarioDataType: scenarioData?.type,
-                scenarioDataName: scenarioData?.name,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to create what-if scenario'
+                scenarioDataName: scenarioData?.name
             });
         }
     }
@@ -820,49 +555,39 @@ export class ExperimentationController {
      * Run what-if analysis
      * POST /api/experimentation/what-if-scenarios/:scenarioName/analyze
      */
-    static async runWhatIfAnalysis(req: any, res: Response): Promise<void> {
+    static async runWhatIfAnalysis(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const { scenarioName } = req.params;
 
         try {
-            loggingService.info('What-if analysis initiated', {
-                userId,
-                hasUserId: !!userId,
-                scenarioName,
-                hasScenarioName: !!scenarioName,
-                requestId: req.headers['x-request-id'] as string
-            });
+            // Auth check using helper
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+            const userId = req.userId!;
 
-            loggingService.info('What-if analysis processing started', {
-                userId,
-                scenarioName,
-                requestId: req.headers['x-request-id'] as string
-            });
+            // Log request start
+            ControllerHelper.logRequestStart('What-if analysis', req, { scenarioName });
             
             const analysis = await ExperimentationService.runWhatIfAnalysis(userId, scenarioName);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('What-if analysis completed successfully', {
-                userId,
+            // Log success
+            ControllerHelper.logRequestSuccess('What-if analysis', req, startTime, {
                 scenarioName,
-                duration,
-                hasAnalysis: !!analysis,
-                requestId: req.headers['x-request-id'] as string
+                hasAnalysis: !!analysis
             });
 
             // Log business event
-            loggingService.logBusiness({
-                event: 'experimentation_what_if_analysis_completed',
-                category: 'experimentation_operations',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'experimentation_what_if_analysis_completed',
+                'experimentation_operations',
+                userId,
+                Date.now() - startTime,
+                {
                     scenarioName,
                     hasAnalysis: !!analysis
                 }
-            });
+            );
 
             res.json({
                 success: true,
@@ -870,20 +595,8 @@ export class ExperimentationController {
                 message: 'What-if analysis completed successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('What-if analysis failed', {
-                userId,
-                scenarioName,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to run what-if analysis'
+            ControllerHelper.handleError('What-if analysis', error, req, res, startTime, {
+                scenarioName
             });
         }
     }
@@ -892,73 +605,43 @@ export class ExperimentationController {
      * Real-time What-If Cost Simulator
      * POST /api/experimentation/real-time-simulation
      */
-    static async runRealTimeSimulation(req: any, res: Response): Promise<void> {
+    static async runRealTimeSimulation(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
         const simulationRequest = req.body;
 
         try {
-            loggingService.info('Real-time simulation initiated', {
-                simulationType: simulationRequest.simulationType,
-                hasSimulationType: !!simulationRequest.simulationType,
-                hasPrompt: !!simulationRequest.prompt,
-                hasCurrentModel: !!simulationRequest.currentModel,
-                requestId: req.headers['x-request-id'] as string
+            // Log request start (no auth required for this endpoint)
+            ControllerHelper.logRequestStart('Real-time simulation', req, {
+                simulationType: simulationRequest.simulationType
             });
 
             // Validate request
             if (!simulationRequest.simulationType) {
-                loggingService.warn('Real-time simulation failed - missing simulation type', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(400).json({
-                    success: false,
-                    message: 'Simulation type is required'
-                });
+                ControllerHelper.sendError(res, 400, 'Simulation type is required');
                 return;
             }
 
             // For prompt-level simulations, ensure prompt and model are provided
             if (['prompt_optimization', 'context_trimming', 'real_time_analysis'].includes(simulationRequest.simulationType)) {
                 if (!simulationRequest.prompt || !simulationRequest.currentModel) {
-                    loggingService.warn('Real-time simulation failed - missing prompt or model for prompt-level simulation', {
-                        simulationType: simulationRequest.simulationType,
-                        hasPrompt: !!simulationRequest.prompt,
-                        hasCurrentModel: !!simulationRequest.currentModel,
-                        requestId: req.headers['x-request-id'] as string
-                    });
-
-                    res.status(400).json({
-                        success: false,
-                        message: 'Prompt and current model are required for prompt-level simulations'
-                    });
+                    ControllerHelper.sendError(res, 400, 'Prompt and current model are required for prompt-level simulations');
                     return;
                 }
             }
 
-            loggingService.info('Real-time simulation processing started', {
-                simulationType: simulationRequest.simulationType,
-                hasPrompt: !!simulationRequest.prompt,
-                hasCurrentModel: !!simulationRequest.currentModel,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const simulation = await ExperimentationService.runRealTimeWhatIfSimulation(simulationRequest);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Real-time simulation completed successfully', {
+            // Log success
+            ControllerHelper.logRequestSuccess('Real-time simulation', req, startTime, {
                 simulationType: simulationRequest.simulationType,
-                duration,
-                hasSimulation: !!simulation,
-                requestId: req.headers['x-request-id'] as string
+                hasSimulation: !!simulation
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'experimentation_real_time_simulation_completed',
                 category: 'experimentation_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     simulationType: simulationRequest.simulationType,
                     hasPrompt: !!simulationRequest.prompt,
@@ -974,21 +657,8 @@ export class ExperimentationController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Real-time simulation failed', {
-                simulationType: simulationRequest.simulationType,
-                hasPrompt: !!simulationRequest.prompt,
-                hasCurrentModel: !!simulationRequest.currentModel,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to run real-time simulation'
+            ControllerHelper.handleError('Real-time simulation', error, req, res, startTime, {
+                simulationType: simulationRequest.simulationType
             });
         }
     }
@@ -997,67 +667,40 @@ export class ExperimentationController {
      * Delete what-if scenario
      * DELETE /api/experimentation/what-if-scenarios/:scenarioName
      */
-    static async deleteWhatIfScenario(req: any, res: Response): Promise<void> {
+    static async deleteWhatIfScenario(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const { scenarioName } = req.params;
 
         try {
-            loggingService.info('What-if scenario deletion initiated', {
-                userId,
-                hasUserId: !!userId,
-                scenarioName,
-                hasScenarioName: !!scenarioName,
-                requestId: req.headers['x-request-id'] as string
-            });
+            // Auth check using helper
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+            const userId = req.userId!;
 
-            loggingService.info('What-if scenario deletion processing started', {
-                userId,
-                scenarioName,
-                requestId: req.headers['x-request-id'] as string
-            });
+            // Log request start
+            ControllerHelper.logRequestStart('What-if scenario deletion', req, { scenarioName });
             
             await ExperimentationService.deleteWhatIfScenario(userId, scenarioName);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('What-if scenario deleted successfully', {
-                userId,
-                scenarioName,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+            // Log success
+            ControllerHelper.logRequestSuccess('What-if scenario deletion', req, startTime, {
+                scenarioName
             });
 
             // Log business event
-            loggingService.logBusiness({
-                event: 'experimentation_what_if_scenario_deleted',
-                category: 'experimentation_operations',
-                value: duration,
-                metadata: {
-                    userId,
-                    scenarioName
-                }
-            });
-
-            res.json({
-                success: true,
-                message: 'What-if scenario deleted successfully'
-            });
-        } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('What-if scenario deletion failed', {
+            ControllerHelper.logBusinessEvent(
+                'experimentation_what_if_scenario_deleted',
+                'experimentation_operations',
                 userId,
-                scenarioName,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
+                Date.now() - startTime,
+                { scenarioName }
+            );
 
-            res.status(500).json({
-                success: false,
-                message: 'Failed to delete what-if scenario'
+            ControllerHelper.sendSuccess(res, null, 'What-if scenario deleted successfully');
+        } catch (error: any) {
+            ControllerHelper.handleError('What-if scenario deletion', error, req, res, startTime, {
+                scenarioName
             });
         }
     }
@@ -1066,9 +709,8 @@ export class ExperimentationController {
      * Start real-time model comparison with Bedrock execution
      * POST /api/experimentation/real-time-comparison
      */
-    static async startRealTimeComparison(req: any, res: Response): Promise<void> {
+    static async startRealTimeComparison(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const { 
             prompt, 
             models, 
@@ -1080,41 +722,14 @@ export class ExperimentationController {
         } = req.body;
 
         try {
-            loggingService.info('Real-time model comparison initiated', {
-                userId,
-                hasUserId: !!userId,
-                hasPrompt: !!prompt,
-                modelsCount: models?.length || 0,
-                evaluationCriteria,
-                iterations,
-                executeOnBedrock,
-                comparisonMode,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Real-time model comparison failed - user not authenticated', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({ message: 'Unauthorized' });
+            // Auth check using helper
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
 
             if (!prompt || !models || !Array.isArray(models) || models.length === 0) {
-                loggingService.warn('Real-time model comparison failed - missing required fields', {
-                    userId,
-                    hasPrompt: !!prompt,
-                    hasModels: !!models,
-                    isModelsArray: Array.isArray(models),
-                    modelsLength: models?.length || 0,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(400).json({
-                    success: false,
-                    message: 'Prompt and models array are required'
-                });
+                ControllerHelper.sendError(res, 400, 'Prompt and models array are required');
                 return;
             }
 
@@ -1132,16 +747,14 @@ export class ExperimentationController {
                 comparisonMode
             };
 
-            loggingService.info('Real-time model comparison processing started', {
-                userId,
+            // Log request start
+            ControllerHelper.logRequestStart('Real-time model comparison', req, {
                 sessionId,
                 promptLength: prompt.length,
-                models,
-                evaluationCriteria: request.evaluationCriteria,
+                modelsCount: models.length,
                 iterations,
                 executeOnBedrock,
-                comparisonMode,
-                requestId: req.headers['x-request-id'] as string
+                comparisonMode
             });
 
             // Start the comparison asynchronously
@@ -1156,27 +769,21 @@ export class ExperimentationController {
                     });
                 });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Real-time model comparison started successfully', {
-                userId,
+            // Log success
+            ControllerHelper.logRequestSuccess('Real-time model comparison', req, startTime, {
                 sessionId,
-                duration,
                 promptLength: prompt.length,
                 modelsCount: models.length,
-                iterations,
-                executeOnBedrock,
-                comparisonMode,
-                requestId: req.headers['x-request-id'] as string
+                iterations
             });
 
             // Log business event
-            loggingService.logBusiness({
-                event: 'experimentation_real_time_comparison_started',
-                category: 'experimentation_operations',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'experimentation_real_time_comparison_started',
+                'experimentation_operations',
+                userId,
+                Date.now() - startTime,
+                {
                     sessionId,
                     promptLength: prompt.length,
                     modelsCount: models.length,
@@ -1185,7 +792,7 @@ export class ExperimentationController {
                     executeOnBedrock,
                     comparisonMode
                 }
-            });
+            );
 
             res.json({
                 success: true,
@@ -1197,25 +804,13 @@ export class ExperimentationController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Real-time model comparison failed', {
-                userId,
+            ControllerHelper.handleError('Real-time model comparison', error, req, res, startTime, {
                 hasPrompt: !!prompt,
                 modelsCount: models?.length || 0,
                 evaluationCriteria,
                 iterations,
                 executeOnBedrock,
-                comparisonMode,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to start real-time comparison'
+                comparisonMode
             });
         }
     }
@@ -1224,34 +819,22 @@ export class ExperimentationController {
      * SSE endpoint for real-time model comparison progress
      * GET /api/experimentation/comparison-progress/:sessionId
      */
-    static async streamComparisonProgress(req: any, res: Response): Promise<void> {
+    static async streamComparisonProgress(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
         const { sessionId } = req.params;
 
         try {
-            loggingService.info('SSE connection initiated for comparison progress', {
-                sessionId,
-                hasSessionId: !!sessionId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            // Log request start (no auth required - uses session validation)
+            ControllerHelper.logRequestStart('SSE comparison progress', req, { sessionId });
             
             if (!sessionId) {
-                loggingService.warn('SSE connection failed - missing session ID', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(400).json({ message: 'Session ID is required' });
+                ControllerHelper.sendError(res, 400, 'Session ID is required');
                 return;
             }
 
             // Validate session instead of requiring auth token
             const sessionValidation = ExperimentationService.validateSession(sessionId);
             if (!sessionValidation.isValid) {
-                loggingService.warn('SSE connection failed - invalid session', {
-                    sessionId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.writeHead(401, {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': '*',
@@ -1259,12 +842,6 @@ export class ExperimentationController {
                 res.end(JSON.stringify({ message: 'Invalid or expired session' }));
                 return;
             }
-
-            loggingService.info('SSE connection established for comparison progress', {
-                sessionId,
-                duration: Date.now() - startTime,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Set SSE headers
             res.writeHead(200, {
@@ -1328,17 +905,21 @@ export class ExperimentationController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('SSE stream error for comparison progress', {
-                sessionId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({ message: 'SSE stream error' });
+            // Only send JSON error if headers haven't been sent yet
+            if (!res.headersSent) {
+                ControllerHelper.handleError('SSE comparison progress', error, req, res, startTime, {
+                    sessionId
+                });
+            } else {
+                // Headers already sent, just log the error
+                loggingService.error('SSE stream error for comparison progress', {
+                    sessionId,
+                    error: error.message || 'Unknown error',
+                    stack: error.stack,
+                    duration: Date.now() - startTime,
+                    requestId: req.headers['x-request-id'] as string
+                });
+            }
         }
     }
 } 

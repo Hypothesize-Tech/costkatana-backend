@@ -3,8 +3,10 @@ import { loggingService } from '../services/logging.service';
 import { AICostTrackerService } from '../services/aiCostTracker.service';
 import { UsageService } from '../services/usage.service';
 import { RealtimeUpdateService } from '../services/realtime-update.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
-interface CursorRequest extends Request {
+interface CursorRequest extends AuthenticatedRequest {
     body: {
         user_id?: string;
         api_key?: string;
@@ -57,18 +59,10 @@ interface CursorRequest extends Request {
 export class CursorController {
     static async handleAction(req: CursorRequest, res: Response): Promise<void> {
         const startTime = Date.now();
+        ControllerHelper.logRequestStart('handleAction', req);
         const { action, user_id, api_key } = req.body;
 
         try {
-            loggingService.info('Cursor action received', {
-                action,
-                hasUserId: !!user_id,
-                hasApiKey: !!api_key,
-                hasEmail: !!req.body.email,
-                workspace: req.body.workspace?.name,
-                requestType: req.body.ai_request?.request_type,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             if (action === 'generate_magic_link') {
                 await CursorController.generateMagicLink(req, res);
@@ -150,62 +144,28 @@ export class CursorController {
                     });
             }
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Cursor action completed successfully', {
+            ControllerHelper.logRequestSuccess('handleAction', req, startTime, {
                 action,
                 userId,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'cursor_action_completed',
-                category: 'cursor_operations',
-                value: duration,
-                metadata: {
-                    action,
-                    userId,
-                    hasApiKey: !!api_key,
-                    workspace: req.body.workspace?.name
-                }
+                hasApiKey: !!api_key,
+                workspace: req.body.workspace?.name
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Cursor action failed', {
+            ControllerHelper.handleError('handleAction', error, req, res, startTime, {
                 action,
                 userId: user_id,
-                hasApiKey: !!api_key,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Internal server error',
-                message: error.message
+                hasApiKey: !!api_key
             });
         }
     }
 
     private static async generateMagicLink(req: CursorRequest, res: Response): Promise<void> {
         const startTime = Date.now();
+        ControllerHelper.logRequestStart('generateMagicLink', req);
         const { email } = req.body;
 
         try {
-            loggingService.info('Magic link generation initiated', {
-                email,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!email) {
-                loggingService.warn('Magic link generation failed - missing email', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Email is required',
@@ -216,25 +176,7 @@ export class CursorController {
 
             const magicLink = `https://api.costkatana.com/auth/magic-link?token=${Buffer.from(email).toString('base64')}&expires=${Date.now() + 900000}`;
             
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Magic link generated successfully', {
-                email,
-                duration,
-                hasMagicLink: !!magicLink,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'cursor_magic_link_generated',
-                category: 'cursor_operations',
-                value: duration,
-                metadata: {
-                    email,
-                    hasMagicLink: !!magicLink
-                }
-            });
+            ControllerHelper.logRequestSuccess('generateMagicLink', req, startTime, { hasMagicLink: !!magicLink });
 
             res.json({
                 success: true,
@@ -245,46 +187,17 @@ export class CursorController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Magic link generation failed', {
-                email,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to generate magic link',
-                message: error.message
-            });
+            ControllerHelper.handleError('generateMagicLink', error, req, res, startTime, { email });
         }
     }
 
     private static async trackUsage(req: CursorRequest, res: Response): Promise<void> {
         const startTime = Date.now();
+        ControllerHelper.logRequestStart('trackUsage', req);
         const { ai_request, user_id, workspace, code_context } = req.body;
 
         try {
-            loggingService.info('Usage tracking initiated', {
-                userId: user_id,
-                hasAiRequest: !!ai_request,
-                workspace: workspace?.name,
-                projectId: workspace?.projectId,
-                language: code_context?.language,
-                requestType: ai_request?.request_type,
-                model: ai_request?.model,
-                requestId: req.headers['x-request-id'] as string
-            });
-            
             if (!ai_request) {
-                loggingService.warn('Usage tracking failed - missing AI request data', {
-                    userId: user_id,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'AI request data is required',
@@ -295,16 +208,6 @@ export class CursorController {
 
             // Use real user ID or fallback to extension user
             const userId = user_id || 'extension-user-id';
-            
-            loggingService.info('Usage tracking processing started', {
-                userId,
-                model: ai_request.model,
-                requestType: ai_request.request_type,
-                promptLength: ai_request.prompt.length,
-                responseLength: ai_request.response.length,
-                hasTokensUsed: !!ai_request.tokens_used,
-                requestId: req.headers['x-request-id'] as string
-            });
             
             // Track the real usage
             await AICostTrackerService.trackRequest(
@@ -357,34 +260,16 @@ export class CursorController {
             // Generate smart suggestions based on usage patterns
             const suggestions = await CursorController.generateSmartSuggestions(userId, latestUsage);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Usage tracked successfully', {
+            ControllerHelper.logRequestSuccess('trackUsage', req, startTime, {
                 userId,
                 model: ai_request.model,
                 requestType: ai_request.request_type,
-                duration,
                 usageId: latestUsage._id,
                 cost: latestUsage.cost,
                 totalTokens: latestUsage.totalTokens,
                 hasSuggestions: !!suggestions,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'cursor_usage_tracked',
-                category: 'cursor_operations',
-                value: duration,
-                metadata: {
-                    userId,
-                    model: ai_request.model,
-                    requestType: ai_request.request_type,
-                    cost: latestUsage.cost,
-                    totalTokens: latestUsage.totalTokens,
-                    projectId: workspace?.projectId,
-                    language: code_context?.language
-                }
+                projectId: workspace?.projectId,
+                language: code_context?.language
             });
 
             res.json({
@@ -404,45 +289,21 @@ export class CursorController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Usage tracking failed', {
+            ControllerHelper.handleError('trackUsage', error, req, res, startTime, {
                 userId: user_id,
                 hasAiRequest: !!ai_request,
-                workspace: workspace?.name,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to track usage',
-                message: error.message
+                workspace: workspace?.name
             });
         }
     }
 
     private static async optimizePrompt(req: CursorRequest, res: Response): Promise<void> {
         const startTime = Date.now();
+        ControllerHelper.logRequestStart('optimizePrompt', req);
         const { optimization_request } = req.body;
 
         try {
-            loggingService.info('Prompt optimization initiated', {
-                hasOptimizationRequest: !!optimization_request,
-                promptLength: optimization_request?.prompt?.length || 0,
-                currentTokens: optimization_request?.current_tokens,
-                targetReduction: optimization_request?.target_reduction,
-                preserveQuality: optimization_request?.preserve_quality,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!optimization_request) {
-                loggingService.warn('Prompt optimization failed - missing optimization request', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Optimization request is required',
@@ -457,31 +318,13 @@ export class CursorController {
             const tokenReduction = current_tokens ? Math.round(((current_tokens - optimizedTokens) / current_tokens) * 100) : 0;
             const costSavings = 0.0005;
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Prompt optimization completed successfully', {
+            ControllerHelper.logRequestSuccess('optimizePrompt', req, startTime, {
                 originalPromptLength: prompt.length,
                 optimizedPromptLength: optimizedPrompt.length,
                 originalTokens: current_tokens,
                 optimizedTokens,
                 tokenReduction,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'cursor_prompt_optimized',
-                category: 'cursor_operations',
-                value: duration,
-                metadata: {
-                    originalPromptLength: prompt.length,
-                    optimizedPromptLength: optimizedPrompt.length,
-                    originalTokens: current_tokens,
-                    optimizedTokens,
-                    tokenReduction,
-                    costSavings
-                }
+                costSavings
             });
 
             res.json({
@@ -502,43 +345,19 @@ export class CursorController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Prompt optimization failed', {
-                hasOptimizationRequest: !!optimization_request,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to optimize prompt',
-                message: error.message
+            ControllerHelper.handleError('optimizePrompt', error, req, res, startTime, {
+                hasOptimizationRequest: !!optimization_request
             });
         }
     }
 
     private static async getSuggestions(req: CursorRequest, res: Response): Promise<void> {
         const startTime = Date.now();
+        ControllerHelper.logRequestStart('getSuggestions', req);
         const { code_context } = req.body;
 
         try {
-            loggingService.info('Suggestions request initiated', {
-                hasCodeContext: !!code_context,
-                language: code_context?.language,
-                filePath: code_context?.file_path,
-                hasFunctionName: !!code_context?.function_name,
-                hasClassName: !!code_context?.class_name,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!code_context) {
-                loggingService.warn('Suggestions request failed - missing code context', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Code context is required',
@@ -547,26 +366,11 @@ export class CursorController {
                 return;
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Suggestions generated successfully', {
+            ControllerHelper.logRequestSuccess('getSuggestions', req, startTime, {
                 language: code_context.language,
                 filePath: code_context.file_path,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'cursor_suggestions_generated',
-                category: 'cursor_operations',
-                value: duration,
-                metadata: {
-                    language: code_context.language,
-                    filePath: code_context.file_path,
-                    hasFunctionName: !!code_context.function_name,
-                    hasClassName: !!code_context.class_name
-                }
+                hasFunctionName: !!code_context.function_name,
+                hasClassName: !!code_context.class_name
             });
 
             res.json({
@@ -599,46 +403,19 @@ export class CursorController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Suggestions generation failed', {
-                hasCodeContext: !!code_context,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to generate suggestions',
-                message: error.message
+            ControllerHelper.handleError('getSuggestions', error, req, res, startTime, {
+                hasCodeContext: !!code_context
             });
         }
     }
 
     private static async analyzeCode(req: CursorRequest, res: Response): Promise<void> {
         const startTime = Date.now();
+        ControllerHelper.logRequestStart('analyzeCode', req);
         const { code_context } = req.body;
 
         try {
-            loggingService.info('Code analysis initiated', {
-                hasCodeContext: !!code_context,
-                hasCodeSnippet: !!code_context?.code_snippet,
-                language: code_context?.language,
-                filePath: code_context?.file_path,
-                functionName: code_context?.function_name,
-                className: code_context?.class_name,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!code_context || !code_context.code_snippet) {
-                loggingService.warn('Code analysis failed - missing code snippet', {
-                    hasCodeContext: !!code_context,
-                    hasCodeSnippet: !!code_context?.code_snippet,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Code snippet is required',
@@ -647,28 +424,12 @@ export class CursorController {
                 return;
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Code analysis completed successfully', {
+            ControllerHelper.logRequestSuccess('analyzeCode', req, startTime, {
                 language: code_context.language,
                 filePath: code_context.file_path,
                 codeSnippetLength: code_context.code_snippet.length,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'cursor_code_analyzed',
-                category: 'cursor_operations',
-                value: duration,
-                metadata: {
-                    language: code_context.language,
-                    filePath: code_context.file_path,
-                    codeSnippetLength: code_context.code_snippet.length,
-                    functionName: code_context.function_name,
-                    className: code_context.class_name
-                }
+                functionName: code_context.function_name,
+                className: code_context.class_name
             });
 
             res.json({
@@ -696,45 +457,20 @@ export class CursorController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Code analysis failed', {
+            ControllerHelper.handleError('analyzeCode', error, req, res, startTime, {
                 hasCodeContext: !!code_context,
-                hasCodeSnippet: !!code_context?.code_snippet,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to analyze code',
-                message: error.message
+                hasCodeSnippet: !!code_context?.code_snippet
             });
         }
     }
 
     private static async setupWorkspace(req: CursorRequest, res: Response): Promise<void> {
         const startTime = Date.now();
+        ControllerHelper.logRequestStart('setupWorkspace', req);
         const { workspace } = req.body;
 
         try {
-            loggingService.info('Workspace setup initiated', {
-                hasWorkspace: !!workspace,
-                workspaceName: workspace?.name,
-                workspacePath: workspace?.path,
-                projectId: workspace?.projectId,
-                language: workspace?.language,
-                framework: workspace?.framework,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!workspace) {
-                loggingService.warn('Workspace setup failed - missing workspace data', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Workspace data is required',
@@ -743,30 +479,12 @@ export class CursorController {
                 return;
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Workspace setup completed successfully', {
+            ControllerHelper.logRequestSuccess('setupWorkspace', req, startTime, {
                 workspaceName: workspace.name,
                 workspacePath: workspace.path,
                 projectId: workspace.projectId,
                 language: workspace.language,
-                framework: workspace.framework,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'cursor_workspace_setup',
-                category: 'cursor_operations',
-                value: duration,
-                metadata: {
-                    workspaceName: workspace.name,
-                    workspacePath: workspace.path,
-                    projectId: workspace.projectId,
-                    language: workspace.language,
-                    framework: workspace.framework
-                }
+                framework: workspace.framework
             });
 
             res.json({
@@ -778,40 +496,19 @@ export class CursorController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Workspace setup failed', {
-                hasWorkspace: !!workspace,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to setup workspace',
-                message: error.message
+            ControllerHelper.handleError('setupWorkspace', error, req, res, startTime, {
+                hasWorkspace: !!workspace
             });
         }
     }
 
     private static async createProject(req: CursorRequest, res: Response): Promise<void> {
         const startTime = Date.now();
+        ControllerHelper.logRequestStart('createProject', req);
         const { name } = req.body;
 
         try {
-            loggingService.info('Project creation initiated', {
-                projectName: name,
-                hasName: !!name,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!name) {
-                loggingService.warn('Project creation failed - missing project name', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Project name is required',
@@ -820,23 +517,7 @@ export class CursorController {
                 return;
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Project created successfully', {
-                projectName: name,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'cursor_project_created',
-                category: 'cursor_operations',
-                value: duration,
-                metadata: {
-                    projectName: name
-                }
-            });
+            ControllerHelper.logRequestSuccess('createProject', req, startTime, { projectName: name });
 
             res.json({
                 success: true,
@@ -847,49 +528,14 @@ export class CursorController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Project creation failed', {
-                projectName: name,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to create project',
-                message: error.message
-            });
+            ControllerHelper.handleError('createProject', error, req, res, startTime, { projectName: name });
         }
     }
 
     private static async getProjects(res: Response): Promise<void> {
         const startTime = Date.now();
-
+        // Note: No req parameter, so we can't use ControllerHelper.logRequestStart
         try {
-            loggingService.info('Projects retrieval initiated', {
-                requestId: 'background'
-            });
-
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Projects retrieved successfully', {
-                duration,
-                projectsCount: 1,
-                requestId: 'background'
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'cursor_projects_retrieved',
-                category: 'cursor_operations',
-                value: duration,
-                metadata: {
-                    projectsCount: 1
-                }
-            });
 
             res.json({
                 success: true,
@@ -906,13 +552,10 @@ export class CursorController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
             loggingService.error('Projects retrieval failed', {
                 error: error.message || 'Unknown error',
                 stack: error.stack,
-                duration,
-                requestId: 'background'
+                duration: Date.now() - startTime
             });
 
             res.status(500).json({
@@ -925,29 +568,8 @@ export class CursorController {
 
     private static async getAnalytics(res: Response): Promise<void> {
         const startTime = Date.now();
-
+        // Note: No req parameter, so we can't use ControllerHelper.logRequestStart
         try {
-            loggingService.info('Analytics retrieval initiated', {
-                requestId: 'background'
-            });
-
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Analytics retrieved successfully', {
-                duration,
-                requestId: 'background'
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'cursor_analytics_retrieved',
-                category: 'cursor_operations',
-                value: duration,
-                metadata: {
-                    hasSummary: true,
-                    hasCursorSpecific: true
-                }
-            });
 
             res.json({
                 success: true,
@@ -972,13 +594,10 @@ export class CursorController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
             loggingService.error('Analytics retrieval failed', {
                 error: error.message || 'Unknown error',
                 stack: error.stack,
-                duration,
-                requestId: 'background'
+                duration: Date.now() - startTime
             });
 
             res.status(500).json({
@@ -1053,16 +672,11 @@ export class CursorController {
         }
     }
 
-    static async healthCheck(_req: Request, res: Response): Promise<void> {
+    static async healthCheck(_req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-
+        ControllerHelper.logRequestStart('healthCheck', _req);
         try {
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Cursor health check completed successfully', {
-                duration,
-                requestId: _req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('healthCheck', _req, startTime);
 
             res.json({
                 success: true,
@@ -1119,20 +733,7 @@ export class CursorController {
                 timestamp: new Date().toISOString()
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Cursor health check failed', {
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: _req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Health check failed',
-                message: error.message
-            });
+            ControllerHelper.handleError('healthCheck', error, _req, res, startTime);
         }
     }
 } 

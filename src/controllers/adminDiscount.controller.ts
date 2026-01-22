@@ -4,14 +4,19 @@ import { loggingService } from '../services/logging.service';
 import { AppError } from '../middleware/error.middleware';
 import { DiscountUsageService } from '../services/discountUsage.service';
 import mongoose from 'mongoose';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class AdminDiscountController {
     /**
      * Get all discounts with pagination and filtering
      * GET /api/admin/discounts
      */
-    static async getDiscounts(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getDiscounts(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
+        
+        ControllerHelper.logRequestStart('getDiscounts', req, { query: req.query });
+
         try {
             const page = parseInt(req.query.page as string) || 1;
             const limit = parseInt(req.query.limit as string) || 20;
@@ -67,13 +72,9 @@ export class AdminDiscountController {
                 })
             );
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Discounts retrieved', {
-                component: 'AdminDiscountController',
-                operation: 'getDiscounts',
-                adminUserId: req.user?.id,
+            ControllerHelper.logRequestSuccess('getDiscounts', req, startTime, {
                 count: discounts.length,
-                duration,
+                total
             });
 
             res.json({
@@ -90,13 +91,7 @@ export class AdminDiscountController {
                 },
             });
         } catch (error) {
-            loggingService.error('Error getting discounts:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminDiscountController',
-                operation: 'getDiscounts',
-                adminUserId: req.user?.id,
-            });
-            next(error);
+            ControllerHelper.handleError('getDiscounts', error, req, res, startTime);
         }
     }
 
@@ -104,14 +99,14 @@ export class AdminDiscountController {
      * Get single discount by ID
      * GET /api/admin/discounts/:id
      */
-    static async getDiscount(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getDiscount(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        try {
-            const { id } = req.params;
+        const { id } = req.params;
+        
+        ControllerHelper.logRequestStart('getDiscount', req, { discountId: id });
 
-            if (!mongoose.Types.ObjectId.isValid(id)) {
-                throw new AppError('Invalid discount ID', 400);
-            }
+        try {
+            ServiceHelper.validateObjectId(id, 'discountId');
 
             const discount = await Discount.findById(id);
 
@@ -119,27 +114,14 @@ export class AdminDiscountController {
                 throw new AppError('Discount not found', 404);
             }
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Discount retrieved', {
-                component: 'AdminDiscountController',
-                operation: 'getDiscount',
-                adminUserId: req.user?.id,
-                discountId: id,
-                duration,
-            });
+            ControllerHelper.logRequestSuccess('getDiscount', req, startTime, { discountId: id });
 
             res.json({
                 success: true,
                 data: discount,
             });
         } catch (error) {
-            loggingService.error('Error getting discount:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminDiscountController',
-                operation: 'getDiscount',
-                adminUserId: req.user?.id,
-            });
-            next(error);
+            ControllerHelper.handleError('getDiscount', error, req, res, startTime, { discountId: id });
         }
     }
 
@@ -147,8 +129,11 @@ export class AdminDiscountController {
      * Create new discount
      * POST /api/admin/discounts
      */
-    static async createDiscount(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async createDiscount(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
+        
+        ControllerHelper.logRequestStart('createDiscount', req);
+
         try {
             const {
                 code,
@@ -214,14 +199,9 @@ export class AdminDiscountController {
 
             await discount.save();
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Discount created', {
-                component: 'AdminDiscountController',
-                operation: 'createDiscount',
-                adminUserId: req.user?.id,
+            ControllerHelper.logRequestSuccess('createDiscount', req, startTime, {
                 discountId: discount._id,
-                code: discount.code,
-                duration,
+                code: discount.code
             });
 
             res.status(201).json({
@@ -230,13 +210,7 @@ export class AdminDiscountController {
                 data: discount,
             });
         } catch (error) {
-            loggingService.error('Error creating discount:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminDiscountController',
-                operation: 'createDiscount',
-                adminUserId: req.user?.id,
-            });
-            next(error);
+            ControllerHelper.handleError('createDiscount', error, req, res, startTime);
         }
     }
 
@@ -244,14 +218,14 @@ export class AdminDiscountController {
      * Update existing discount
      * PUT /api/admin/discounts/:id
      */
-    static async updateDiscount(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async updateDiscount(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        try {
-            const { id } = req.params;
+        const { id } = req.params;
+        
+        ControllerHelper.logRequestStart('updateDiscount', req, { discountId: id });
 
-            if (!mongoose.Types.ObjectId.isValid(id)) {
-                throw new AppError('Invalid discount ID', 400);
-            }
+        try {
+            ServiceHelper.validateObjectId(id, 'discountId');
 
             const discount = await Discount.findById(id);
 
@@ -321,14 +295,7 @@ export class AdminDiscountController {
 
             await discount.save();
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Discount updated', {
-                component: 'AdminDiscountController',
-                operation: 'updateDiscount',
-                adminUserId: req.user?.id,
-                discountId: id,
-                duration,
-            });
+            ControllerHelper.logRequestSuccess('updateDiscount', req, startTime, { discountId: id });
 
             res.json({
                 success: true,
@@ -336,13 +303,7 @@ export class AdminDiscountController {
                 data: discount,
             });
         } catch (error) {
-            loggingService.error('Error updating discount:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminDiscountController',
-                operation: 'updateDiscount',
-                adminUserId: req.user?.id,
-            });
-            next(error);
+            ControllerHelper.handleError('updateDiscount', error, req, res, startTime, { discountId: id });
         }
     }
 
@@ -350,14 +311,14 @@ export class AdminDiscountController {
      * Delete discount
      * DELETE /api/admin/discounts/:id
      */
-    static async deleteDiscount(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async deleteDiscount(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        try {
-            const { id } = req.params;
+        const { id } = req.params;
+        
+        ControllerHelper.logRequestStart('deleteDiscount', req, { discountId: id });
 
-            if (!mongoose.Types.ObjectId.isValid(id)) {
-                throw new AppError('Invalid discount ID', 400);
-            }
+        try {
+            ServiceHelper.validateObjectId(id, 'discountId');
 
             const discount = await Discount.findById(id);
 
@@ -367,14 +328,9 @@ export class AdminDiscountController {
 
             await Discount.findByIdAndDelete(id);
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Discount deleted', {
-                component: 'AdminDiscountController',
-                operation: 'deleteDiscount',
-                adminUserId: req.user?.id,
+            ControllerHelper.logRequestSuccess('deleteDiscount', req, startTime, {
                 discountId: id,
-                code: discount.code,
-                duration,
+                code: discount.code
             });
 
             res.json({
@@ -382,13 +338,7 @@ export class AdminDiscountController {
                 message: 'Discount deleted successfully',
             });
         } catch (error) {
-            loggingService.error('Error deleting discount:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminDiscountController',
-                operation: 'deleteDiscount',
-                adminUserId: req.user?.id,
-            });
-            next(error);
+            ControllerHelper.handleError('deleteDiscount', error, req, res, startTime, { discountId: id });
         }
     }
 
@@ -396,38 +346,25 @@ export class AdminDiscountController {
      * Get usage statistics for a discount
      * GET /api/admin/discounts/:id/usage
      */
-    static async getDiscountUsage(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getDiscountUsage(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        try {
-            const { id } = req.params;
+        const { id } = req.params;
+        
+        ControllerHelper.logRequestStart('getDiscountUsage', req, { discountId: id });
 
-            if (!mongoose.Types.ObjectId.isValid(id)) {
-                throw new AppError('Invalid discount ID', 400);
-            }
+        try {
+            ServiceHelper.validateObjectId(id, 'discountId');
 
             const stats = await DiscountUsageService.getDiscountUsageStats(id);
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Discount usage stats retrieved', {
-                component: 'AdminDiscountController',
-                operation: 'getDiscountUsage',
-                adminUserId: req.user?.id,
-                discountId: id,
-                duration,
-            });
+            ControllerHelper.logRequestSuccess('getDiscountUsage', req, startTime, { discountId: id });
 
             res.json({
                 success: true,
                 data: stats,
             });
         } catch (error) {
-            loggingService.error('Error getting discount usage:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminDiscountController',
-                operation: 'getDiscountUsage',
-                adminUserId: req.user?.id,
-            });
-            next(error);
+            ControllerHelper.handleError('getDiscountUsage', error, req, res, startTime, { discountId: id });
         }
     }
 
@@ -435,27 +372,26 @@ export class AdminDiscountController {
      * Bulk activate discounts
      * POST /api/admin/discounts/bulk-activate
      */
-    static async bulkActivate(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async bulkActivate(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        try {
-            const { ids } = req.body;
+        const { ids } = req.body;
+        
+        ControllerHelper.logRequestStart('bulkActivate', req, { idsCount: ids?.length });
 
+        try {
             if (!Array.isArray(ids) || ids.length === 0) {
                 throw new AppError('IDs array is required', 400);
             }
+
+            ids.forEach(id => ServiceHelper.validateObjectId(id, 'discountId'));
 
             const result = await Discount.updateMany(
                 { _id: { $in: ids.map((id: string) => new mongoose.Types.ObjectId(id)) } },
                 { $set: { isActive: true } }
             );
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Discounts bulk activated', {
-                component: 'AdminDiscountController',
-                operation: 'bulkActivate',
-                adminUserId: req.user?.id,
-                count: result.modifiedCount,
-                duration,
+            ControllerHelper.logRequestSuccess('bulkActivate', req, startTime, {
+                modifiedCount: result.modifiedCount
             });
 
             res.json({
@@ -464,13 +400,7 @@ export class AdminDiscountController {
                 data: { modifiedCount: result.modifiedCount },
             });
         } catch (error) {
-            loggingService.error('Error bulk activating discounts:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminDiscountController',
-                operation: 'bulkActivate',
-                adminUserId: req.user?.id,
-            });
-            next(error);
+            ControllerHelper.handleError('bulkActivate', error, req, res, startTime);
         }
     }
 
@@ -478,27 +408,26 @@ export class AdminDiscountController {
      * Bulk deactivate discounts
      * POST /api/admin/discounts/bulk-deactivate
      */
-    static async bulkDeactivate(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async bulkDeactivate(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        try {
-            const { ids } = req.body;
+        const { ids } = req.body;
+        
+        ControllerHelper.logRequestStart('bulkDeactivate', req, { idsCount: ids?.length });
 
+        try {
             if (!Array.isArray(ids) || ids.length === 0) {
                 throw new AppError('IDs array is required', 400);
             }
+
+            ids.forEach(id => ServiceHelper.validateObjectId(id, 'discountId'));
 
             const result = await Discount.updateMany(
                 { _id: { $in: ids.map((id: string) => new mongoose.Types.ObjectId(id)) } },
                 { $set: { isActive: false } }
             );
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Discounts bulk deactivated', {
-                component: 'AdminDiscountController',
-                operation: 'bulkDeactivate',
-                adminUserId: req.user?.id,
-                count: result.modifiedCount,
-                duration,
+            ControllerHelper.logRequestSuccess('bulkDeactivate', req, startTime, {
+                modifiedCount: result.modifiedCount
             });
 
             res.json({
@@ -507,13 +436,7 @@ export class AdminDiscountController {
                 data: { modifiedCount: result.modifiedCount },
             });
         } catch (error) {
-            loggingService.error('Error bulk deactivating discounts:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminDiscountController',
-                operation: 'bulkDeactivate',
-                adminUserId: req.user?.id,
-            });
-            next(error);
+            ControllerHelper.handleError('bulkDeactivate', error, req, res, startTime);
         }
     }
 
@@ -521,26 +444,25 @@ export class AdminDiscountController {
      * Bulk delete discounts
      * POST /api/admin/discounts/bulk-delete
      */
-    static async bulkDelete(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async bulkDelete(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        try {
-            const { ids } = req.body;
+        const { ids } = req.body;
+        
+        ControllerHelper.logRequestStart('bulkDelete', req, { idsCount: ids?.length });
 
+        try {
             if (!Array.isArray(ids) || ids.length === 0) {
                 throw new AppError('IDs array is required', 400);
             }
+
+            ids.forEach(id => ServiceHelper.validateObjectId(id, 'discountId'));
 
             const result = await Discount.deleteMany({
                 _id: { $in: ids.map((id: string) => new mongoose.Types.ObjectId(id)) },
             });
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Discounts bulk deleted', {
-                component: 'AdminDiscountController',
-                operation: 'bulkDelete',
-                adminUserId: req.user?.id,
-                count: result.deletedCount,
-                duration,
+            ControllerHelper.logRequestSuccess('bulkDelete', req, startTime, {
+                deletedCount: result.deletedCount
             });
 
             res.json({
@@ -549,13 +471,7 @@ export class AdminDiscountController {
                 data: { deletedCount: result.deletedCount },
             });
         } catch (error) {
-            loggingService.error('Error bulk deleting discounts:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminDiscountController',
-                operation: 'bulkDelete',
-                adminUserId: req.user?.id,
-            });
-            next(error);
+            ControllerHelper.handleError('bulkDelete', error, req, res, startTime);
         }
     }
 }

@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { RequestScoringService, ScoreRequestData } from '../services/requestScoring.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class RequestScoringController {
     // Background processing queue
@@ -21,37 +23,23 @@ export class RequestScoringController {
      * Score a request for training quality
      * POST /api/training/score
      */
-    static async scoreRequest(req: Request, res: Response, next: NextFunction): Promise<void> {
+    static async scoreRequest(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('scoreRequest', req, {
+            scoreRequestId: req.body?.requestId,
+            score: req.body?.score
+        });
 
         try {
-            loggingService.info('Request scoring initiated', {
-                userId,
-                requestId,
-                scoreRequestId: req.body?.requestId,
-                score: req.body?.score
-            });
-
-            if (!userId) {
-                loggingService.warn('Request scoring failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({ success: false, message: 'Authentication required' });
-                return;
-            }
 
             const scoreData: ScoreRequestData = req.body;
 
             // Validate input
             if (!scoreData.requestId || !scoreData.score) {
-                loggingService.warn('Request scoring failed - missing required fields', {
-                    userId,
-                    requestId,
-                    hasRequestId: !!scoreData.requestId,
-                    hasScore: !!scoreData.score
-                });
                 res.status(400).json({ 
                     success: false, 
                     message: 'Request ID and score are required' 
@@ -60,12 +48,6 @@ export class RequestScoringController {
             }
 
             if (scoreData.score < 1 || scoreData.score > 5) {
-                loggingService.warn('Request scoring failed - invalid score range', {
-                    userId,
-                    requestId,
-                    score: scoreData.score,
-                    scoreValid: scoreData.score >= 1 && scoreData.score <= 5
-                });
                 res.status(400).json({ 
                     success: false, 
                     message: 'Score must be between 1 and 5' 
@@ -74,17 +56,9 @@ export class RequestScoringController {
             }
 
             const requestScore = await RequestScoringService.scoreRequest(userId, scoreData);
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Request scored successfully', {
-                userId,
-                duration,
-                scoreRequestId: scoreData.requestId,
-                score: scoreData.score,
-                requestId
-            });
 
             // Queue background business event logging
+            const duration = Date.now() - startTime;
             this.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'request_scored',
@@ -98,6 +72,11 @@ export class RequestScoringController {
                 });
             });
 
+            ControllerHelper.logRequestSuccess('scoreRequest', req, startTime, {
+                scoreRequestId: scoreData.requestId,
+                score: scoreData.score
+            });
+
             res.json({
                 success: true,
                 data: requestScore,
@@ -105,18 +84,10 @@ export class RequestScoringController {
             });
         } catch (error: any) {
             RequestScoringController.recordDbFailure();
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Request scoring failed', {
-                userId,
-                requestId,
+            ControllerHelper.handleError('scoreRequest', error, req, res, startTime, {
                 scoreRequestId: req.body?.requestId,
-                score: req.body?.score,
-                error: error.message || 'Unknown error',
-                duration
+                score: req.body?.score
             });
-
-            next(error);
         }
     }
 
@@ -124,38 +95,23 @@ export class RequestScoringController {
      * Get score for a specific request
      * GET /api/training/score/:requestId
      */
-    static async getRequestScore(req: Request, res: Response, next: NextFunction): Promise<void> {
+    static async getRequestScore(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
-        const requestId = req.headers['x-request-id'] as string;
         const { requestId: scoreRequestId } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getRequestScore', req, { scoreRequestId });
 
         try {
-            loggingService.info('Request score retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                scoreRequestId,
-                hasScoreRequestId: !!scoreRequestId
-            });
-
-            if (!userId) {
-                loggingService.warn('Request score retrieval failed - user not authenticated', {
-                    requestId,
-                    scoreRequestId
-                });
-                res.status(401).json({ success: false, message: 'Authentication required' });
-                return;
+            if (scoreRequestId) {
+                ServiceHelper.validateObjectId(scoreRequestId, 'requestId');
             }
 
             const requestScore = await RequestScoringService.getRequestScore(userId, scoreRequestId);
 
             if (!requestScore) {
-                loggingService.warn('Request score retrieval failed - score not found', {
-                    userId,
-                    requestId,
-                    scoreRequestId
-                });
                 res.status(404).json({ 
                     success: false, 
                     message: 'Request score not found' 
@@ -163,34 +119,14 @@ export class RequestScoringController {
                 return;
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Request score retrieved successfully', {
-                userId,
-                duration,
-                scoreRequestId,
-                hasRequestScore: !!requestScore,
-                requestId
-            });
+            ControllerHelper.logRequestSuccess('getRequestScore', req, startTime, { scoreRequestId });
 
             res.json({
                 success: true,
                 data: requestScore
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Request score retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                scoreRequestId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            next(error);
+            ControllerHelper.handleError('getRequestScore', error, req, res, startTime, { scoreRequestId });
         }
     }
 
@@ -278,39 +214,15 @@ export class RequestScoringController {
      * Get training candidates (high-scoring requests)
      * GET /api/training/candidates
      */
-    static async getTrainingCandidates(req: Request, res: Response, next: NextFunction): Promise<void> {
+    static async getTrainingCandidates(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getTrainingCandidates', req, { query: req.query });
 
         try {
-            loggingService.info('Training candidates retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                minScore: req.query.minScore,
-                hasMinScore: !!req.query.minScore,
-                maxTokens: req.query.maxTokens,
-                hasMaxTokens: !!req.query.maxTokens,
-                maxCost: req.query.maxCost,
-                hasMaxCost: !!req.query.maxCost,
-                providers: req.query.providers,
-                hasProviders: !!req.query.providers,
-                models: req.query.models,
-                hasModels: !!req.query.models,
-                features: req.query.features,
-                hasFeatures: !!req.query.features,
-                limit: req.query.limit,
-                hasLimit: !!req.query.limit
-            });
-
-            if (!userId) {
-                loggingService.warn('Training candidates retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({ success: false, message: 'Authentication required' });
-                return;
-            }
 
             const filters = {
                 minScore: req.query.minScore ? parseInt(req.query.minScore as string) : 4,
@@ -323,15 +235,10 @@ export class RequestScoringController {
             };
 
             const candidates = await RequestScoringService.getTrainingCandidates(userId, filters);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Training candidates retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getTrainingCandidates', req, startTime, {
                 candidatesCount: candidates.length,
-                hasCandidates: !!candidates && candidates.length > 0,
-                filters,
-                requestId
+                filters
             });
 
             res.json({
@@ -340,18 +247,7 @@ export class RequestScoringController {
                 message: `Found ${candidates.length} training candidates`
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Training candidates retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            next(error);
+            ControllerHelper.handleError('getTrainingCandidates', error, req, res, startTime);
         }
     }
 
@@ -359,53 +255,26 @@ export class RequestScoringController {
      * Get scoring analytics
      * GET /api/training/analytics
      */
-    static async getScoringAnalytics(req: Request, res: Response, next: NextFunction): Promise<void> {
+    static async getScoringAnalytics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getScoringAnalytics', req);
 
         try {
-            loggingService.info('Scoring analytics retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId
-            });
-
-            if (!userId) {
-                loggingService.warn('Scoring analytics retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({ success: false, message: 'Authentication required' });
-                return;
-            }
 
             const analytics = await RequestScoringService.getScoringAnalytics(userId);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Scoring analytics retrieved successfully', {
-                userId,
-                duration,
-                hasAnalytics: !!analytics,
-                requestId
-            });
+            ControllerHelper.logRequestSuccess('getScoringAnalytics', req, startTime);
 
             res.json({
                 success: true,
                 data: analytics
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Scoring analytics retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            next(error);
+            ControllerHelper.handleError('getScoringAnalytics', error, req, res, startTime);
         }
     }
 
@@ -413,37 +282,21 @@ export class RequestScoringController {
      * Bulk score multiple requests
      * POST /api/training/score/bulk
      */
-    static async bulkScoreRequests(req: Request, res: Response, next: NextFunction): Promise<void> {
+    static async bulkScoreRequests(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('bulkScoreRequests', req, {
+            scoresCount: Array.isArray(req.body?.scores) ? req.body.scores.length : 0
+        });
 
         try {
-            loggingService.info('Bulk score requests initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                scoresCount: Array.isArray(req.body?.scores) ? req.body.scores.length : 0,
-                hasScores: Array.isArray(req.body?.scores) && req.body.scores.length > 0
-            });
-
-            if (!userId) {
-                loggingService.warn('Bulk score requests failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({ success: false, message: 'Authentication required' });
-                return;
-            }
 
             const { scores } = req.body;
 
             if (!Array.isArray(scores) || scores.length === 0) {
-                loggingService.warn('Bulk score requests failed - scores array is required', {
-                    userId,
-                    requestId,
-                    scoresType: typeof scores,
-                    scoresLength: Array.isArray(scores) ? scores.length : 0
-                });
                 res.status(400).json({ 
                     success: false, 
                     message: 'Scores array is required' 
@@ -454,12 +307,6 @@ export class RequestScoringController {
             // Validate each score
             for (const scoreData of scores) {
                 if (!scoreData.requestId || !scoreData.score) {
-                    loggingService.warn('Bulk score requests failed - missing required fields in score data', {
-                        userId,
-                        requestId,
-                        hasRequestId: !!scoreData.requestId,
-                        hasScore: !!scoreData.score
-                    });
                     res.status(400).json({ 
                         success: false, 
                         message: 'Each score must have requestId and score' 
@@ -467,12 +314,6 @@ export class RequestScoringController {
                     return;
                 }
                 if (scoreData.score < 1 || scoreData.score > 5) {
-                    loggingService.warn('Bulk score requests failed - invalid score range', {
-                        userId,
-                        requestId,
-                        score: scoreData.score,
-                        scoreValid: scoreData.score >= 1 && scoreData.score <= 5
-                    });
                     res.status(400).json({ 
                         success: false, 
                         message: 'All scores must be between 1 and 5' 
@@ -483,15 +324,6 @@ export class RequestScoringController {
 
             const results = await RequestScoringService.bulkScoreRequests(userId, scores);
             const duration = Date.now() - startTime;
-
-            loggingService.info('Bulk score requests completed successfully', {
-                userId,
-                duration,
-                scoresCount: scores.length,
-                resultsCount: results.length,
-                hasResults: !!results && results.length > 0,
-                requestId
-            });
 
             // Log business event
             loggingService.logBusiness({
@@ -505,25 +337,20 @@ export class RequestScoringController {
                 }
             });
 
+            ControllerHelper.logRequestSuccess('bulkScoreRequests', req, startTime, {
+                scoresCount: scores.length,
+                resultsCount: results.length
+            });
+
             res.json({
                 success: true,
                 data: results,
                 message: `Successfully scored ${results.length} requests`
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Bulk score requests failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                scoresCount: Array.isArray(req.body?.scores) ? req.body.scores.length : 0,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
+            ControllerHelper.handleError('bulkScoreRequests', error, req, res, startTime, {
+                scoresCount: Array.isArray(req.body?.scores) ? req.body.scores.length : 0
             });
-
-            next(error);
         }
     }
 
@@ -531,38 +358,23 @@ export class RequestScoringController {
      * Delete a request score
      * DELETE /api/training/score/:requestId
      */
-    static async deleteScore(req: Request, res: Response, next: NextFunction): Promise<void> {
+    static async deleteScore(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
-        const requestId = req.headers['x-request-id'] as string;
         const { requestId: scoreRequestId } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('deleteScore', req, { scoreRequestId });
 
         try {
-            loggingService.info('Request score deletion initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                scoreRequestId,
-                hasScoreRequestId: !!scoreRequestId
-            });
-
-            if (!userId) {
-                loggingService.warn('Request score deletion failed - user not authenticated', {
-                    requestId,
-                    scoreRequestId
-                });
-                res.status(401).json({ success: false, message: 'Authentication required' });
-                return;
+            if (scoreRequestId) {
+                ServiceHelper.validateObjectId(scoreRequestId, 'requestId');
             }
 
             const deleted = await RequestScoringService.deleteScore(userId, scoreRequestId);
 
             if (!deleted) {
-                loggingService.warn('Request score deletion failed - score not found', {
-                    userId,
-                    requestId,
-                    scoreRequestId
-                });
                 res.status(404).json({ 
                     success: false, 
                     message: 'Request score not found' 
@@ -571,13 +383,6 @@ export class RequestScoringController {
             }
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Request score deleted successfully', {
-                userId,
-                duration,
-                scoreRequestId,
-                requestId
-            });
 
             // Log business event
             loggingService.logBusiness({
@@ -590,24 +395,14 @@ export class RequestScoringController {
                 }
             });
 
+            ControllerHelper.logRequestSuccess('deleteScore', req, startTime, { scoreRequestId });
+
             res.json({
                 success: true,
                 message: 'Request score deleted successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Request score deletion failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                scoreRequestId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            next(error);
+            ControllerHelper.handleError('deleteScore', error, req, res, startTime, { scoreRequestId });
         }
     }
 

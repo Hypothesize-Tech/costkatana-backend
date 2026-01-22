@@ -5,6 +5,8 @@ import { AuthService } from '../services/auth.service';
 import { User } from '../models/User';
 import { loggingService } from '../services/logging.service';
 import { config } from '../config';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 // Validation schemas
 const setupTOTPSchema = z.object({
@@ -38,51 +40,24 @@ export class MFAController {
     /**
      * Get MFA status for the current user
      */
-    static async getStatus(req: any, res: Response): Promise<void> {
+    static async getStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id || req.user?._id || req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getStatus', req);
 
         try {
-            loggingService.info('MFA status retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                userSource: req.user?.id ? 'req.user.id' : req.user?._id ? 'req.user._id' : req.userId ? 'req.userId' : 'none',
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('MFA status retrieval failed - authentication required', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required. Please log in to access MFA settings.',
-                });
-                return;
-            }
-
-            loggingService.info('MFA status retrieval processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const status = await MFAService.getMFAStatus(userId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('MFA status retrieved successfully', {
-                userId,
-                duration,
-                hasStatus: !!status,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('getStatus', req, startTime, { hasStatus: !!status });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'mfa_status_retrieved',
                 category: 'mfa_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     hasStatus: !!status
@@ -94,79 +69,37 @@ export class MFAController {
                 data: status,
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('MFA status retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get MFA status',
-                error: error.message,
-            });
+            ControllerHelper.handleError('getStatus', error, req, res, startTime);
         }
     }
 
     /**
      * Setup TOTP (Time-based One-Time Password) for authenticator apps
      */
-    static async setupTOTP(req: any, res: Response): Promise<void> {
+    static async setupTOTP(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id || req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
         const { email } = setupTOTPSchema.parse(req.body);
+        
+        ControllerHelper.logRequestStart('setupTOTP', req, { email });
 
         try {
-            loggingService.info('TOTP setup initiated', {
-                userId,
-                hasUserId: !!userId,
-                email,
-                hasEmail: !!email,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('TOTP setup failed - authentication required', {
-                    email,
-                    hasEmail: !!email,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
-                return;
-            }
-
-            loggingService.info('TOTP setup processing started', {
-                userId,
-                email,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const result = await MFAService.setupTOTP(userId, email);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('TOTP setup completed successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('setupTOTP', req, startTime, {
                 email,
-                duration,
                 hasQrCodeUrl: !!result.qrCodeUrl,
-                hasBackupCodes: !!result.backupCodes,
-                requestId: req.headers['x-request-id'] as string
+                hasBackupCodes: !!result.backupCodes
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'totp_setup_completed',
                 category: 'mfa_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     email,
@@ -184,18 +117,6 @@ export class MFAController {
                 },
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('TOTP setup failed', {
-                userId,
-                email,
-                hasEmail: !!email,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-            
             if (error instanceof z.ZodError) {
                 res.status(400).json({
                     success: false,
@@ -204,76 +125,36 @@ export class MFAController {
                 });
                 return;
             }
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to setup TOTP',
-                error: error.message,
-            });
+            ControllerHelper.handleError('setupTOTP', error, req, res, startTime, { email });
         }
     }
 
     /**
      * Verify TOTP token and enable TOTP MFA
      */
-    static async verifyAndEnableTOTP(req: any, res: Response): Promise<void> {
+    static async verifyAndEnableTOTP(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id || req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
         const { token } = verifyTOTPSchema.parse(req.body);
+        
+        ControllerHelper.logRequestStart('verifyAndEnableTOTP', req, { hasToken: !!token });
 
         try {
-            loggingService.info('TOTP verification and enablement initiated', {
-                userId,
-                hasUserId: !!userId,
-                hasToken: !!token,
-                tokenLength: token?.length,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('TOTP verification and enablement failed - authentication required', {
-                    hasToken: !!token,
-                    tokenLength: token?.length,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
-                return;
-            }
-
-            loggingService.info('TOTP verification and enablement processing started', {
-                userId,
-                hasToken: !!token,
-                tokenLength: token?.length,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const verified = await MFAService.verifyAndEnableTOTP(userId, token);
 
-            const duration = Date.now() - startTime;
-
             if (verified) {
-                loggingService.info('TOTP verification and enablement completed successfully', {
-                    userId,
-                    hasToken: !!token,
-                    tokenLength: token?.length,
-                    duration,
-                    verified,
-                    requestId: req.headers['x-request-id'] as string
-                });
+                ControllerHelper.logRequestSuccess('verifyAndEnableTOTP', req, startTime, { verified });
 
                 // Log business event
                 loggingService.logBusiness({
                     event: 'totp_verified_and_enabled',
                     category: 'mfa_operations',
-                    value: duration,
+                    value: Date.now() - startTime,
                     metadata: {
                         userId,
-                        hasToken: !!token,
-                        tokenLength: token?.length,
                         verified
                     }
                 });
@@ -283,33 +164,12 @@ export class MFAController {
                     message: 'TOTP enabled successfully',
                 });
             } else {
-                loggingService.warn('TOTP verification and enablement failed - invalid token', {
-                    userId,
-                    hasToken: !!token,
-                    tokenLength: token?.length,
-                    duration,
-                    verified,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     message: 'Invalid TOTP token',
                 });
             }
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('TOTP verification and enablement failed', {
-                userId,
-                hasToken: !!token,
-                tokenLength: token?.length,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-            
             if (error instanceof z.ZodError) {
                 res.status(400).json({
                     success: false,
@@ -318,62 +178,31 @@ export class MFAController {
                 });
                 return;
             }
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to verify TOTP',
-                error: error.message,
-            });
+            ControllerHelper.handleError('verifyAndEnableTOTP', error, req, res, startTime);
         }
     }
 
     /**
      * Send email MFA code
      */
-    static async sendEmailCode(req: any, res: Response): Promise<void> {
+    static async sendEmailCode(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id || req.user?._id || req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('sendEmailCode', req);
 
         try {
-            loggingService.info('Email MFA code sending initiated', {
-                userId,
-                hasUserId: !!userId,
-                userSource: req.user?.id ? 'req.user.id' : req.user?._id ? 'req.user._id' : req.userId ? 'req.userId' : 'none',
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Email MFA code sending failed - authentication required', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required. Please log in to send email verification codes.',
-                });
-                return;
-            }
-
-            loggingService.info('Email MFA code sending processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             await MFAService.sendEmailCode(userId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Email MFA code sent successfully', {
-                userId,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('sendEmailCode', req, startTime);
 
             // Log business event
             loggingService.logBusiness({
                 event: 'email_mfa_code_sent',
                 category: 'mfa_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId
                 }
@@ -384,102 +213,45 @@ export class MFAController {
                 message: 'Verification code sent to your email',
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Email MFA code sending failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-            
             if (error.message.includes('wait') || error.message.includes('attempts')) {
-                loggingService.warn('Email MFA code sending rate limited', {
-                    userId,
-                    error: error.message,
-                    duration,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(429).json({
                     success: false,
                     message: error.message,
                 });
                 return;
             }
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to send verification code',
-                error: error.message,
-            });
+            ControllerHelper.handleError('sendEmailCode', error, req, res, startTime);
         }
     }
 
     /**
      * Verify email MFA code and enable email MFA
      */
-    static async verifyAndEnableEmailMFA(req: any, res: Response): Promise<void> {
+    static async verifyAndEnableEmailMFA(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id || req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
         const { code } = verifyEmailCodeSchema.parse(req.body);
+        
+        ControllerHelper.logRequestStart('verifyAndEnableEmailMFA', req, { hasCode: !!code });
 
         try {
-            loggingService.info('Email MFA verification and enablement initiated', {
-                userId,
-                hasUserId: !!userId,
-                hasCode: !!code,
-                codeLength: code?.length,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Email MFA verification and enablement failed - authentication required', {
-                    hasCode: !!code,
-                    codeLength: code?.length,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
-                return;
-            }
-
-            loggingService.info('Email MFA verification and enablement processing started', {
-                userId,
-                hasCode: !!code,
-                codeLength: code?.length,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const verified = await MFAService.verifyEmailCode(userId, code);
 
             if (verified) {
                 await MFAService.enableEmailMFA(userId);
 
-                const duration = Date.now() - startTime;
-
-                loggingService.info('Email MFA verification and enablement completed successfully', {
-                    userId,
-                    hasCode: !!code,
-                    codeLength: code?.length,
-                    duration,
-                    verified,
-                    requestId: req.headers['x-request-id'] as string
-                });
+                ControllerHelper.logRequestSuccess('verifyAndEnableEmailMFA', req, startTime, { verified });
 
                 // Log business event
                 loggingService.logBusiness({
                     event: 'email_mfa_verified_and_enabled',
                     category: 'mfa_operations',
-                    value: duration,
+                    value: Date.now() - startTime,
                     metadata: {
                         userId,
-                        hasCode: !!code,
-                        codeLength: code?.length,
                         verified
                     }
                 });
@@ -489,35 +261,12 @@ export class MFAController {
                     message: 'Email MFA enabled successfully',
                 });
             } else {
-                const duration = Date.now() - startTime;
-
-                loggingService.warn('Email MFA verification and enablement failed - invalid code', {
-                    userId,
-                    hasCode: !!code,
-                    codeLength: code?.length,
-                    duration,
-                    verified,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     message: 'Invalid or expired verification code',
                 });
             }
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Email MFA verification and enablement failed', {
-                userId,
-                hasCode: !!code,
-                codeLength: code?.length,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-            
             if (error instanceof z.ZodError) {
                 res.status(400).json({
                     success: false,
@@ -526,12 +275,7 @@ export class MFAController {
                 });
                 return;
             }
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to verify email code',
-                error: error.message,
-            });
+            ControllerHelper.handleError('verifyAndEnableEmailMFA', error, req, res, startTime);
         }
     }
 
@@ -738,42 +482,15 @@ export class MFAController {
                     },
                 });
             } else {
-                const duration = Date.now() - startTime;
-
-                loggingService.warn('MFA verification during login failed - invalid verification code', {
-                    userId,
-                    method,
-                    hasCode: !!code,
-                    codeLength: code?.length,
-                    duration,
-                    verified,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     message: 'Invalid verification code',
                 });
             }
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('MFA verification during login failed', {
+            ControllerHelper.handleError('verifyMFA', error, req, res, startTime, {
                 method,
-                hasCode: !!req.body.code,
-                codeLength: req.body.code?.length,
-                rememberDevice: req.body.rememberDevice,
-                hasDeviceName: !!req.body.deviceName,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to verify MFA',
-                error: error.message,
+                rememberDevice: req.body.rememberDevice
             });
         }
     }
@@ -984,56 +701,26 @@ export class MFAController {
     /**
      * Remove trusted device
      */
-    static async removeTrustedDevice(req: any, res: Response): Promise<void> {
+    static async removeTrustedDevice(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id || req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
         const { deviceId } = removeTrustedDeviceSchema.parse(req.body);
+        
+        ControllerHelper.logRequestStart('removeTrustedDevice', req, { deviceId });
 
         try {
-            loggingService.info('Trusted device removal initiated', {
-                userId,
-                hasUserId: !!userId,
-                deviceId,
-                hasDeviceId: !!deviceId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Trusted device removal failed - authentication required', {
-                    deviceId,
-                    hasDeviceId: !!deviceId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
-                return;
-            }
-
-            loggingService.info('Trusted device removal processing started', {
-                userId,
-                deviceId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             await MFAService.removeTrustedDevice(userId, deviceId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Trusted device removed successfully', {
-                userId,
-                deviceId,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('removeTrustedDevice', req, startTime, { deviceId });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'trusted_device_removed',
                 category: 'mfa_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     deviceId
@@ -1045,18 +732,6 @@ export class MFAController {
                 message: 'Device removed from trusted devices',
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Trusted device removal failed', {
-                userId,
-                deviceId,
-                hasDeviceId: !!deviceId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-            
             if (error instanceof z.ZodError) {
                 res.status(400).json({
                     success: false,
@@ -1065,73 +740,40 @@ export class MFAController {
                 });
                 return;
             }
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to remove trusted device',
-                error: error.message,
-            });
+            ControllerHelper.handleError('removeTrustedDevice', error, req, res, startTime, { deviceId });
         }
     }
 
     /**
      * Check if current device is trusted
      */
-    static async checkTrustedDevice(req: any, res: Response): Promise<void> {
+    static async checkTrustedDevice(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id || req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('checkTrustedDevice', req);
 
         try {
-            loggingService.info('Trusted device check initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Trusted device check failed - authentication required', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
-                return;
-            }
-
-            loggingService.info('Trusted device check processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const { deviceId, userAgent, ipAddress } = MFAController.getDeviceInfo(req);
 
             const isTrusted = await MFAService.isTrustedDevice(userId, deviceId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Trusted device check completed successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('checkTrustedDevice', req, startTime, {
                 deviceId,
-                isTrusted,
-                hasUserAgent: !!userAgent,
-                hasIpAddress: !!ipAddress,
-                requestId: req.headers['x-request-id'] as string
+                isTrusted
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'trusted_device_check_completed',
                 category: 'mfa_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     deviceId,
-                    isTrusted,
-                    hasUserAgent: !!userAgent,
-                    hasIpAddress: !!ipAddress
+                    isTrusted
                 }
             });
 
@@ -1143,21 +785,7 @@ export class MFAController {
                 },
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Trusted device check failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to check trusted device',
-                error: error.message,
-            });
+            ControllerHelper.handleError('checkTrustedDevice', error, req, res, startTime);
         }
     }
 

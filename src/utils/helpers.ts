@@ -160,7 +160,12 @@ export const calculateTokenCost = (
   return (tokens / 1000) * pricePerToken;
 };
 
-// Enhanced retry function for external API calls with better throttling handling
+/**
+ * Enhanced retry function for external API calls with better throttling handling
+ * @deprecated Use ServiceHelper.withRetry() or RetryWithBackoff instead for standardized retry logic
+ * @see ServiceHelper.withRetry
+ * @see RetryWithBackoff
+ */
 export const retry = async <T>(
   fn: () => Promise<T>,
   maxRetries: number = 5,

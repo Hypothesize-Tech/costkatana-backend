@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import { AWSConnection, IAWSConnection } from '../../models/AWSConnection';
 import { loggingService } from '../logging.service';
 import { killSwitchService } from './killSwitch.service';
+import { BaseService } from '../../shared/BaseService';
 
 /**
  * STS Credential Manager - Secure Temporary Credential Management
@@ -131,13 +132,13 @@ const getScopedPolicy = (connection: IAWSConnection): string => {
   return JSON.stringify(policy);
 };
 
-class STSCredentialService {
+class STSCredentialService extends BaseService {
   private static instance: STSCredentialService;
   
   // Credential cache (per plan execution)
   private credentialCache: Map<string, CredentialCacheEntry> = new Map();
   
-  // Circuit breaker for STS throttling
+  // Circuit breaker for STS throttling - managed by BaseService but kept for compatibility
   private circuitBreaker: CircuitBreakerState = {
     isOpen: false,
     failureCount: 0,
@@ -152,6 +153,11 @@ class STSCredentialService {
   private stsClient: STSClient;
   
   private constructor() {
+    super('STSCredentialService', {
+      max: 100,
+      ttl: 900000 // 15 minutes
+    });
+    
     this.stsClient = new STSClient({
       region: process.env.AWS_REGION || 'us-east-1',
       credentials: {

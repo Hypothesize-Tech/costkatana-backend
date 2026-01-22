@@ -6,23 +6,23 @@ import { GoogleExportAudit } from '../models/GoogleExportAudit';
 import { loggingService } from '../services/logging.service';
 import { GoogleErrors } from '../utils/googleErrors';
 import mongoose from 'mongoose';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class GoogleController {
     /**
      * Initialize OAuth flow
      * GET /api/google/auth
      */
-    static async initiateOAuth(req: any, res: Response): Promise<void> {
+    static async initiateOAuth(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('initiateOAuth', req);
+
         try {
-            const userId = req.userId;
-            if (!userId) {
-                loggingService.warn('Google OAuth initiation failed: User not authenticated', { 
-                    hasAuthHeader: !!req.headers.authorization 
-                });
-                const error = GoogleErrors.AUTH_REQUIRED;
-                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
-                return;
-            }
 
             // Validate Google OAuth configuration
             const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -63,8 +63,8 @@ export class GoogleController {
                     error: error.message,
                     provider: 'google'
                 });
-                if (req.session) {
-                    req.session.oauthState = stateData;
+                if ((req as any).session) {
+                    (req as any).session.oauthState = stateData;
                 }
             }
 
@@ -583,17 +583,17 @@ export class GoogleController {
      * Create cost report in Google Docs
      * POST /api/google/export/report
      */
-    static async createCostReport(req: any, res: Response): Promise<void> {
+    static async createCostReport(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        const { connectionId, startDate, endDate, projectId, includeTopModels, includeRecommendations } = req.body;
+        
+        ControllerHelper.logRequestStart('createCostReport', req, { connectionId });
+
         try {
-            const userId = req.userId;
-            const { connectionId, startDate, endDate, projectId, includeTopModels, includeRecommendations } = req.body;
-
-            if (!userId) {
-                const error = GoogleErrors.AUTH_REQUIRED;
-                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
-                return;
-            }
-
             if (!connectionId) {
                 res.status(400).json({
                     success: false,
@@ -601,6 +601,8 @@ export class GoogleController {
                 });
                 return;
             }
+
+            ServiceHelper.validateObjectId(connectionId, 'connectionId');
 
             const connection = await GoogleConnection.findOne({
                 _id: connectionId,
@@ -630,6 +632,11 @@ export class GoogleController {
                 documentId: result.documentId
             });
 
+            ControllerHelper.logRequestSuccess('createCostReport', req, startTime, {
+                connectionId,
+                documentId: result.documentId
+            });
+
             res.json({
                 success: true,
                 data: {
@@ -639,10 +646,6 @@ export class GoogleController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Failed to create cost report', {
-                error: error.message
-            });
-
             const standardError = GoogleErrors.fromGoogleError(error);
             res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
         }
@@ -652,16 +655,17 @@ export class GoogleController {
      * Get export audits
      * GET /api/google/export/audits
      */
-    static async getExportAudits(req: any, res: Response): Promise<void> {
-        try {
-            const userId = req.userId;
-            const { limit = 50, exportType, datasetType } = req.query;
+    static async getExportAudits(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        const { limit = 50, exportType, datasetType } = req.query;
+        
+        ControllerHelper.logRequestStart('getExportAudits', req, { limit, exportType, datasetType });
 
-            if (!userId) {
-                const error = GoogleErrors.AUTH_REQUIRED;
-                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
-                return;
-            }
+        try {
 
             const query: any = { userId: new mongoose.Types.ObjectId(userId) };
             if (exportType) query.exportType = exportType;
@@ -676,20 +680,14 @@ export class GoogleController {
                 count: audits.length
             });
 
+            ControllerHelper.logRequestSuccess('getExportAudits', req, startTime, { count: audits.length });
+
             res.json({
                 success: true,
                 data: audits
             });
         } catch (error: any) {
-            loggingService.error('Failed to get export audits', {
-                error: error.message
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get export audits',
-                error: error.message
-            });
+            ControllerHelper.handleError('getExportAudits', error, req, res, startTime);
         }
     }
 
@@ -697,18 +695,19 @@ export class GoogleController {
      * Create Spreadsheet
      * POST /api/google/connections/:id/sheets
      */
-    static async createSpreadsheet(req: any, res: Response): Promise<void> {
+    static async createSpreadsheet(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        const { id } = req.params;
+        const { title } = req.body;
+        ServiceHelper.validateObjectId(id, 'id');
+        
+        ControllerHelper.logRequestStart('createSpreadsheet', req, { connectionId: id, title });
+
         try {
-            const userId = req.userId;
-            const { id } = req.params;
-            const { title } = req.body;
-
-            if (!userId) {
-                const error = GoogleErrors.AUTH_REQUIRED;
-                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
-                return;
-            }
-
             if (!title) {
                 res.status(400).json({
                     success: false,
@@ -731,24 +730,18 @@ export class GoogleController {
 
             const result = await GoogleService.createSpreadsheet(connection, title);
 
+            ControllerHelper.logRequestSuccess('createSpreadsheet', req, startTime, {
+                connectionId: id,
+                spreadsheetId: result.spreadsheetId
+            });
+
             res.json({
                 success: true,
                 data: result
             });
-
-            loggingService.info('Created Google Spreadsheet', {
-                userId,
-                connectionId: id,
-                spreadsheetId: result.spreadsheetId
-            });
         } catch (error: any) {
             const standardError = GoogleErrors.fromGoogleError(error);
             res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
-
-            loggingService.error('Failed to create spreadsheet', {
-                userId: req.userId,
-                error: error.message
-            });
         }
     }
 
@@ -756,18 +749,19 @@ export class GoogleController {
      * Create Document
      * POST /api/google/connections/:id/docs
      */
-    static async createDocument(req: any, res: Response): Promise<void> {
+    static async createDocument(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        const { id } = req.params;
+        const { title } = req.body;
+        ServiceHelper.validateObjectId(id, 'id');
+        
+        ControllerHelper.logRequestStart('createDocument', req, { connectionId: id, title });
+
         try {
-            const userId = req.userId;
-            const { id } = req.params;
-            const { title } = req.body;
-
-            if (!userId) {
-                const error = GoogleErrors.AUTH_REQUIRED;
-                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
-                return;
-            }
-
             if (!title) {
                 res.status(400).json({
                     success: false,
@@ -790,24 +784,18 @@ export class GoogleController {
 
             const result = await GoogleService.createDocument(connection, title);
 
+            ControllerHelper.logRequestSuccess('createDocument', req, startTime, {
+                connectionId: id,
+                documentId: result.documentId
+            });
+
             res.json({
                 success: true,
                 data: result
             });
-
-            loggingService.info('Created Google Document', {
-                userId,
-                connectionId: id,
-                documentId: result.documentId
-            });
         } catch (error: any) {
             const standardError = GoogleErrors.fromGoogleError(error);
             res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
-
-            loggingService.error('Failed to create document', {
-                userId: req.userId,
-                error: error.message
-            });
         }
     }
 
@@ -815,16 +803,17 @@ export class GoogleController {
      * Analyze cost trends with Gemini
      * POST /api/google/gemini/analyze
      */
-    static async analyzeCostTrends(req: any, res: Response): Promise<void> {
-        try {
-            const userId = req.userId;
-            const { startDate, endDate } = req.body;
+    static async analyzeCostTrends(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        const { startDate, endDate } = req.body;
+        
+        ControllerHelper.logRequestStart('analyzeCostTrends', req, { startDate, endDate });
 
-            if (!userId) {
-                const error = GoogleErrors.AUTH_REQUIRED;
-                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
-                return;
-            }
+        try {
 
             const result = await GoogleIntegrationService.analyzeCostTrendsWithGemini(userId, {
                 startDate: startDate ? new Date(startDate) : undefined,
@@ -933,13 +922,35 @@ export class GoogleController {
      * List spreadsheets accessible via picker
      * GET /api/google/connections/:id/spreadsheets
      */
-    static async listSpreadsheets(req: any, res: Response): Promise<void> {
+    static async listSpreadsheets(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        const connectionId = req.params.id;
+        ServiceHelper.validateObjectId(connectionId, 'id');
+        
+        ControllerHelper.logRequestStart('listSpreadsheets', req, { connectionId });
+        
         try {
-            const connectionId = req.params.id;
-            const sheets = await GoogleService.listSpreadsheets(connectionId);
+            const connection = await GoogleConnection.findOne({
+                _id: connectionId,
+                userId,
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const sheets = await GoogleService.listSpreadsheets(connection);
+            ControllerHelper.logRequestSuccess('listSpreadsheets', req, startTime, { count: sheets.length });
             res.json({ success: true, data: sheets });
         } catch (error: any) {
-            res.status(500).json({ success: false, error: error.message });
+            ControllerHelper.handleError('listSpreadsheets', error, req, res, startTime);
         }
     }
 
@@ -947,13 +958,35 @@ export class GoogleController {
      * List documents accessible via picker
      * GET /api/google/connections/:id/documents
      */
-    static async listDocuments(req: any, res: Response): Promise<void> {
+    static async listDocuments(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        const connectionId = req.params.id;
+        ServiceHelper.validateObjectId(connectionId, 'id');
+        
+        ControllerHelper.logRequestStart('listDocuments', req, { connectionId });
+        
         try {
-            const connectionId = req.params.id;
-            const docs = await GoogleService.listDocuments(connectionId);
+            const connection = await GoogleConnection.findOne({
+                _id: connectionId,
+                userId,
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const docs = await GoogleService.listDocuments(connection);
+            ControllerHelper.logRequestSuccess('listDocuments', req, startTime, { count: docs.length });
             res.json({ success: true, data: docs });
         } catch (error: any) {
-            res.status(500).json({ success: false, error: error.message });
+            ControllerHelper.handleError('listDocuments', error, req, res, startTime);
         }
     }
 
@@ -961,14 +994,18 @@ export class GoogleController {
      * Get document content
      * GET /api/google/docs/:docId/content
      */
-    static async getDocumentContent(req: any, res: Response): Promise<void> {
+    static async getDocumentContent(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { docId } = req.params;
+        const { connectionId } = req.query;
+        if (connectionId) ServiceHelper.validateObjectId(String(connectionId), 'connectionId');
+        ControllerHelper.logRequestStart('getDocumentContent', req, { docId, connectionId });
         try {
-            const { docId } = req.params;
-            const { connectionId } = req.query;
             const content = await GoogleService.getDocumentContent(String(connectionId), docId);
+            ControllerHelper.logRequestSuccess('getDocumentContent', req, startTime);
             res.json({ success: true, data: content });
         } catch (error: any) {
-            res.status(500).json({ success: false, error: error.message });
+            ControllerHelper.handleError('getDocumentContent', error, req, res, startTime);
         }
     }
 
@@ -977,16 +1014,17 @@ export class GoogleController {
      * POST /api/google/file-from-link
      * Body: { connectionId, linkOrId }
      */
-    static async getFileFromLink(req: any, res: Response): Promise<void> {
-        try {
-            const userId = req.user?.id || req.user?._id?.toString();
-            const { connectionId, linkOrId } = req.body;
+    static async getFileFromLink(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        const { connectionId, linkOrId } = req.body;
+        
+        ControllerHelper.logRequestStart('getFileFromLink', req, { connectionId });
 
-            if (!userId) {
-                const error = GoogleErrors.AUTH_REQUIRED;
-                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
-                return;
-            }
+        try {
 
             if (!connectionId) {
                 res.status(400).json({
@@ -1003,6 +1041,8 @@ export class GoogleController {
                 });
                 return;
             }
+
+            ServiceHelper.validateObjectId(connectionId, 'connectionId');
 
             const connection = await GoogleConnection.findOne({
                 _id: connectionId,
@@ -1040,6 +1080,12 @@ export class GoogleController {
                 }
             );
 
+            ControllerHelper.logRequestSuccess('getFileFromLink', req, startTime, {
+                connectionId,
+                fileId: fileMetadata.id,
+                fileType
+            });
+
             res.json({
                 success: true,
                 data: {
@@ -1049,11 +1095,6 @@ export class GoogleController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Failed to get file from link', {
-                error: error.message,
-                stack: error.stack,
-                errorCode: error.code
-            });
 
             if (error.message.includes('Invalid Google Drive link')) {
                 res.status(400).json({
@@ -1084,16 +1125,17 @@ export class GoogleController {
      * Check file access
      * GET /api/google/file-access/check/:fileId
      */
-    static async checkFileAccess(req: any, res: Response): Promise<void> {
-        try {
-            const userId = req.user?.id || req.user?._id?.toString();
-            const { fileId } = req.params;
+    static async checkFileAccess(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        const { fileId } = req.params;
+        
+        ControllerHelper.logRequestStart('checkFileAccess', req, { fileId });
 
-            if (!userId) {
-                const error = GoogleErrors.AUTH_REQUIRED;
-                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
-                return;
-            }
+        try {
 
             if (!fileId) {
                 res.status(400).json({
@@ -1112,20 +1154,15 @@ export class GoogleController {
                 hasAccess
             });
 
+            ControllerHelper.logRequestSuccess('checkFileAccess', req, startTime, { fileId, hasAccess });
+
             res.json({
                 success: true,
                 hasAccess,
                 fileId
             });
         } catch (error: any) {
-            loggingService.error('Failed to check file access', {
-                error: error.message
-            });
-
-            res.status(500).json({
-                success: false,
-                error: error.message
-            });
+            ControllerHelper.handleError('checkFileAccess', error, req, res, startTime, { fileId });
         }
     }
 
@@ -1133,17 +1170,19 @@ export class GoogleController {
      * Get accessible files for a connection
      * GET /api/google/connections/:id/accessible-files
      */
-    static async getAccessibleFiles(req: any, res: Response): Promise<void> {
-        try {
-            const userId = req.userId;
-            const { id } = req.params;
-            const { fileType } = req.query;
+    static async getAccessibleFiles(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        const { id } = req.params;
+        const { fileType } = req.query;
+        ServiceHelper.validateObjectId(id, 'id');
+        
+        ControllerHelper.logRequestStart('getAccessibleFiles', req, { connectionId: id, fileType });
 
-            if (!userId) {
-                const error = GoogleErrors.AUTH_REQUIRED;
-                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
-                return;
-            }
+        try {
 
             const connection = await GoogleConnection.findOne({
                 _id: id,
@@ -1170,20 +1209,18 @@ export class GoogleController {
                 filesCount: files.length
             });
 
+            ControllerHelper.logRequestSuccess('getAccessibleFiles', req, startTime, {
+                connectionId: id,
+                fileType,
+                filesCount: files.length
+            });
+
             res.json({
                 success: true,
                 data: files
             });
         } catch (error: any) {
-            loggingService.error('Failed to get accessible files', {
-                error: error.message
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get accessible files',
-                error: error.message
-            });
+            ControllerHelper.handleError('getAccessibleFiles', error, req, res, startTime, { connectionId: id });
         }
     }
 }

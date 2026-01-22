@@ -1,33 +1,16 @@
 import { Response, NextFunction } from 'express';
 import { TrackingService } from '../services/tracking.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class TrackingController {
-  static async trackManualRequest(req: any, res: Response, next: NextFunction): Promise<void> {
+  static async trackManualRequest(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     const startTime = Date.now();
-    const requestId = req.headers['x-request-id'] as string;
-    const userId = req.user?.id || req.userId;
-
     try {
-      loggingService.info('Manual request tracking initiated', {
-        requestId,
-        userId,
-        hasUserId: !!userId,
-        userSource: req.user?.id ? 'req.user.id' : 'req.userId'
-      });
-
-      if (!userId) {
-        
-        loggingService.warn('Manual request tracking failed - authentication required', {
-          requestId
-        });
-
-        res.status(401).json({
-          success: false,
-          message: 'Authentication required',
-        });
-        return;
-      }
+      if (!ControllerHelper.requireAuth(req, res)) return;
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('trackManualRequest', req);
 
       const {
         model,
@@ -41,6 +24,8 @@ export class TrackingController {
         prompt,
         response,
       } = req.body;
+
+      const requestId = req.headers['x-request-id'] as string;
 
       loggingService.info('Manual request tracking parameters received', {
         requestId,
@@ -179,28 +164,7 @@ export class TrackingController {
         data: trackingResult,
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Manual request tracking failed', {
-        requestId,
-        userId,
-        hasUserId: !!userId,
-        model: req.body?.model,
-        tokens: req.body?.tokens,
-        project: req.body?.project,
-        user: req.body?.user,
-        feedback: req.body?.feedback,
-        cost: req.body?.cost,
-        description: req.body?.description,
-        provider: req.body?.provider,
-        hasPrompt: !!req.body?.prompt,
-        hasResponse: !!req.body?.response,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      next(error);
+      ControllerHelper.handleError('trackManualRequest', error, req, res, startTime);
     }
   }
 }

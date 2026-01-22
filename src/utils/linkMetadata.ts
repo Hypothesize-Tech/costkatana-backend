@@ -26,7 +26,7 @@ export interface LinkMetadata {
   summary?: string; // AI-generated summary from WebScraperTool
   structuredData?: Record<string, unknown>; // Structured data extracted by AI
   relevanceScore?: number; // Relevance score from AI
-  scrapingMethod?: 'axios-cheerio' | 'google-search-api'; // Which method was used
+  scrapingMethod?: 'axios-cheerio' | 'google-search-api' | 'puppeteer-ai'; // Which method was used
 }
 
 /**

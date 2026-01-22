@@ -8,6 +8,7 @@
 
 import { loggingService } from './logging.service';
 import { redisService } from './redis.service';
+import { BaseService } from '../shared/BaseService';
 
 // ============================================================================
 // TYPES AND INTERFACES
@@ -52,7 +53,7 @@ export interface RoutingDecision {
 // LATENCY ROUTER SERVICE
 // ============================================================================
 
-export class LatencyRouterService {
+export class LatencyRouterService extends BaseService {
     private static instance: LatencyRouterService;
     
     // Configuration
@@ -61,7 +62,7 @@ export class LatencyRouterService {
     private readonly CIRCUIT_BREAKER_THRESHOLD_MS = 30000; // 30 seconds
     private readonly CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5; // 5 consecutive failures
     
-    // Circuit breaker state
+    // Circuit breaker state - now using BaseService functionality
     private circuitBreakers = new Map<string, {
         state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
         failureCount: number;
@@ -70,7 +71,12 @@ export class LatencyRouterService {
     }>();
     
     private constructor() {
-        loggingService.info('🚀 Latency Router Service initialized', {
+        super('LatencyRouterService', {
+            max: 500,
+            ttl: 900000 // 15 minutes
+        });
+        
+        this.logOperation('info', 'Latency Router Service initialized', 'constructor', {
             windowMs: this.LATENCY_WINDOW_MS,
             maxEntries: this.MAX_LATENCY_ENTRIES,
             circuitBreakerThreshold: this.CIRCUIT_BREAKER_THRESHOLD_MS

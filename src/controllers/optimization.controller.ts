@@ -7,6 +7,8 @@ import { S3Service } from '../services/s3.service';
 import { PromptCompilerService } from '../compiler/promptCompiler.service';
 import { ParallelExecutionOptimizerService } from '../compiler/parallelExecutionOptimizer.service';
 import { ProactiveSuggestionsService } from '../services/proactiveSuggestions.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 /**
  * Model mapping from short names to full AWS Bedrock model IDs
@@ -43,16 +45,13 @@ import { Optimization } from '../models';
 
 
 export class OptimizationController {
-    static async createOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async createOptimization(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('createOptimization', req);
 
         try {
-            loggingService.info('Optimization creation initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             const validatedData = optimizationRequestSchema.parse(req.body);
 
@@ -173,23 +172,6 @@ export class OptimizationController {
                 }
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Optimization created successfully', {
-                userId,
-                duration,
-                optimizationId: optimization._id,
-                hasUserQuery: !!optimization.userQuery,
-                hasGeneratedAnswer: !!optimization.generatedAnswer,
-                improvementPercentage: optimization.improvementPercentage,
-                costSaved: optimization.costSaved,
-                tokensSaved: optimization.tokensSaved,
-                hasSuggestions: !!optimization.suggestions,
-                hasMetadata: !!optimization.metadata,
-                promptCompilationApplied: !!promptCompilationMetadata,
-                requestId: req.headers['x-request-id'] as string
-            });
-            
             // 🚀 Generate proactive suggestions asynchronously (non-blocking)
             if (generateSuggestions && optimization.tokensSaved && optimization.tokensSaved > 0) {
                 ProactiveSuggestionsService.pushOptimizationCompletedSuggestion(
@@ -206,13 +188,20 @@ export class OptimizationController {
                 });
             }
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'optimization_created',
-                category: 'optimization_operations',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logRequestSuccess('createOptimization', req, startTime, {
+                optimizationId: optimization._id,
+                improvementPercentage: optimization.improvementPercentage,
+                costSaved: optimization.costSaved,
+                tokensSaved: optimization.tokensSaved,
+                promptCompilationApplied: !!promptCompilationMetadata
+            });
+
+            ControllerHelper.logBusinessEvent(
+                'optimization_created',
+                'optimization_operations',
+                userId,
+                Date.now() - startTime,
+                {
                     optimizationId: optimization._id,
                     hasUserQuery: !!optimization.userQuery,
                     hasGeneratedAnswer: !!optimization.generatedAnswer,
@@ -222,7 +211,7 @@ export class OptimizationController {
                     hasSuggestions: !!optimization.suggestions,
                     hasMetadata: !!optimization.metadata
                 }
-            });
+            );
 
             res.status(201).json({
                 success: true,
@@ -245,31 +234,18 @@ export class OptimizationController {
                 },
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Optimization creation failed', {
-                userId,
-                hasUserId: !!userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('createOptimization', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async getOptimizations(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getOptimizations(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getOptimizations', req);
 
         try {
-            loggingService.info('Optimizations retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             const { page, limit, sort, order } = paginationSchema.parse(req.query);
 
@@ -341,30 +317,20 @@ export class OptimizationController {
                 })
             );
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Optimizations retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getOptimizations', req, startTime, {
                 page,
                 limit,
-                sort,
-                order,
                 optimizationsCount: result.data.length,
-                hasOptimizations: !!result.data && result.data.length > 0,
-                hasPagination: !!result.pagination,
                 totalPages: result.pagination?.pages,
-                totalCount: result.pagination?.total,
-                requestId: req.headers['x-request-id'] as string
+                totalCount: result.pagination?.total
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'optimizations_retrieved',
-                category: 'optimization_operations',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'optimizations_retrieved',
+                'optimization_operations',
+                userId,
+                Date.now() - startTime,
+                {
                     page,
                     limit,
                     sort,
@@ -375,7 +341,7 @@ export class OptimizationController {
                     totalPages: result.pagination?.pages,
                     totalCount: result.pagination?.total
                 }
-            });
+            );
 
             res.json({
                 success: true,
@@ -383,44 +349,23 @@ export class OptimizationController {
                 pagination: result.pagination,
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Optimizations retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                page: req.query.page,
-                limit: req.query.limit,
-                sort: req.query.sort,
-                order: req.query.order,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('getOptimizations', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async getOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getOptimization(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) {
+            return;
+        }
+        const userId = req.userId!;
         const { id } = req.params;
+        ControllerHelper.logRequestStart('getOptimization', req);
 
         try {
-            loggingService.info('Individual optimization retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                optimizationId: id,
-                hasOptimizationId: !!id,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            loggingService.info('Individual optimization retrieval processing started', {
-                userId,
-                optimizationId: id,
-                requestId: req.headers['x-request-id'] as string
-            });
+            // Validate MongoDB ObjectId
+            ServiceHelper.validateObjectId(id, 'Optimization ID');
 
             const result = await OptimizationService.getOptimizations(
                 { userId },
@@ -430,17 +375,7 @@ export class OptimizationController {
             const optimization = result.data.find((o: any) => o._id.toString() === id);
 
             if (!optimization) {
-                const duration = Date.now() - startTime;
-
-                loggingService.warn('Individual optimization retrieval failed - optimization not found', {
-                    userId,
-                    optimizationId: id,
-                    duration,
-                    hasResult: !!result,
-                    resultDataCount: result.data.length,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
+                ControllerHelper.logRequestSuccess('getOptimization', req, startTime, { optimizationId: id, found: false });
                 res.status(404).json({
                     success: false,
                     message: 'Optimization not found',
@@ -448,120 +383,66 @@ export class OptimizationController {
                 return;
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Individual optimization retrieved successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getOptimization', req, startTime, {
                 optimizationId: id,
-                duration,
-                hasOptimization: !!optimization,
-                hasUserQuery: !!(optimization as any)?.userQuery,
-                hasGeneratedAnswer: !!(optimization as any)?.generatedAnswer,
                 improvementPercentage: (optimization as any)?.improvementPercentage,
                 costSaved: (optimization as any)?.costSaved,
-                tokensSaved: (optimization as any)?.tokensSaved,
-                requestId: req.headers['x-request-id'] as string
+                tokensSaved: (optimization as any)?.tokensSaved
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'individual_optimization_retrieved',
-                category: 'optimization_operations',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'individual_optimization_retrieved',
+                'optimization_operations',
+                userId,
+                undefined,
+                {
                     optimizationId: id,
-                    hasOptimization: !!optimization,
-                    hasUserQuery: !!(optimization as any)?.userQuery,
-                    hasGeneratedAnswer: !!(optimization as any)?.generatedAnswer,
                     improvementPercentage: (optimization as any)?.improvementPercentage,
                     costSaved: (optimization as any)?.costSaved,
                     tokensSaved: (optimization as any)?.tokensSaved
                 }
-            });
+            );
 
+            // Keep existing response format (backward compatibility)
             res.json({
                 success: true,
                 data: optimization,
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Individual optimization retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                optimizationId: id,
-                hasOptimizationId: !!id,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('getOptimization', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async applyOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async applyOptimization(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { id } = req.params;
+        ControllerHelper.logRequestStart('applyOptimization', req);
 
         try {
-            loggingService.info('Optimization application initiated', {
-                userId,
-                hasUserId: !!userId,
-                optimizationId: id,
-                hasOptimizationId: !!id,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            loggingService.info('Optimization application processing started', {
-                userId,
-                optimizationId: id,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ServiceHelper.validateObjectId(id, 'Optimization ID');
 
             await OptimizationService.applyOptimization(id, userId);
 
-            const duration = Date.now() - startTime;
+            ControllerHelper.logRequestSuccess('applyOptimization', req, startTime, {
+                optimizationId: id
+            });
 
-            loggingService.info('Optimization applied successfully', {
+            ControllerHelper.logBusinessEvent(
+                'optimization_applied',
+                'optimization_operations',
                 userId,
-                optimizationId: id,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'optimization_applied',
-                category: 'optimization_operations',
-                value: duration,
-                metadata: {
-                    userId,
-                    optimizationId: id
-                }
-            });
+                Date.now() - startTime,
+                { optimizationId: id }
+            );
 
             res.json({
                 success: true,
                 message: 'Optimization applied successfully',
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Optimization application failed', {
-                userId,
-                hasUserId: !!userId,
-                optimizationId: id,
-                hasOptimizationId: !!id,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (error.message === 'Optimization not found') {
                 res.status(404).json({
                     success: false,
@@ -569,43 +450,23 @@ export class OptimizationController {
                 });
                 return;
             }
-
+            ControllerHelper.handleError('applyOptimization', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async provideFeedback(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async provideFeedback(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { id } = req.params;
         const { helpful, rating, comment } = req.body;
+        ControllerHelper.logRequestStart('provideFeedback', req);
 
         try {
-            loggingService.info('Optimization feedback submission initiated', {
-                userId,
-                hasUserId: !!userId,
-                optimizationId: id,
-                hasOptimizationId: !!id,
-                helpful,
-                hasHelpful: helpful !== undefined,
-                rating,
-                hasRating: rating !== undefined,
-                comment,
-                hasComment: !!comment,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ServiceHelper.validateObjectId(id, 'Optimization ID');
 
             if (helpful === undefined) {
-                loggingService.warn('Optimization feedback submission failed - helpful status is required', {
-                    userId,
-                    optimizationId: id,
-                    rating,
-                    hasRating: rating !== undefined,
-                    comment,
-                    hasComment: !!comment,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     message: 'Feedback helpful status is required',
@@ -614,16 +475,6 @@ export class OptimizationController {
             }
 
             if (rating !== undefined && (rating < 1 || rating > 5)) {
-                loggingService.warn('Optimization feedback submission failed - invalid rating', {
-                    userId,
-                    optimizationId: id,
-                    helpful,
-                    rating,
-                    comment,
-                    hasComment: !!comment,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     message: 'Rating must be between 1 and 5',
@@ -631,74 +482,37 @@ export class OptimizationController {
                 return;
             }
 
-            loggingService.info('Optimization feedback submission processing started', {
-                userId,
-                optimizationId: id,
-                helpful,
-                rating,
-                comment,
-                hasComment: !!comment,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             await OptimizationService.provideFeedback(id, userId, {
                 helpful,
                 rating,
                 comment,
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Optimization feedback submitted successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('provideFeedback', req, startTime, {
                 optimizationId: id,
-                duration,
                 helpful,
-                rating,
-                comment,
-                hasComment: !!comment,
-                requestId: req.headers['x-request-id'] as string
+                rating
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'optimization_feedback_submitted',
-                category: 'optimization_operations',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'optimization_feedback_submitted',
+                'optimization_operations',
+                userId,
+                Date.now() - startTime,
+                {
                     optimizationId: id,
                     helpful,
                     rating,
                     comment,
                     hasComment: !!comment
                 }
-            });
+            );
 
             res.json({
                 success: true,
                 message: 'Feedback submitted successfully',
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Optimization feedback submission failed', {
-                userId,
-                hasUserId: !!userId,
-                optimizationId: id,
-                hasOptimizationId: !!id,
-                helpful,
-                hasHelpful: helpful !== undefined,
-                rating,
-                hasRating: rating !== undefined,
-                comment,
-                hasComment: !!comment,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (error.message === 'Optimization not found') {
                 res.status(404).json({
                     success: false,
@@ -706,181 +520,99 @@ export class OptimizationController {
                 });
                 return;
             }
-
+            ControllerHelper.handleError('provideFeedback', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async analyzeOpportunities(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async analyzeOpportunities(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('analyzeOpportunities', req);
 
         try {
-            loggingService.info('Optimization opportunities analysis initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            loggingService.info('Optimization opportunities analysis processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const opportunities = await OptimizationService.analyzeOptimizationOpportunities(userId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Optimization opportunities analysis completed successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('analyzeOpportunities', req, startTime, {
                 opportunitiesCount: opportunities.opportunities?.length || 0,
-                hasOpportunities: !!(opportunities.opportunities && opportunities.opportunities.length > 0),
-                totalPotentialSavings: opportunities.totalPotentialSavings,
-                requestId: req.headers['x-request-id'] as string
+                totalPotentialSavings: opportunities.totalPotentialSavings
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'optimization_opportunities_analyzed',
-                category: 'optimization_operations',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'optimization_opportunities_analyzed',
+                'optimization_operations',
+                userId,
+                Date.now() - startTime,
+                {
                     opportunitiesCount: opportunities.opportunities?.length || 0,
                     hasOpportunities: !!(opportunities.opportunities && opportunities.opportunities.length > 0),
                     totalPotentialSavings: opportunities.totalPotentialSavings
                 }
-            });
+            );
 
             res.json({
                 success: true,
                 data: opportunities,
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Optimization opportunities analysis failed', {
-                userId,
-                hasUserId: !!userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('analyzeOpportunities', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async getPromptsForBulkOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getPromptsForBulkOptimization(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { service, minCalls, timeframe } = req.query;
+        ControllerHelper.logRequestStart('getPromptsForBulkOptimization', req);
 
         try {
-            loggingService.info('Prompts for bulk optimization retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                service,
-                hasService: !!service,
-                minCalls,
-                hasMinCalls: !!minCalls,
-                timeframe,
-                hasTimeframe: !!timeframe,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            loggingService.info('Prompts for bulk optimization retrieval processing started', {
-                userId,
-                service,
-                minCalls,
-                timeframe,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const prompts = await OptimizationService.getPromptsForBulkOptimization(userId, {
                 service: service as string,
                 minCalls: minCalls ? parseInt(minCalls as string) : undefined,
                 timeframe: timeframe as string,
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Prompts for bulk optimization retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getPromptsForBulkOptimization', req, startTime, {
                 service,
-                minCalls,
-                timeframe,
-                promptsCount: prompts.length,
-                hasPrompts: !!prompts && prompts.length > 0,
-                requestId: req.headers['x-request-id'] as string
+                promptsCount: prompts.length
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'prompts_for_bulk_optimization_retrieved',
-                category: 'optimization_operations',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'prompts_for_bulk_optimization_retrieved',
+                'optimization_operations',
+                userId,
+                Date.now() - startTime,
+                {
                     service,
                     minCalls,
                     timeframe,
                     promptsCount: prompts.length,
                     hasPrompts: !!prompts && prompts.length > 0
                 }
-            });
+            );
 
             res.json({
                 success: true,
                 data: prompts,
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Prompts for bulk optimization retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                service,
-                hasService: !!service,
-                minCalls,
-                hasMinCalls: !!minCalls,
-                timeframe,
-                hasTimeframe: !!timeframe,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('getPromptsForBulkOptimization', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async bulkOptimize(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async bulkOptimize(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { promptIds, cortexEnabled, cortexConfig } = req.body;
+        ControllerHelper.logRequestStart('bulkOptimize', req);
 
         try {
-            loggingService.info('Bulk optimization initiated', {
-                userId,
-                hasUserId: !!userId,
-                hasPromptIds: !!promptIds,
-                promptIdsCount: Array.isArray(promptIds) ? promptIds.length : 0,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!Array.isArray(promptIds) || promptIds.length === 0) {
-                loggingService.warn('Bulk optimization failed - array of prompt IDs is required', {
-                    userId,
-                    hasPromptIds: !!promptIds,
-                    promptIdsCount: Array.isArray(promptIds) ? promptIds.length : 0,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     message: 'Array of prompt IDs is required',
@@ -889,12 +621,6 @@ export class OptimizationController {
             }
 
             if (promptIds.length > 10) {
-                loggingService.warn('Bulk optimization failed - maximum 10 prompts allowed', {
-                    userId,
-                    promptIdsCount: promptIds.length,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     message: 'Maximum 10 prompts can be optimized at once',
@@ -902,42 +628,29 @@ export class OptimizationController {
                 return;
             }
 
-            loggingService.info('Bulk optimization processing started', {
-                userId,
-                promptIdsCount: promptIds.length,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const result = await OptimizationService.generateBulkOptimizations(userId, promptIds, {
                 cortexEnabled,
                 cortexConfig
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Bulk optimization completed successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('bulkOptimize', req, startTime, {
                 promptIdsCount: promptIds.length,
                 successful: result.successful,
-                total: result.total,
-                hasResult: !!result,
-                requestId: req.headers['x-request-id'] as string
+                total: result.total
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'bulk_optimization_completed',
-                category: 'optimization_operations',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'bulk_optimization_completed',
+                'optimization_operations',
+                userId,
+                Date.now() - startTime,
+                {
                     promptIdsCount: promptIds.length,
                     successful: result.successful,
                     total: result.total,
                     hasResult: !!result
                 }
-            });
+            );
 
             res.json({
                 success: true,
@@ -945,28 +658,19 @@ export class OptimizationController {
                 data: result,
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Bulk optimization failed', {
-                userId,
-                hasUserId: !!userId,
-                hasPromptIds: !!promptIds,
-                promptIdsCount: Array.isArray(promptIds) ? promptIds.length : 0,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ControllerHelper.handleError('bulkOptimize', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async getOptimizationSummary(req: any, res: Response, next: NextFunction): Promise<void> {
-        try {
-            const userId = req.user!.id;
-            const timeframe = (req.query.timeframe as string) || '30d';
+    static async getOptimizationSummary(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        const timeframe = (req.query.timeframe as string) || '30d';
+        ControllerHelper.logRequestStart('getOptimizationSummary', req);
 
+        try {
             let startDate: Date;
             const endDate = new Date();
 
@@ -1040,6 +744,10 @@ export class OptimizationController {
             const topOptimizations = summaryResult.topOptimizations || [];
 
             if (!summaryStats) {
+                ControllerHelper.logRequestSuccess('getOptimizationSummary', req, startTime, {
+                    timeframe,
+                    total: 0
+                });
                 res.json({
                     success: true,
                     data: {
@@ -1072,21 +780,29 @@ export class OptimizationController {
                 topOptimizations,
             };
 
+            ControllerHelper.logRequestSuccess('getOptimizationSummary', req, startTime, {
+                timeframe,
+                total: summary.total
+            });
+
             res.json({
                 success: true,
                 data: summary,
             });
         } catch (error: any) {
-            loggingService.error('Get optimization summary error:', error);
+            ControllerHelper.handleError('getOptimizationSummary', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async createBatchOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
-        try {
-            const userId = req.user!.id;
-            const { requests } = req.body;
+    static async createBatchOptimization(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        const { requests } = req.body;
+        ControllerHelper.logRequestStart('createBatchOptimization', req);
 
+        try {
             if (!Array.isArray(requests) || requests.length < 2) {
                 res.status(400).json({
                     success: false,
@@ -1109,6 +825,10 @@ export class OptimizationController {
                 enableFusion: req.body.enableFusion !== false,
             });
 
+            ControllerHelper.logRequestSuccess('createBatchOptimization', req, startTime, {
+                optimizationsCount: optimizations.length
+            });
+
             res.status(201).json({
                 success: true,
                 message: `Successfully created ${optimizations.length} batch optimizations`,
@@ -1121,16 +841,19 @@ export class OptimizationController {
                 })),
             });
         } catch (error: any) {
-            loggingService.error('Create batch optimization error:', error);
+            ControllerHelper.handleError('createBatchOptimization', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async optimizeConversation(req: any, res: Response, next: NextFunction): Promise<void> {
-        try {
-            const userId = req.user!.id;
-            const { messages, model, service } = req.body;
+    static async optimizeConversation(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        const { messages, model, service } = req.body;
+        ControllerHelper.logRequestStart('optimizeConversation', req);
 
+        try {
             if (!Array.isArray(messages) || messages.length === 0) {
                 res.status(400).json({
                     success: false,
@@ -1165,6 +888,11 @@ export class OptimizationController {
                 }
             });
 
+            ControllerHelper.logRequestSuccess('optimizeConversation', req, startTime, {
+                optimizationId: optimization._id,
+                originalMessages: messages.length
+            });
+
             res.status(201).json({
                 success: true,
                 message: 'Conversation optimization created successfully',
@@ -1180,16 +908,19 @@ export class OptimizationController {
                 },
             });
         } catch (error: any) {
-            loggingService.error('Optimize conversation error:', error);
+            ControllerHelper.handleError('optimizeConversation', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async getOptimizationPreview(req: any, res: Response, next: NextFunction): Promise<void> {
-        try {
-            const userId = req.user!.id;
-            const { prompt, model, service, conversationHistory, enableCompression, enableContextTrimming, enableRequestFusion } = req.body;
+    static async getOptimizationPreview(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        const { prompt, model, service, conversationHistory, enableCompression, enableContextTrimming, enableRequestFusion } = req.body;
+        ControllerHelper.logRequestStart('getOptimizationPreview', req);
 
+        try {
             if (!prompt || !model || !service) {
                 res.status(400).json({
                     success: false,
@@ -1211,6 +942,10 @@ export class OptimizationController {
                 }
             });
 
+            ControllerHelper.logRequestSuccess('getOptimizationPreview', req, startTime, {
+                improvementPercentage: optimization.improvementPercentage
+            });
+
             res.json({
                 success: true,
                 data: {
@@ -1223,14 +958,16 @@ export class OptimizationController {
                 },
             });
         } catch (error: any) {
-            loggingService.error('Get optimization preview error:', error);
+            ControllerHelper.handleError('getOptimizationPreview', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async getOptimizationConfig(res: Response, next: NextFunction): Promise<void> {
-        try {
+    static async getOptimizationConfig(_req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getOptimizationConfig', _req);
 
+        try {
             // For now, return default configuration
             // In a real implementation, this would be stored per user in the database
             const defaultConfig = {
@@ -1265,24 +1002,32 @@ export class OptimizationController {
                 }
             };
 
+            ControllerHelper.logRequestSuccess('getOptimizationConfig', _req, startTime);
+
             res.json({
                 success: true,
                 data: defaultConfig,
             });
         } catch (error: any) {
-            loggingService.error('Get optimization config error:', error);
+            ControllerHelper.handleError('getOptimizationConfig', error, _req, res, startTime);
             next(error);
         }
     }
 
-    static async updateOptimizationConfig(req: any, res: Response, next: NextFunction): Promise<void> {
-        try {
-            const userId = req.user!.id;
-            const config = req.body;
+    static async updateOptimizationConfig(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        const config = req.body;
+        ControllerHelper.logRequestStart('updateOptimizationConfig', req);
 
+        try {
             // For now, just acknowledge the update
             // In a real implementation, this would update the user's configuration in the database
-            loggingService.info('Optimization config updated for user:', { userId, config });
+
+            ControllerHelper.logRequestSuccess('updateOptimizationConfig', req, startTime, {
+                configKeys: Object.keys(config || {})
+            });
 
             res.json({
                 success: true,
@@ -1290,91 +1035,102 @@ export class OptimizationController {
                 data: config,
             });
         } catch (error: any) {
-            loggingService.error('Update optimization config error:', error);
+            ControllerHelper.handleError('updateOptimizationConfig', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async getOptimizationTemplates(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getOptimizationTemplates(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getOptimizationTemplates', req);
+
         try {
             const { category } = req.query;
 
             // Get real optimization templates from database
-            const templates = await OptimizationService.getOptimizationTemplates(category);
+            const templates = await OptimizationService.getOptimizationTemplates(category as string | undefined);
+
+            ControllerHelper.logRequestSuccess('getOptimizationTemplates', req, startTime, {
+                category,
+                templatesCount: templates.length
+            });
 
             res.json({
                 success: true,
                 data: templates,
             });
         } catch (error: any) {
-            loggingService.error('Get optimization templates error:', error);
+            ControllerHelper.handleError('getOptimizationTemplates', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async getOptimizationHistory(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getOptimizationHistory(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        
-        try {
-            const { promptHash } = req.params;
-            const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        const { promptHash } = req.params;
+        ControllerHelper.logRequestStart('getOptimizationHistory', req);
 
+        try {
             // Get real optimization history from database
             const history = await OptimizationService.getOptimizationHistory(promptHash, userId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Optimization history retrieved successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getOptimizationHistory', req, startTime, {
                 promptHash,
-                hasPromptHash: !!promptHash,
-                duration,
                 historyCount: history.history?.length || 0,
-                hasHistory: !!(history.history && history.history.length > 0),
-                currentVersion: history.currentVersion,
-                requestId: req.headers['x-request-id'] as string
+                currentVersion: history.currentVersion
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'optimization_history_retrieved',
-                category: 'optimization_operations',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'optimization_history_retrieved',
+                'optimization_operations',
+                userId,
+                Date.now() - startTime,
+                {
                     promptHash,
                     hasPromptHash: !!promptHash,
                     historyCount: history.history?.length || 0,
                     hasHistory: !!(history.history && history.history.length > 0),
                     currentVersion: history.currentVersion
                 }
-            });
+            );
 
             res.json({
                 success: true,
                 data: history,
             });
         } catch (error: any) {
-            loggingService.error('Get optimization history error:', error);
+            ControllerHelper.handleError('getOptimizationHistory', error, req, res, startTime);
             next(error);
         }
     }
 
-    static async revertOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async revertOptimization(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        const { id } = req.params;
+        const { version } = req.body;
+        ControllerHelper.logRequestStart('revertOptimization', req);
+
         try {
-            const { id } = req.params;
-            const userId = req.user!.id;
-            const { version } = req.body;
+            ServiceHelper.validateObjectId(id, 'Optimization ID');
 
             // Revert optimization to previous version
             await OptimizationService.revertOptimization(id, userId, version);
+
+            ControllerHelper.logRequestSuccess('revertOptimization', req, startTime, {
+                optimizationId: id,
+                version
+            });
 
             res.json({
                 success: true,
                 message: 'Optimization reverted successfully',
             });
         } catch (error: any) {
-            loggingService.error('Revert optimization error:', error);
+            ControllerHelper.handleError('revertOptimization', error, req, res, startTime);
             next(error);
         }
     }
@@ -1382,10 +1138,17 @@ export class OptimizationController {
     /**
      * Get Cortex cache statistics
      */
-    static async getCortexCacheStats(_req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getCortexCacheStats(_req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getCortexCacheStats', _req);
+
         try {
             const { CortexCacheService } = await import('../services/cortexCache.service');
             const stats = CortexCacheService.getCacheStats();
+            
+            ControllerHelper.logRequestSuccess('getCortexCacheStats', _req, startTime, {
+                hitRate: stats.hitRate
+            });
             
             res.status(200).json({
                 success: true,
@@ -1399,10 +1162,7 @@ export class OptimizationController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Failed to get cache stats', {
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
+            ControllerHelper.handleError('getCortexCacheStats', error, _req, res, startTime);
             next(error);
         }
     }
@@ -1410,20 +1170,22 @@ export class OptimizationController {
     /**
      * Clear Cortex cache (admin endpoint)
      */
-    static async clearCortexCache(_req: any, res: Response, next: NextFunction): Promise<void> {
+    static async clearCortexCache(_req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('clearCortexCache', _req);
+
         try {
             const { CortexCacheService } = await import('../services/cortexCache.service');
             CortexCacheService.clearCache();
+            
+            ControllerHelper.logRequestSuccess('clearCortexCache', _req, startTime);
             
             res.status(200).json({
                 success: true,
                 message: 'Cortex cache cleared successfully'
             });
         } catch (error: any) {
-            loggingService.error('Failed to clear cache', {
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
+            ControllerHelper.handleError('clearCortexCache', error, _req, res, startTime);
             next(error);
         }
     }

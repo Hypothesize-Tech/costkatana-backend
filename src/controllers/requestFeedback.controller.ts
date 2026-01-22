@@ -1,6 +1,8 @@
 import { Response, NextFunction } from 'express';
 import { RequestFeedbackService, FeedbackData } from '../services/requestFeedback.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class RequestFeedbackController {
     // Background processing queue
@@ -24,37 +26,16 @@ export class RequestFeedbackController {
      * Submit feedback for a specific request
      * POST /api/v1/request/:requestId/feedback
      */
-    static async submitFeedback(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async submitFeedback(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
-        const { requestId: feedbackRequestId } = req.params;
-
         try {
-            this.conditionalLog('info', 'Feedback submission initiated', {
-                userId,
-                requestId,
-                feedbackRequestId,
-                rating: req.body?.rating
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('submitFeedback', req);
 
-            if (!userId) {
-                this.conditionalLog('warn', 'Feedback submission failed - user not authenticated', {
-                    requestId,
-                    feedbackRequestId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
+            const { requestId: feedbackRequestId } = req.params;
 
             if (!feedbackRequestId) {
-                this.conditionalLog('warn', 'Feedback submission failed - request ID is required', {
-                    userId,
-                    requestId
-                });
                 res.status(400).json({
                     success: false,
                     error: 'Request ID is required'
@@ -62,15 +43,11 @@ export class RequestFeedbackController {
                 return;
             }
 
+            ServiceHelper.validateObjectId(feedbackRequestId, 'requestId');
+
             const { rating, comment, implicitSignals } = req.body;
 
             if (typeof rating !== 'boolean') {
-                this.conditionalLog('warn', 'Feedback submission failed - invalid rating type', {
-                    userId,
-                    requestId,
-                    feedbackRequestId,
-                    ratingType: typeof rating
-                });
                 res.status(400).json({
                     success: false,
                     error: 'Rating must be a boolean (true for positive, false for negative)'
@@ -87,11 +64,8 @@ export class RequestFeedbackController {
             };
 
             await RequestFeedbackService.submitFeedback(feedbackRequestId, userId, feedbackData);
-            const duration = Date.now() - startTime;
 
-            this.conditionalLog('info', 'Feedback submitted successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('submitFeedback', req, startTime, {
                 feedbackRequestId,
                 rating
             });
@@ -101,7 +75,7 @@ export class RequestFeedbackController {
                 loggingService.logBusiness({
                     event: 'feedback_submitted',
                     category: 'request_feedback',
-                    value: duration,
+                    value: Date.now() - startTime,
                     metadata: {
                         userId,
                         feedbackRequestId,
@@ -119,15 +93,6 @@ export class RequestFeedbackController {
 
         } catch (error: any) {
             RequestFeedbackController.recordDbFailure();
-            const duration = Date.now() - startTime;
-            
-            this.conditionalLog('error', 'Feedback submission failed', {
-                userId,
-                requestId,
-                feedbackRequestId,
-                error: error.message || 'Unknown error',
-                duration
-            });
 
             if (error.message === 'Feedback already exists for this request') {
                 res.status(409).json({
@@ -137,7 +102,7 @@ export class RequestFeedbackController {
                 return;
             }
 
-            next(error);
+            ControllerHelper.handleError('submitFeedback', error, req, res, startTime);
         }
     }
 
@@ -145,37 +110,16 @@ export class RequestFeedbackController {
      * Get feedback analytics for the authenticated user
      * GET /api/v1/feedback/analytics
      */
-    static async getFeedbackAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getFeedbackAnalytics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
-
         try {
-            this.conditionalLog('info', 'Feedback analytics retrieval initiated', {
-                userId,
-                requestId
-            });
-
-            if (!userId) {
-                loggingService.warn('Feedback analytics retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getFeedbackAnalytics', req);
 
             const analytics = await RequestFeedbackService.getFeedbackAnalytics(userId);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Feedback analytics retrieved successfully', {
-                userId,
-                duration,
-                hasAnalytics: !!analytics,
-                requestId
-            });
+            ControllerHelper.logRequestSuccess('getFeedbackAnalytics', req, startTime);
 
             res.json({
                 success: true,
@@ -183,18 +127,7 @@ export class RequestFeedbackController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Feedback analytics retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            next(error);
+            ControllerHelper.handleError('getFeedbackAnalytics', error, req, res, startTime);
         }
     }
 
@@ -202,38 +135,16 @@ export class RequestFeedbackController {
      * Get global feedback analytics (admin only)
      * GET /api/v1/feedback/analytics/global
      */
-    static async getGlobalFeedbackAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getGlobalFeedbackAnalytics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
-
         try {
-            loggingService.info('Global feedback analytics retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId
-            });
-
-            if (!userId) {
-                loggingService.warn('Global feedback analytics retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getGlobalFeedbackAnalytics', req);
 
             // Check if user has admin role
-            const user = (req as any).user;
-            if (user.role !== 'admin' && user.role !== 'owner') {
-                loggingService.warn('Global feedback analytics retrieval failed - insufficient permissions', {
-                    userId,
-                    requestId,
-                    userRole: user.role,
-                    hasAdminRole: user.role === 'admin' || user.role === 'owner'
-                });
+            const user = req.user;
+            if (user?.role !== 'admin' && user?.role !== 'owner') {
                 res.status(403).json({
                     success: false,
                     error: 'Admin access required'
@@ -242,24 +153,17 @@ export class RequestFeedbackController {
             }
 
             const analytics = await RequestFeedbackService.getGlobalFeedbackAnalytics();
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Global feedback analytics retrieved successfully', {
-                userId,
-                duration,
-                userRole: user.role,
-                hasAnalytics: !!analytics,
-                requestId
-            });
+            ControllerHelper.logRequestSuccess('getGlobalFeedbackAnalytics', req, startTime);
 
             // Log business event
             loggingService.logBusiness({
                 event: 'global_feedback_analytics_retrieved',
                 category: 'request_feedback',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
-                    userRole: user.role
+                    userRole: user?.role
                 }
             });
 
@@ -269,18 +173,7 @@ export class RequestFeedbackController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Global feedback analytics retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            next(error);
+            ControllerHelper.handleError('getGlobalFeedbackAnalytics', error, req, res, startTime);
         }
     }
 
@@ -288,38 +181,16 @@ export class RequestFeedbackController {
      * Get feedback for a specific request
      * GET /api/v1/request/:requestId/feedback
      */
-    static async getFeedbackByRequestId(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getFeedbackByRequestId(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
-        const { requestId: feedbackRequestId } = req.params;
-
         try {
-            loggingService.info('Feedback by request ID retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                feedbackRequestId,
-                hasFeedbackRequestId: !!feedbackRequestId
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getFeedbackByRequestId', req);
 
-            if (!userId) {
-                loggingService.warn('Feedback by request ID retrieval failed - user not authenticated', {
-                    requestId,
-                    feedbackRequestId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
+            const { requestId: feedbackRequestId } = req.params;
 
             if (!feedbackRequestId) {
-                loggingService.warn('Feedback by request ID retrieval failed - request ID is required', {
-                    userId,
-                    requestId
-                });
                 res.status(400).json({
                     success: false,
                     error: 'Request ID is required'
@@ -327,14 +198,11 @@ export class RequestFeedbackController {
                 return;
             }
 
+            ServiceHelper.validateObjectId(feedbackRequestId, 'requestId');
+
             const feedback = await RequestFeedbackService.getFeedbackByRequestId(feedbackRequestId);
 
             if (!feedback) {
-                loggingService.warn('Feedback by request ID retrieval failed - feedback not found', {
-                    userId,
-                    requestId,
-                    feedbackRequestId
-                });
                 res.status(404).json({
                     success: false,
                     error: 'Feedback not found for this request'
@@ -344,13 +212,6 @@ export class RequestFeedbackController {
 
             // Only allow users to see their own feedback
             if (feedback.userId !== userId) {
-                loggingService.warn('Feedback by request ID retrieval failed - access denied', {
-                    userId,
-                    requestId,
-                    feedbackRequestId,
-                    feedbackUserId: feedback.userId,
-                    hasAccess: feedback.userId === userId
-                });
                 res.status(403).json({
                     success: false,
                     error: 'Access denied'
@@ -358,14 +219,8 @@ export class RequestFeedbackController {
                 return;
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Feedback by request ID retrieved successfully', {
-                userId,
-                duration,
-                feedbackRequestId,
-                hasFeedback: !!feedback,
-                requestId
+            ControllerHelper.logRequestSuccess('getFeedbackByRequestId', req, startTime, {
+                feedbackRequestId
             });
 
             res.json({
@@ -374,19 +229,7 @@ export class RequestFeedbackController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Feedback by request ID retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                feedbackRequestId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            next(error);
+            ControllerHelper.handleError('getFeedbackByRequestId', error, req, res, startTime);
         }
     }
 
@@ -394,54 +237,24 @@ export class RequestFeedbackController {
      * Update implicit signals for a request
      * PUT /api/v1/request/:requestId/implicit-signals
      */
-    static async updateImplicitSignals(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async updateImplicitSignals(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
-        const { requestId: feedbackRequestId } = req.params;
-
         try {
-            loggingService.info('Implicit signals update initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                feedbackRequestId,
-                hasFeedbackRequestId: !!feedbackRequestId,
-                copied: req.body?.copied,
-                hasCopied: typeof req.body?.copied === 'boolean',
-                conversationContinued: req.body?.conversationContinued,
-                hasConversationContinued: typeof req.body?.conversationContinued === 'boolean',
-                immediateRephrase: req.body?.immediateRephrase,
-                hasImmediateRephrase: typeof req.body?.immediateRephrase === 'boolean',
-                sessionDuration: req.body?.sessionDuration,
-                hasSessionDuration: typeof req.body?.sessionDuration === 'number',
-                codeAccepted: req.body?.codeAccepted,
-                hasCodeAccepted: typeof req.body?.codeAccepted === 'boolean'
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('updateImplicitSignals', req);
 
-            if (!userId) {
-                loggingService.warn('Implicit signals update failed - user not authenticated', {
-                    requestId,
-                    feedbackRequestId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
+            const { requestId: feedbackRequestId } = req.params;
 
             if (!feedbackRequestId) {
-                loggingService.warn('Implicit signals update failed - request ID is required', {
-                    userId,
-                    requestId
-                });
                 res.status(400).json({
                     success: false,
                     error: 'Request ID is required'
                 });
                 return;
             }
+
+            ServiceHelper.validateObjectId(feedbackRequestId, 'requestId');
 
             const { copied, conversationContinued, immediateRephrase, sessionDuration, codeAccepted } = req.body;
 
@@ -454,13 +267,6 @@ export class RequestFeedbackController {
             if (typeof codeAccepted === 'boolean') signals.codeAccepted = codeAccepted;
 
             if (Object.keys(signals).length === 0) {
-                loggingService.warn('Implicit signals update failed - no valid signals provided', {
-                    userId,
-                    requestId,
-                    feedbackRequestId,
-                    signalsCount: Object.keys(signals).length,
-                    hasValidSignals: Object.keys(signals).length > 0
-                });
                 res.status(400).json({
                     success: false,
                     error: 'At least one valid implicit signal must be provided'
@@ -469,22 +275,17 @@ export class RequestFeedbackController {
             }
 
             await RequestFeedbackService.updateImplicitSignals(feedbackRequestId, signals);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Implicit signals updated successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('updateImplicitSignals', req, startTime, {
                 feedbackRequestId,
-                signalsCount: Object.keys(signals).length,
-                signals: Object.keys(signals),
-                requestId
+                signalsCount: Object.keys(signals).length
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'implicit_signals_updated',
                 category: 'request_feedback',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     feedbackRequestId,
@@ -499,20 +300,7 @@ export class RequestFeedbackController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Implicit signals update failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                feedbackRequestId,
-                signalsCount: Object.keys(req.body || {}),
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            next(error);
+            ControllerHelper.handleError('updateImplicitSignals', error, req, res, startTime);
         }
     }
 

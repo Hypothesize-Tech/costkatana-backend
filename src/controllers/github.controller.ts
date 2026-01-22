@@ -4,6 +4,8 @@ import { GitHubIntegrationService, StartIntegrationOptions } from '../services/g
 import { GitHubConnection, GitHubIntegration } from '../models';
 import { loggingService } from '../services/logging.service';
 import { GitHubErrors } from '../utils/githubErrors';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 import crypto from 'crypto';
 
 export class GitHubController {
@@ -11,14 +13,14 @@ export class GitHubController {
      * Initialize GitHub App installation
      * GET /api/github/install
      */
-    static async initiateAppInstallation(req: any, res: Response): Promise<void> {
+    static async initiateAppInstallation(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const userId = req.userId;
-            if (!userId) {
-                const error = GitHubErrors.AUTH_REQUIRED;
-                res.status(error.httpStatus).json(GitHubErrors.formatError(error));
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('initiateAppInstallation', req);
 
             const appId = process.env.GITHUB_APP_ID;
             if (!appId) {
@@ -33,20 +35,17 @@ export class GitHubController {
             const state = Buffer.from(JSON.stringify({ userId, nonce, timestamp, type: 'app' })).toString('base64');
             
             // Store state in session for validation
-            if (!req.session) {
+            if (!(req as any).session) {
                 const error = GitHubErrors.SESSION_NOT_CONFIGURED;
                 loggingService.error(error.message, { code: error.code });
                 res.status(error.httpStatus).json(GitHubErrors.formatError(error));
                 return;
             }
-            req.session.githubAppState = { state, nonce, timestamp, userId };
+            (req as any).session.githubAppState = { state, nonce, timestamp, userId };
 
             const installUrl = `https://github.com/apps/${process.env.GITHUB_APP_SLUG || 'costkatana'}/installations/new?state=${state}`;
 
-            loggingService.info('GitHub App installation initiated', {
-                userId,
-                hasSession: !!req.session
-            });
+            ControllerHelper.logRequestSuccess('initiateAppInstallation', req, startTime, { userId, hasSession: !!(req as any).session });
 
             res.json({
                 success: true,
@@ -57,16 +56,7 @@ export class GitHubController {
             });
 
         } catch (error: any) {
-            loggingService.error('Failed to initiate GitHub App installation', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to initiate GitHub App installation',
-                error: error.message
-            });
+            ControllerHelper.handleError('initiateAppInstallation', error, req, res, startTime);
         }
     }
 
@@ -74,14 +64,14 @@ export class GitHubController {
      * Initialize OAuth flow
      * GET /api/github/auth
      */
-    static async initiateOAuth(req: any, res: Response): Promise<void> {
+    static async initiateOAuth(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const userId = req.userId;
-            if (!userId) {
-                const error = GitHubErrors.AUTH_REQUIRED;
-                res.status(error.httpStatus).json(GitHubErrors.formatError(error));
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('initiateOAuth', req);
 
             // Initialize GitHub service first
             await GitHubService.initialize();
@@ -104,10 +94,7 @@ export class GitHubController {
             const scopes = 'repo,read:user,user:email';
             const authUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${scopes}&state=${stateData}`;
 
-            loggingService.info('GitHub OAuth flow initiated', {
-                userId,
-                hasRedis: true
-            });
+            ControllerHelper.logRequestSuccess('initiateOAuth', req, startTime, { userId, hasRedis: true });
 
             res.json({
                 success: true,
@@ -117,16 +104,7 @@ export class GitHubController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Failed to initiate GitHub OAuth', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to initiate OAuth flow',
-                error: error.message
-            });
+            ControllerHelper.handleError('initiateOAuth', error, req, res, startTime);
         }
     }
 
@@ -135,8 +113,10 @@ export class GitHubController {
      * GET /api/github/callback
      * Handles both user authentication OAuth (login) and integration OAuth
      */
-    static async handleOAuthCallback(req: any, res: Response): Promise<void> {
+    static async handleOAuthCallback(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
+            ControllerHelper.logRequestStart('handleOAuthCallback', req);
             const { code, state, installation_id, setup_action } = req.query;
 
             // Handle GitHub App installation
@@ -464,7 +444,8 @@ export class GitHubController {
                 error: error.message,
                 stack: error.stack,
                 code: error.code,
-                status: error.status
+                status: error.status,
+                duration: Date.now() - startTime
             });
 
             const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
@@ -477,8 +458,10 @@ export class GitHubController {
      * Handle GitHub App installation
      * GET /api/github/callback?installation_id=xxx&setup_action=install&state=xxx
      */
-    static async handleGitHubAppInstallation(req: any, res: Response, installationId: string): Promise<void> {
+    static async handleGitHubAppInstallation(req: AuthenticatedRequest, res: Response, installationId: string): Promise<void> {
+        const startTime = Date.now();
         try {
+            ControllerHelper.logRequestStart('handleGitHubAppInstallation', req);
             // Initialize GitHub service first
             await GitHubService.initialize();
 
@@ -491,14 +474,14 @@ export class GitHubController {
                     const stateData = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
                     
                     // Validate state if stored in session
-                    const storedState = req.session?.githubAppState;
+                    const storedState = (req as any).session?.githubAppState;
                     if (storedState && storedState.state === state) {
                         // Validate timestamp (10 minute window)
                         const stateAge = Date.now() - storedState.timestamp;
                         if (stateAge <= 10 * 60 * 1000) {
                             userId = storedState.userId;
                             // Clear used state
-                            delete req.session.githubAppState;
+                            delete (req as any).session.githubAppState;
                             
                             loggingService.info('GitHub App state validated successfully', {
                                 userId,
@@ -528,7 +511,7 @@ export class GitHubController {
 
             // Fallback to session userId
             if (!userId) {
-                userId = req.userId || req.session?.userId;
+                userId = req.userId || (req as any).session?.userId;
             }
             
             if (!userId) {
@@ -575,7 +558,7 @@ export class GitHubController {
             connection.repositories = repositories;
             await connection.save();
 
-            loggingService.info('GitHub App installation completed', {
+            ControllerHelper.logRequestSuccess('handleGitHubAppInstallation', req, startTime, {
                 userId,
                 installationId,
                 repositoriesCount: repositories.length
@@ -589,7 +572,8 @@ export class GitHubController {
             loggingService.error('GitHub App installation failed', {
                 installationId,
                 error: error.message,
-                stack: error.stack
+                stack: error.stack,
+                duration: Date.now() - startTime
             });
 
             const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
@@ -602,36 +586,28 @@ export class GitHubController {
      * List user's GitHub connections
      * GET /api/github/connections
      */
-    static async listConnections(req: any, res: Response): Promise<void> {
+    static async listConnections(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const userId = req.userId;
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('listConnections', req);
 
             const connections = await GitHubConnection.find({
                 userId,
                 isActive: true
             });
 
+            ControllerHelper.logRequestSuccess('listConnections', req, startTime, { userId, count: connections.length });
+
             res.json({
                 success: true,
                 data: connections
             });
         } catch (error: any) {
-            loggingService.error('Failed to list GitHub connections', {
-                error: error.message
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to list connections',
-                error: error.message
-            });
+            ControllerHelper.handleError('listConnections', error, req, res, startTime);
         }
     }
 
@@ -639,18 +615,17 @@ export class GitHubController {
      * Get repositories for a connection
      * GET /api/github/connections/:connectionId/repositories
      */
-    static async getRepositories(req: any, res: Response): Promise<void> {
+    static async getRepositories(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const userId = req.userId;
-            const { connectionId } = req.params;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getRepositories', req);
+
+            const { connectionId } = req.params;
+            ServiceHelper.validateObjectId(connectionId, 'connectionId');
 
             const connection = await GitHubConnection.findOne({
                 _id: connectionId,
@@ -681,6 +656,8 @@ export class GitHubController {
                 }
             }
 
+            ControllerHelper.logRequestSuccess('getRepositories', req, startTime, { userId, connectionId });
+
             res.json({
                 success: true,
                 data: {
@@ -689,15 +666,7 @@ export class GitHubController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Failed to get repositories', {
-                error: error.message
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get repositories',
-                error: error.message
-            });
+            ControllerHelper.handleError('getRepositories', error, req, res, startTime);
         }
     }
 
@@ -705,16 +674,14 @@ export class GitHubController {
      * Start integration for a repository
      * POST /api/github/integrations
      */
-    static async startIntegration(req: any, res: Response): Promise<void> {
+    static async startIntegration(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const userId = req.userId;
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('startIntegration', req);
 
             const {
                 connectionId,
@@ -756,9 +723,11 @@ export class GitHubController {
                 conversationId
             };
 
+            ServiceHelper.validateObjectId(connectionId, 'connectionId');
+
             const integration = await GitHubIntegrationService.startIntegration(options);
 
-            loggingService.info('GitHub integration started', {
+            ControllerHelper.logRequestSuccess('startIntegration', req, startTime, {
                 userId,
                 integrationId: integration._id.toString(),
                 repository: repositoryFullName
@@ -774,16 +743,7 @@ export class GitHubController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Failed to start integration', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to start integration',
-                error: error.message
-            });
+            ControllerHelper.handleError('startIntegration', error, req, res, startTime);
         }
     }
 
@@ -791,18 +751,17 @@ export class GitHubController {
      * Get integration status
      * GET /api/github/integrations/:integrationId
      */
-    static async getIntegrationStatus(req: any, res: Response): Promise<void> {
+    static async getIntegrationStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const userId = req.userId;
-            const { integrationId } = req.params;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getIntegrationStatus', req);
+
+            const { integrationId } = req.params;
+            ServiceHelper.validateObjectId(integrationId, 'integrationId');
 
             const integration = await GitHubIntegration.findOne({
                 _id: integrationId,
@@ -820,20 +779,14 @@ export class GitHubController {
 
             const progress = await GitHubIntegrationService.getIntegrationStatus(integrationId);
 
+            ControllerHelper.logRequestSuccess('getIntegrationStatus', req, startTime, { userId, integrationId });
+
             res.json({
                 success: true,
                 data: progress
             });
         } catch (error: any) {
-            loggingService.error('Failed to get integration status', {
-                error: error.message
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get integration status',
-                error: error.message
-            });
+            ControllerHelper.handleError('getIntegrationStatus', error, req, res, startTime);
         }
     }
 
@@ -841,16 +794,14 @@ export class GitHubController {
      * List user's integrations
      * GET /api/github/integrations
      */
-    static async listIntegrations(req: any, res: Response): Promise<void> {
+    static async listIntegrations(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const userId = req.userId;
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('listIntegrations', req);
 
             const { status, limit } = req.query;
 
@@ -859,20 +810,14 @@ export class GitHubController {
                 limit: limit ? parseInt(limit as string) : undefined
             });
 
+            ControllerHelper.logRequestSuccess('listIntegrations', req, startTime, { userId, count: integrations.length });
+
             res.json({
                 success: true,
                 data: integrations
             });
         } catch (error: any) {
-            loggingService.error('Failed to list integrations', {
-                error: error.message
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to list integrations',
-                error: error.message
-            });
+            ControllerHelper.handleError('listIntegrations', error, req, res, startTime);
         }
     }
 
@@ -880,19 +825,19 @@ export class GitHubController {
      * Update integration from chat
      * POST /api/github/integrations/:integrationId/update
      */
-    static async updateIntegration(req: any, res: Response): Promise<void> {
+    static async updateIntegration(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const userId = req.userId;
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('updateIntegration', req);
+
             const { integrationId } = req.params;
             const { changes } = req.body;
 
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
+            ServiceHelper.validateObjectId(integrationId, 'integrationId');
 
             if (!changes) {
                 res.status(400).json({
@@ -915,20 +860,14 @@ export class GitHubController {
 
             await GitHubIntegrationService.updateIntegrationFromChat(integrationId, changes);
 
+            ControllerHelper.logRequestSuccess('updateIntegration', req, startTime, { userId, integrationId });
+
             res.json({
                 success: true,
                 message: 'Integration update started'
             });
         } catch (error: any) {
-            loggingService.error('Failed to update integration', {
-                error: error.message
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to update integration',
-                error: error.message
-            });
+            ControllerHelper.handleError('updateIntegration', error, req, res, startTime);
         }
     }
 
@@ -936,18 +875,17 @@ export class GitHubController {
      * Disconnect GitHub connection
      * DELETE /api/github/connections/:connectionId
      */
-    static async disconnectConnection(req: any, res: Response): Promise<void> {
+    static async disconnectConnection(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const userId = req.userId;
-            const { connectionId } = req.params;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
+            if (!ControllerHelper.requireAuth(req, res)) {
                 return;
             }
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('disconnectConnection', req);
+
+            const { connectionId } = req.params;
+            ServiceHelper.validateObjectId(connectionId, 'connectionId');
 
             const connection = await GitHubConnection.findOne({
                 _id: connectionId,
@@ -963,25 +901,14 @@ export class GitHubController {
             connection.isActive = false;
             await connection.save();
 
-            loggingService.info('GitHub connection disconnected', {
-                userId,
-                connectionId
-            });
+            ControllerHelper.logRequestSuccess('disconnectConnection', req, startTime, { userId, connectionId });
 
             res.json({
                 success: true,
                 message: 'Connection disconnected successfully'
             });
         } catch (error: any) {
-            loggingService.error('Failed to disconnect connection', {
-                error: error.message
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to disconnect connection',
-                error: error.message
-            });
+            ControllerHelper.handleError('disconnectConnection', error, req, res, startTime);
         }
     }
 

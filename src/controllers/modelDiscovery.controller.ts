@@ -3,6 +3,8 @@ import { ModelDiscoveryService } from '../services/modelDiscovery.service';
 import { ModelDiscoveryJob } from '../jobs/modelDiscovery.job';
 import { AIModelPricing } from '../models/AIModelPricing';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 /**
  * Model Discovery Controller
@@ -13,14 +15,18 @@ export class ModelDiscoveryController {
      * Manually trigger model discovery for all providers
      * POST /api/model-discovery/trigger
      */
-    static async triggerDiscovery(req: any, res: Response): Promise<void> {
-        try {
-            const userId = req.user?.id || req.userId;
-            loggingService.info('Manual model discovery triggered', {
-                triggeredBy: userId
-            });
+    static async triggerDiscovery(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('triggerDiscovery', req);
 
+        try {
             const results = await ModelDiscoveryJob.trigger();
+
+            ControllerHelper.logRequestSuccess('triggerDiscovery', req, startTime);
 
             res.json({
                 success: true,
@@ -28,16 +34,7 @@ export class ModelDiscoveryController {
                 ...results
             });
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            loggingService.error('Error triggering model discovery', {
-                error: errorMessage
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to trigger model discovery',
-                details: errorMessage
-            });
+            ControllerHelper.handleError('triggerDiscovery', error, req, res, startTime);
         }
     }
 
@@ -45,10 +42,16 @@ export class ModelDiscoveryController {
      * Trigger discovery for a specific provider
      * POST /api/model-discovery/trigger/:provider
      */
-    static async triggerProviderDiscovery(req: any, res: Response): Promise<void> {
-        try {
-            const { provider } = req.params;
+    static async triggerProviderDiscovery(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { provider } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('triggerProviderDiscovery', req, { provider });
 
+        try {
             if (!provider) {
                 res.status(400).json({
                     success: false,
@@ -57,29 +60,16 @@ export class ModelDiscoveryController {
                 return;
             }
 
-            loggingService.info(`Manual model discovery triggered for ${provider}`, {
-                provider,
-                triggeredBy: req.userId
-            });
-
             const result = await ModelDiscoveryService.discoverModelsForProvider(provider);
+
+            ControllerHelper.logRequestSuccess('triggerProviderDiscovery', req, startTime, { provider });
 
             res.json({
                 success: true,
                 result
             });
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            loggingService.error(`Error triggering discovery for provider`, {
-                provider: req.params.provider,
-                error: errorMessage
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to trigger provider discovery',
-                details: errorMessage
-            });
+            ControllerHelper.handleError('triggerProviderDiscovery', error, req, res, startTime, { provider });
         }
     }
 
@@ -87,7 +77,9 @@ export class ModelDiscoveryController {
      * Get discovery job status
      * GET /api/model-discovery/status
      */
-    static async getStatus(_req: any, res: Response): Promise<void> {
+    static async getStatus(_req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+
         try {
             const jobStatus = ModelDiscoveryJob.getStatus();
             const discoveryStatus = await ModelDiscoveryService.getDiscoveryStatus();
@@ -100,16 +92,7 @@ export class ModelDiscoveryController {
                 }
             });
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            loggingService.error('Error getting discovery status', {
-                error: errorMessage
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to get discovery status',
-                details: errorMessage
-            });
+            ControllerHelper.handleError('getStatus', error, _req, res, startTime);
         }
     }
 
@@ -117,7 +100,14 @@ export class ModelDiscoveryController {
      * Get all discovered models
      * GET /api/model-discovery/models
      */
-    static async getAllModels(req: any, res: Response): Promise<void> {
+    static async getAllModels(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getAllModels', req, { query: req.query });
+
         try {
             const { provider, active, latest } = req.query;
             const query: any = {};
@@ -137,6 +127,8 @@ export class ModelDiscoveryController {
                 .sort({ provider: 1, isLatest: -1, modelName: 1 })
                 .select('-llmExtractionPrompt -googleSearchSnippet -searchQuery');
 
+            ControllerHelper.logRequestSuccess('getAllModels', req, startTime, { count: models.length });
+
             res.json({
                 success: true,
                 data: {
@@ -145,16 +137,7 @@ export class ModelDiscoveryController {
                 }
             });
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            loggingService.error('Error getting models', {
-                error: errorMessage
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to get models',
-                details: errorMessage
-            });
+            ControllerHelper.handleError('getAllModels', error, req, res, startTime);
         }
     }
 
@@ -208,11 +191,17 @@ export class ModelDiscoveryController {
      * Manually update a model
      * PUT /api/model-discovery/models/:modelId
      */
-    static async updateModel(req: any, res: Response): Promise<void> {
-        try {
-            const { modelId } = req.params;
-            const updates = req.body;
+    static async updateModel(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { modelId } = req.params;
+        const updates = req.body;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('updateModel', req, { modelId });
 
+        try {
             if (!modelId) {
                 res.status(400).json({
                     success: false,
@@ -256,28 +245,14 @@ export class ModelDiscoveryController {
             
             await model.save();
 
-            const userId = req.user?.id || req.userId;
-            loggingService.info(`Model updated manually: ${modelId}`, {
-                modelId,
-                updatedBy: userId
-            });
+            ControllerHelper.logRequestSuccess('updateModel', req, startTime, { modelId });
 
             res.json({
                 success: true,
                 data: model
             });
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            loggingService.error('Error updating model', {
-                modelId: req.params.modelId,
-                error: errorMessage
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to update model',
-                details: errorMessage
-            });
+            ControllerHelper.handleError('updateModel', error, req, res, startTime, { modelId });
         }
     }
 

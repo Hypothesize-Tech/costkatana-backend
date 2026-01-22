@@ -1,13 +1,14 @@
 import { InvokeModelCommand, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
 import { bedrockClient, AWS_CONFIG } from '../config/aws';
-import { retryBedrockOperation } from '../utils/bedrockRetry';
-import { recordGenAIUsage } from '../utils/genaiTelemetry';
-import { calculateCost } from '../utils/pricing';
-import { estimateTokens } from '../utils/tokenCounter';
+import { ServiceHelper } from '@utils/serviceHelper';
+import { recordGenAIUsage } from '@utils/genaiTelemetry';
+import { calculateCost } from '@utils/pricing';
+import { estimateTokens } from '@utils/tokenCounter';
+import { TokenEstimator } from '@utils/tokenEstimator';
 import { AIProvider } from '../types/aiCostTracker.types';
 import { loggingService } from './logging.service';
 import { AICostTrackingService } from './aiCostTracking.service';
-import { decodeFromTOON } from '../utils/toon.utils';
+import { decodeFromTOON } from '@utils/toon.utils';
 import { S3Service } from './s3.service';
 import { RawPricingData, LLMExtractionResult } from '../types/modelDiscovery.types';
 
@@ -119,24 +120,18 @@ export class BedrockService {
             }
         });
 
-        const response = await retryBedrockOperation(
+        const response = await ServiceHelper.withRetry(
             () => bedrockClient.send(command),
             {
                 maxRetries: 4,
-                baseDelay: 2000,
-                maxDelay: 30000,
-                backoffMultiplier: 2,
-                jitterFactor: 0.25
-            },
-            {
-                modelId: model,
-                operation: 'converse'
+                delayMs: 2000,
+                backoffMultiplier: 2
             }
         );
 
         // Extract text from response
         const result = response.output?.message?.content?.[0]?.text || '';
-        const inputTokens = response.usage?.inputTokens || Math.ceil(prompt.length / 4);
+        const inputTokens = response.usage?.inputTokens || TokenEstimator.estimate(prompt);
         const outputTokens = response.usage?.outputTokens || Math.ceil(result.length / 4);
 
         return { result, inputTokens, outputTokens };
@@ -581,19 +576,13 @@ export class BedrockService {
                 inputTokens = Math.ceil(prompt.length / 4);
             }
 
-            // Use enhanced Bedrock retry logic with exponential backoff and jitter
-            const response = await retryBedrockOperation(
+            // Use standardized retry logic with exponential backoff and jitter
+            const response = await ServiceHelper.withRetry(
                 () => bedrockClient.send(command),
                 {
                     maxRetries: 4,
-                    baseDelay: 2000, // Start with 2 second delay
-                    maxDelay: 30000, // Cap at 30 seconds
-                    backoffMultiplier: 2, // Exponential backoff
-                    jitterFactor: 0.25 // ±25% jitter
-                },
-                {
-                    modelId: actualModelId,
-                    operation: 'invokeModel'
+                    delayMs: 2000,
+                    backoffMultiplier: 2
                 }
             );
             const responseBody = JSON.parse(new TextDecoder().decode(response.body));
@@ -1416,11 +1405,10 @@ Format your response as JSON:
                 commandBodyLength: payloadJson.length
             });
 
-            // Use retry logic
-            const response = await retryBedrockOperation(
+            // Use standardized retry logic
+            const response = await ServiceHelper.withRetry(
                 async () => await bedrockClient.send(command),
-                { maxRetries: 3, baseDelay: 1000 },
-                { modelId, operation: 'invokeWithImage' }
+                { maxRetries: 3, delayMs: 1000 }
             );
 
             const responseBody = JSON.parse(new TextDecoder().decode(response.body));

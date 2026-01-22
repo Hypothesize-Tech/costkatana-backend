@@ -4,13 +4,18 @@ import { AuthService } from '../services/auth.service';
 import { MFAService } from '../services/mfa.service';
 import { loggingService } from '../services/logging.service';
 import { redisService } from '../services/redis.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class OAuthController {
     /**
      * Initiate OAuth flow
      * GET /api/auth/oauth/:provider
      */
-    static async initiateOAuth(req: any, res: Response, _next: NextFunction): Promise<void> {
+    static async initiateOAuth(req: AuthenticatedRequest, res: Response, _next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('initiateOAuth', req);
+        
         try {
             const provider = req.params.provider as 'google' | 'github';
             
@@ -64,15 +69,18 @@ export class OAuthController {
                     provider 
                 });
                 // Final fallback to session if all else fails
-                if (req.session) {
-                    req.session.oauthState = stateData;
+                if ((req as any).session) {
+                    (req as any).session.oauthState = stateData;
                 } else {
                     // If no session either, log warning but continue (state validation will fail gracefully)
                     loggingService.warn('No session available for OAuth state fallback', { provider });
                 }
             }
 
-            loggingService.info(`${provider} OAuth flow initiated`, { provider, hasUserId: !!userId });
+            ControllerHelper.logRequestSuccess('initiateOAuth', req, startTime, {
+                provider,
+                hasUserId: !!userId
+            });
 
             res.json({
                 success: true,
@@ -82,15 +90,8 @@ export class OAuthController {
                 },
             });
         } catch (error: any) {
-            loggingService.error('Failed to initiate OAuth', {
-                error: error.message,
-                provider: req.params.provider,
-            });
-            
-            res.status(500).json({
-                success: false,
-                message: 'Failed to initiate OAuth flow',
-                error: error.message,
+            ControllerHelper.handleError('initiateOAuth', error, req, res, startTime, {
+                provider: req.params.provider
             });
         }
     }
@@ -99,7 +100,10 @@ export class OAuthController {
      * Handle OAuth callback
      * GET /api/auth/oauth/:provider/callback
      */
-    static async handleOAuthCallback(req: any, res: Response, _next: NextFunction): Promise<void> {
+    static async handleOAuthCallback(req: AuthenticatedRequest, res: Response, _next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('handleOAuthCallback', req);
+        
         try {
             const provider = req.params.provider as 'google' | 'github';
             const { code, state, error: oauthError, error_description } = req.query;
@@ -126,7 +130,7 @@ export class OAuthController {
                     description: error_description 
                 });
                 
-                res.redirect(`${frontendUrl}/login?error=${encodeURIComponent(error_description || oauthError)}`);
+                res.redirect(`${frontendUrl}/login?error=${encodeURIComponent((error_description || oauthError) as string)}`);
                 return;
             }
 
@@ -281,10 +285,10 @@ export class OAuthController {
             }
             
             // Fallback to session if cache didn't have it
-            if (!storedState && req.session?.oauthState) {
-                storedState = req.session.oauthState;
-                if (req.session) {
-                    delete req.session.oauthState;
+            if (!storedState && (req as any).session?.oauthState) {
+                storedState = (req as any).session.oauthState;
+                if ((req as any).session) {
+                    delete (req as any).session.oauthState;
                 }
                 loggingService.info('OAuth state retrieved from session fallback', { 
                     provider,
@@ -346,7 +350,7 @@ export class OAuthController {
                 loggingService.warn('OAuth state not found in cache/session, but state is self-validated', { 
                     provider,
                     stateKey,
-                    hasSession: !!req.session,
+                    hasSession: !!(req as any).session,
                 });
             }
 
@@ -1089,15 +1093,21 @@ export class OAuthController {
             // Redirect to frontend with tokens
             const redirectUrl = `${frontendUrl}/oauth/callback?accessToken=${encodeURIComponent(tokens.accessToken)}&refreshToken=${encodeURIComponent(tokens.refreshToken)}&isNewUser=${isNewUser}&lastLoginMethod=${provider}`;
             
+            ControllerHelper.logRequestSuccess('handleOAuthCallback', req, startTime, {
+                provider: req.params.provider,
+                isNewUser
+            });
+            
             res.redirect(redirectUrl);
         } catch (error: any) {
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
             loggingService.error('Failed to handle OAuth callback', {
                 error: error.message,
                 stack: error.stack,
                 provider: req.params.provider,
+                duration: Date.now() - startTime,
+                requestId: req.headers['x-request-id'] as string
             });
-
-            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
             res.redirect(`${frontendUrl}/login?error=${encodeURIComponent(error.message || 'OAuth authentication failed')}`);
         }
     }
@@ -1107,10 +1117,15 @@ export class OAuthController {
      * POST /api/auth/oauth/:provider/link
      * Protected route - requires authentication
      */
-    static async linkOAuthProvider(req: any, res: Response, _next: NextFunction): Promise<void> {
+    static async linkOAuthProvider(req: AuthenticatedRequest, res: Response, _next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('linkOAuthProvider', req);
+
         try {
             const provider = req.params.provider as 'google' | 'github';
-            const userId = req.userId;
 
             // Validate provider
             if (!['google', 'github'].includes(provider)) {
@@ -1121,18 +1136,12 @@ export class OAuthController {
                 return;
             }
 
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
-                return;
-            }
-
             // Generate OAuth URL with userId in state for linking
             const { authUrl } = OAuthService.initiateOAuth(provider, userId);
 
-            loggingService.info(`${provider} OAuth linking initiated`, { provider, userId });
+            ControllerHelper.logRequestSuccess('linkOAuthProvider', req, startTime, {
+                provider
+            });
 
             res.json({
                 success: true,
@@ -1151,16 +1160,8 @@ export class OAuthController {
                 },
             });
         } catch (error: any) {
-            loggingService.error('Failed to initiate OAuth linking', {
-                error: error.message,
-                provider: req.params.provider,
-                userId: req.userId,
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to link OAuth provider',
-                error: error.message,
+            ControllerHelper.handleError('linkOAuthProvider', error, req, res, startTime, {
+                provider: req.params.provider
             });
         }
     }
@@ -1170,17 +1171,14 @@ export class OAuthController {
      * GET /api/auth/oauth/linked
      * Protected route - requires authentication
      */
-    static async getLinkedProviders(req: any, res: Response, _next: NextFunction): Promise<void> {
-        try {
-            const userId = req.userId;
+    static async getLinkedProviders(req: AuthenticatedRequest, res: Response, _next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getLinkedProviders', req);
 
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
-                return;
-            }
+        try {
 
             const { User } = await import('../models/User');
             const user = await User.findById(userId).select('oauthProviders email');
@@ -1199,6 +1197,11 @@ export class OAuthController {
                 linkedAt: provider.linkedAt,
             }));
 
+            ControllerHelper.logRequestSuccess('getLinkedProviders', req, startTime, {
+                providersCount: linkedProviders.length,
+                hasPassword: !!user.password
+            });
+
             res.json({
                 success: true,
                 data: {
@@ -1207,16 +1210,7 @@ export class OAuthController {
                 },
             });
         } catch (error: any) {
-            loggingService.error('Failed to get linked OAuth providers', {
-                error: error.message,
-                userId: req.userId,
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to retrieve linked providers',
-                error: error.message,
-            });
+            ControllerHelper.handleError('getLinkedProviders', error, req, res, startTime);
         }
     }
 
@@ -1225,18 +1219,15 @@ export class OAuthController {
      * DELETE /api/auth/oauth/:provider/unlink
      * Protected route - requires authentication
      */
-    static async unlinkOAuthProvider(req: any, res: Response, _next: NextFunction): Promise<void> {
+    static async unlinkOAuthProvider(req: AuthenticatedRequest, res: Response, _next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('unlinkOAuthProvider', req);
+
         try {
             const provider = req.params.provider as 'google' | 'github';
-            const userId = req.userId;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
-                return;
-            }
 
             const { User } = await import('../models/User');
             const user = await User.findById(userId);
@@ -1264,23 +1255,17 @@ export class OAuthController {
             user.oauthProviders = otherProviders;
             await user.save();
 
-            loggingService.info(`${provider} OAuth provider unlinked`, { provider, userId });
+            ControllerHelper.logRequestSuccess('unlinkOAuthProvider', req, startTime, {
+                provider
+            });
 
             res.json({
                 success: true,
                 message: `${provider} account unlinked successfully`,
             });
         } catch (error: any) {
-            loggingService.error('Failed to unlink OAuth provider', {
-                error: error.message,
-                provider: req.params.provider,
-                userId: req.userId,
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to unlink OAuth provider',
-                error: error.message,
+            ControllerHelper.handleError('unlinkOAuthProvider', error, req, res, startTime, {
+                provider: req.params.provider
             });
         }
     }

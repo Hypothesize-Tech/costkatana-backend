@@ -6,6 +6,8 @@ import { Optimization } from '../models/Optimization';
 import { AWS_BEDROCK_PRICING } from '../utils/pricing/aws-bedrock';
 import { S3Service } from '../services/s3.service';
 import mongoose from 'mongoose';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class VisualComplianceController {
   
@@ -13,51 +15,51 @@ export class VisualComplianceController {
    * POST /api/visual-compliance/check-optimized
    * Ultra-optimized visual compliance check (feature-based)
    */
-  static async checkComplianceOptimized(req: any, res: Response): Promise<Response> {
-    try {
-      const {
-        referenceImage,
-        evidenceImage,
-        complianceCriteria,
-        industry,
-        useUltraCompression = true,
-        mode = 'optimized',
-        metaPrompt,
-        metaPromptPresetId,
-        templateId
-      } = req.body;
+  static async checkComplianceOptimized(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    const {
+      referenceImage,
+      evidenceImage,
+      complianceCriteria,
+      industry,
+      useUltraCompression = true,
+      mode = 'optimized',
+      metaPrompt,
+      metaPromptPresetId,
+      templateId
+    } = req.body;
 
-      // Validation
-      if (!referenceImage || !evidenceImage) {
-        return res.status(400).json({
-          success: false,
-          error: 'Both referenceImage and evidenceImage are required'
-        });
-      }
-
-      if (!complianceCriteria || !Array.isArray(complianceCriteria) || complianceCriteria.length === 0) {
-        return res.status(400).json({
-          success: false,
-          error: 'complianceCriteria must be a non-empty array'
-        });
-      }
-
-      if (!['jewelry', 'grooming', 'retail', 'fmcg', 'documents'].includes(industry)) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid industry. Must be one of: jewelry, grooming, retail, fmcg, documents'
-        });
-      }
-
-      const userId = (req.user as any)?.id?.toString() || 'anonymous';
-      const projectId = req.body.projectId;
-
-      // Log for debugging
-      loggingService.info('Visual compliance check initiated', {
-        userId,
-        hasUser: !!req.user,
-        userObject: req.user ? {id: (req.user as any).id, email: (req.user as any).email} : null
+    // Validation
+    if (!referenceImage || !evidenceImage) {
+      return res.status(400).json({
+        success: false,
+        error: 'Both referenceImage and evidenceImage are required'
       });
+    }
+
+    if (!complianceCriteria || !Array.isArray(complianceCriteria) || complianceCriteria.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'complianceCriteria must be a non-empty array'
+      });
+    }
+
+    if (!['jewelry', 'grooming', 'retail', 'fmcg', 'documents'].includes(industry)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid industry. Must be one of: jewelry, grooming, retail, fmcg, documents'
+      });
+    }
+
+    const userId = req.userId?.toString() || 'anonymous';
+    const projectId = req.body.projectId;
+
+    ControllerHelper.logRequestStart('checkComplianceOptimized', req, {
+      industry,
+      mode
+    });
+
+    try {
 
       const result = await VisualComplianceOptimizedService.processComplianceCheckOptimized({
         referenceImage,
@@ -235,6 +237,12 @@ export class VisualComplianceController {
         throw new Error(`Failed to save optimization: ${saveError instanceof Error ? saveError.message : 'Unknown error'}`);
       }
 
+      ControllerHelper.logRequestSuccess('checkComplianceOptimized', req, startTime, {
+        industry,
+        mode,
+        costSavings: costSavings.toFixed(1)
+      });
+
       return res.status(200).json({
         success: true,
         data: result,
@@ -268,16 +276,8 @@ export class VisualComplianceController {
       });
 
     } catch (error) {
-      loggingService.error('Visual compliance check failed', {
-        error: error instanceof Error ? error.message : String(error),
-        userId: (req.user as any)?._id?.toString()
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      ControllerHelper.handleError('checkComplianceOptimized', error, req, res, startTime);
+      return res;
     }
   }
 
@@ -285,10 +285,15 @@ export class VisualComplianceController {
    * POST /api/visual-compliance/batch
    * Process multiple compliance checks in parallel
    */
-  static async batchCheck(req: any, res: Response): Promise<Response> {
-    try {
-      const { requests } = req.body;
+  static async batchCheck(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    const { requests } = req.body;
 
+    ControllerHelper.logRequestStart('batchCheck', req, {
+      requestsCount: requests?.length || 0
+    });
+
+    try {
       if (!Array.isArray(requests) || requests.length === 0) {
         return res.status(400).json({
           success: false,
@@ -303,7 +308,7 @@ export class VisualComplianceController {
         });
       }
 
-      const userId = (req.user as any)?._id?.toString() || 'anonymous';
+      const userId = req.userId?.toString() || 'anonymous';
 
       // Validate each request
       for (const request of requests) {
@@ -350,6 +355,12 @@ export class VisualComplianceController {
         .filter(r => r.success && r.data)
         .reduce((sum, r) => sum + (r.data?.metadata.cost || 0), 0);
 
+      ControllerHelper.logRequestSuccess('batchCheck', req, startTime, {
+        total: results.length,
+        successful,
+        failed
+      });
+
       return res.status(200).json({
         success: true,
         results: successResults,
@@ -362,14 +373,8 @@ export class VisualComplianceController {
       });
 
     } catch (error) {
-      loggingService.error('Batch compliance check failed', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-      });
+      ControllerHelper.handleError('batchCheck', error, req, res, startTime);
+      return res;
     }
   }
 
@@ -414,7 +419,11 @@ export class VisualComplianceController {
    * GET /api/visual-compliance/cost-comparison
    * Get cost comparison dashboard data from real usage statistics
    */
-  static async getCostComparison(_req: any, res: Response): Promise<Response> {
+  static async getCostComparison(_req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    
+    ControllerHelper.logRequestStart('getCostComparison', _req);
+
     try {
       // Get actual usage statistics for visual-compliance service
       const actualStats = await Usage.aggregate([
@@ -527,11 +536,54 @@ export class VisualComplianceController {
           }
         }
       });
-    } catch (error) {
-      loggingService.error('Failed to get cost comparison', {
-        error: error instanceof Error ? error.message : String(error)
-      });
 
+      ControllerHelper.logRequestSuccess('getCostComparison', _req, startTime);
+
+      return res.status(200).json({
+        success: true,
+        comparison: {
+          traditional: {
+            inputTokens: traditionalInputTokens,
+            outputTokens: traditionalOutputTokens,
+            totalTokens: traditionalTotalTokens,
+            cost: parseFloat(traditionalCost.toFixed(6)),
+            description: 'Full image transmission with JSON output (baseline)'
+          },
+          optimized: {
+            inputTokens: Math.round(actualOptimized.avgInputTokens ?? 150),
+            outputTokens: Math.round(actualOptimized.avgOutputTokens ?? 50),
+            totalTokens: Math.round(actualOptimized.avgTotalTokens ?? 200),
+            cost: parseFloat((actualOptimized.avgCost ?? 0.0003).toFixed(6)),
+            description: 'Feature extraction + TOON + Cortex LISP (actual usage)'
+          },
+          savings: {
+            tokenReduction: parseFloat(tokenReduction.toFixed(1)),
+            costReduction: parseFloat(costReduction.toFixed(1)),
+            technique: 'feature_extraction_toon_cortex',
+            basedOnRequests: actualOptimized.totalRequests
+          },
+          breakdown: {
+            featureExtraction: {
+              reduction: featureExtractionReduction,
+              description: 'Extract visual features instead of raw pixels'
+            },
+            toonEncoding: {
+              reduction: toonEncodingReduction,
+              description: 'Encode features as TOON format'
+            },
+            cortexOutput: {
+              reduction: cortexOutputReduction,
+              description: 'Use Cortex LISP for structured output'
+            }
+          },
+          metadata: {
+            dataSource: actualOptimized.totalRequests > 0 ? 'real_usage' : 'estimated',
+            sampleSize: actualOptimized.totalRequests,
+            lastUpdated: new Date().toISOString()
+          }
+        }
+      });
+    } catch (error) {
       // Fallback to estimated values if database query fails
       const traditionalInputTokens = 4000;
       const traditionalOutputTokens = 400;
@@ -544,6 +596,10 @@ export class VisualComplianceController {
       const optimizedTotalTokens = 200;
       const optimizedCost = (optimizedInputTokens / 1_000_000) * 0.80 + 
                            (optimizedOutputTokens / 1_000_000) * 3.20;
+
+      ControllerHelper.logRequestSuccess('getCostComparison', _req, startTime, {
+        fallback: true
+      });
 
       return res.status(200).json({
         success: true,
@@ -596,7 +652,11 @@ export class VisualComplianceController {
    * GET /api/visual-compliance/meta-prompt-presets
    * Get available meta prompt presets
    */
-  static async getMetaPromptPresets(_req: any, res: Response): Promise<Response> {
+  static async getMetaPromptPresets(_req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    
+    ControllerHelper.logRequestStart('getMetaPromptPresets', _req);
+
     try {
       const { MetaPromptPresetsService } = await import('../services/metaPromptPresets.service');
       
@@ -610,19 +670,17 @@ export class VisualComplianceController {
         description: preset.description
       }));
 
+      ControllerHelper.logRequestSuccess('getMetaPromptPresets', _req, startTime, {
+        presetsCount: presetsInfo.length
+      });
+
       return res.status(200).json({
         success: true,
         presets: presetsInfo
       });
     } catch (error) {
-      loggingService.error('Failed to get meta prompt presets', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-      });
+      ControllerHelper.handleError('getMetaPromptPresets', error, _req, res, startTime);
+      return res;
     }
   }
 
@@ -630,9 +688,13 @@ export class VisualComplianceController {
    * GET /api/visual-compliance/meta-prompt-presets/:id
    * Get a specific meta prompt preset with full prompt text
    */
-  static async getMetaPromptPresetById(req: any, res: Response): Promise<Response> {
+  static async getMetaPromptPresetById(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    const { id } = req.params;
+    
+    ControllerHelper.logRequestStart('getMetaPromptPresetById', req, { presetId: id });
+
     try {
-      const { id } = req.params;
       const { MetaPromptPresetsService } = await import('../services/metaPromptPresets.service');
       
       const preset = MetaPromptPresetsService.getPresetById(id);
@@ -644,19 +706,15 @@ export class VisualComplianceController {
         });
       }
 
+      ControllerHelper.logRequestSuccess('getMetaPromptPresetById', req, startTime, { presetId: id });
+
       return res.status(200).json({
         success: true,
         preset
       });
     } catch (error) {
-      loggingService.error('Failed to get meta prompt preset', {
-        error: error instanceof Error ? error.message : String(error)
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-      });
+      ControllerHelper.handleError('getMetaPromptPresetById', error, req, res, startTime, { presetId: id });
+      return res;
     }
   }
 }

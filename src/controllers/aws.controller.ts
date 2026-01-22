@@ -15,6 +15,8 @@ import { costAnomalyGuardService } from '../services/aws/costAnomalyGuard.servic
 import { auditLoggerService } from '../services/aws/auditLogger.service';
 import { auditAnchorService } from '../services/aws/auditAnchor.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 // AWS Service Providers
 import { ec2ServiceProvider } from '../services/aws/providers/ec2.service';
 import { s3ServiceProvider } from '../services/aws/providers/s3.service';
@@ -27,11 +29,16 @@ export class AWSController {
   // Connection Management
   // ============================================================================
 
-  static async createConnection(req: Request, res: Response): Promise<Response> {
+  static async createConnection(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     let tenantContext;
     try {
-      const userId = (req as any).user?.id;
-      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('createConnection', req);
+      const workspaceId = req.user?.workspaceId || (req as any).workspaceId;
       const { 
         connectionName, 
         description, 
@@ -42,10 +49,6 @@ export class AWSController {
         externalId: providedExternalId,
         selectedPermissions // New: granular permissions from frontend
       } = req.body;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
-      }
 
       if (!connectionName || !roleArn) {
         return res.status(400).json({ error: 'connectionName and roleArn are required' });
@@ -189,27 +192,32 @@ export class AWSController {
           updatedAt: connection.updatedAt,
         },
       });
-    } catch (error) {
-      loggingService.error('Failed to create AWS connection', {
-        component: 'AWSController',
-        operation: 'createConnection',
-        error: error instanceof Error ? error.message : String(error),
+      
+      ControllerHelper.logRequestSuccess('createConnection', req, startTime, {
+        connectionId: connection._id.toString(),
+        isUpdate
       });
-      return res.status(500).json({ error: 'Failed to create connection' });
+      
+      return res;
+    } catch (error) {
+      ControllerHelper.handleError('createConnection', error, req, res, startTime);
+      return res;
     } finally {
       // Clear tenant context
       tenantIsolationService.clearTenantContext();
     }
   }
 
-  static async listConnections(req: Request, res: Response): Promise<Response> {
+  static async listConnections(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     let tenantContext;
     try {
-      const userId = (req as any).user?.id;
-      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
       }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('listConnections', req);
+      const workspaceId = req.user?.workspaceId || (req as any).workspaceId;
 
       // Create tenant context for isolation
       tenantContext = tenantIsolationService.createTenantContext(userId, workspaceId);
@@ -243,23 +251,32 @@ export class AWSController {
           createdAt: c.createdAt,
         })),
       });
+      
+      ControllerHelper.logRequestSuccess('listConnections', req, startTime, {
+        connectionCount: connections.length
+      });
+      
+      return res;
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to list connections' });
+      ControllerHelper.handleError('listConnections', error, req, res, startTime);
+      return res;
     } finally {
       tenantIsolationService.clearTenantContext();
     }
   }
 
-  static async deleteConnection(req: Request, res: Response): Promise<Response> {
+  static async deleteConnection(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     let tenantContext;
     try {
-      const userId = (req as any).user?.id;
-      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
-      const { id } = req.params;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
       }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('deleteConnection', req);
+      const workspaceId = req.user?.workspaceId || (req as any).workspaceId;
+      const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
 
       // Create tenant context
       tenantContext = tenantIsolationService.createTenantContext(userId, workspaceId);
@@ -302,24 +319,33 @@ export class AWSController {
         connectionId: connection._id,
       });
 
+      ControllerHelper.logRequestSuccess('deleteConnection', req, startTime, {
+        connectionId: id
+      });
+      
       return res.json({ success: true, message: 'Connection deleted' });
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to delete connection' });
+      ControllerHelper.handleError('deleteConnection', error, req, res, startTime, {
+        connectionId: req.params.id
+      });
+      return res;
     } finally {
       tenantIsolationService.clearTenantContext();
     }
   }
 
-  static async testConnection(req: Request, res: Response): Promise<Response> {
+  static async testConnection(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     let tenantContext;
     try {
-      const userId = (req as any).user?.id;
-      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
-      const { id } = req.params;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
       }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('testConnection', req);
+      const workspaceId = req.user?.workspaceId || (req as any).workspaceId;
+      const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
 
       // Create tenant context
       tenantContext = tenantIsolationService.createTenantContext(userId, workspaceId);
@@ -366,8 +392,18 @@ export class AWSController {
           error: error instanceof Error ? error.message : 'Connection test failed',
         });
       }
+      
+      ControllerHelper.logRequestSuccess('testConnection', req, startTime, {
+        connectionId: id,
+        status: 'healthy'
+      });
+      
+      return res;
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to test connection' });
+      ControllerHelper.handleError('testConnection', error, req, res, startTime, {
+        connectionId: req.params.id
+      });
+      return res;
     } finally {
       tenantIsolationService.clearTenantContext();
     }
@@ -377,16 +413,17 @@ export class AWSController {
   // Intent & Plan
   // ============================================================================
 
-  static async parseIntent(req: Request, res: Response): Promise<Response> {
+  static async parseIntent(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     let tenantContext;
     try {
-      const userId = (req as any).user?.id;
-      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
-      const { request, connectionId } = req.body;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
       }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('parseIntent', req);
+      const workspaceId = req.user?.workspaceId || (req as any).workspaceId;
+      const { request, connectionId } = req.body;
 
       if (!request) {
         return res.status(400).json({ error: 'request is required' });
@@ -434,24 +471,34 @@ export class AWSController {
         },
       });
 
+      ControllerHelper.logRequestSuccess('parseIntent', req, startTime, {
+        connectionId,
+        blocked: intent.blocked
+      });
+      
       return res.json({ success: true, intent });
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to parse intent' });
+      ControllerHelper.handleError('parseIntent', error, req, res, startTime, {
+        connectionId: req.body.connectionId
+      });
+      return res;
     } finally {
       tenantIsolationService.clearTenantContext();
     }
   }
 
-  static async generatePlan(req: Request, res: Response): Promise<Response> {
+  static async generatePlan(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     let tenantContext;
     try {
-      const userId = (req as any).user?.id;
-      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
-      const { intent, connectionId, resources } = req.body;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
       }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('generatePlan', req);
+      const workspaceId = req.user?.workspaceId || (req as any).workspaceId;
+      const { intent, connectionId, resources } = req.body;
+      ServiceHelper.validateObjectId(connectionId, 'connectionId');
 
       if (!intent || !connectionId) {
         return res.status(400).json({ error: 'intent and connectionId are required' });
@@ -499,9 +546,17 @@ export class AWSController {
         dslHash: plan.dslHash,
       });
 
+      ControllerHelper.logRequestSuccess('generatePlan', req, startTime, {
+        connectionId,
+        planId: plan.planId
+      });
+      
       return res.json({ success: true, plan });
     } catch (error) {
-      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to generate plan' });
+      ControllerHelper.handleError('generatePlan', error, req, res, startTime, {
+        connectionId: req.body.connectionId
+      });
+      return res;
     } finally {
       tenantIsolationService.clearTenantContext();
     }
@@ -511,9 +566,14 @@ export class AWSController {
   // Execution
   // ============================================================================
 
-  static async approvePlan(req: Request, res: Response): Promise<Response> {
+  static async approvePlan(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('approvePlan', req);
       const { planId, connectionId } = req.body;
 
       if (!planId || !connectionId) {
@@ -537,21 +597,34 @@ export class AWSController {
         expiresAt,
         message: 'Plan approved. Use the approval token to execute within 15 minutes.',
       });
+      
+      ControllerHelper.logRequestSuccess('approvePlan', req, startTime, {
+        planId,
+        connectionId
+      });
+      
+      return res;
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to approve plan' });
+      ControllerHelper.handleError('approvePlan', error, req, res, startTime, {
+        planId: req.body.planId,
+        connectionId: req.body.connectionId
+      });
+      return res;
     }
   }
 
-  static async executePlan(req: Request, res: Response): Promise<Response> {
+  static async executePlan(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     let tenantContext;
     try {
-      const userId = (req as any).user?.id;
-      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
-      const { plan, connectionId, approvalToken } = req.body;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
       }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('executePlan', req);
+      const workspaceId = req.user?.workspaceId || (req as any).workspaceId;
+      const { plan, connectionId, approvalToken } = req.body;
+      ServiceHelper.validateObjectId(connectionId, 'connectionId');
 
       if (!plan || !connectionId || !approvalToken) {
         return res.status(400).json({ error: 'plan, connectionId, and approvalToken are required' });
@@ -631,24 +704,36 @@ export class AWSController {
         impact: { resourceCount: plan.summary?.resourcesAffected, costChange: plan.summary?.estimatedCostImpact },
       });
 
+      ControllerHelper.logRequestSuccess('executePlan', req, startTime, {
+        connectionId,
+        planId: plan.planId,
+        status: result.status
+      });
+      
       return res.json({ success: true, result });
     } catch (error) {
-      return res.status(500).json({ error: error instanceof Error ? error.message : 'Execution failed' });
+      ControllerHelper.handleError('executePlan', error, req, res, startTime, {
+        connectionId: req.body.connectionId,
+        planId: req.body.plan?.planId
+      });
+      return res;
     } finally {
       tenantIsolationService.clearTenantContext();
     }
   }
 
-  static async simulatePlan(req: Request, res: Response): Promise<Response> {
+  static async simulatePlan(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     let tenantContext;
     try {
-      const userId = (req as any).user?.id;
-      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
-      const { plan, connectionId } = req.body;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
       }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('simulatePlan', req);
+      const workspaceId = req.user?.workspaceId || (req as any).workspaceId;
+      const { plan, connectionId } = req.body;
+      ServiceHelper.validateObjectId(connectionId, 'connectionId');
 
       // Create tenant context
       tenantContext = tenantIsolationService.createTenantContext(userId, workspaceId);
@@ -685,9 +770,18 @@ export class AWSController {
         connectionId: connection._id,
       }, { planId: plan.planId });
 
+      ControllerHelper.logRequestSuccess('simulatePlan', req, startTime, {
+        connectionId,
+        planId: plan.planId
+      });
+      
       return res.json({ success: true, simulation: result });
     } catch (error) {
-      return res.status(500).json({ error: 'Simulation failed' });
+      ControllerHelper.handleError('simulatePlan', error, req, res, startTime, {
+        connectionId: req.body.connectionId,
+        planId: req.body.plan?.planId
+      });
+      return res;
     } finally {
       tenantIsolationService.clearTenantContext();
     }
@@ -697,10 +791,15 @@ export class AWSController {
   // Kill Switch (Admin Only)
   // ============================================================================
 
-  static async activateKillSwitch(req: Request, res: Response): Promise<Response> {
+  static async activateKillSwitch(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
-      const userRole = (req as any).user?.role;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('activateKillSwitch', req);
+      const userRole = req.user?.role;
       const { scope, id, reason } = req.body;
 
       if (userRole !== 'admin') {
@@ -718,18 +817,30 @@ export class AWSController {
         userId: new Types.ObjectId(userId),
       }, { operation: 'activateKillSwitch' }, undefined, { scope, id, reason });
 
+      ControllerHelper.logRequestSuccess('activateKillSwitch', req, startTime, {
+        scope: req.body.scope,
+        id: req.body.id
+      });
+      
       return res.json({ success: true, message: 'Kill switch activated' });
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to activate kill switch' });
+      ControllerHelper.handleError('activateKillSwitch', error, req, res, startTime);
+      return res;
     }
   }
 
-  static getKillSwitchState(_req: Request, res: Response): Response {
+  static getKillSwitchState(req: AuthenticatedRequest, res: Response): Response {
+    const startTime = Date.now();
     try {
+      ControllerHelper.logRequestStart('getKillSwitchState', req);
       const state = killSwitchService.getState();
+      
+      ControllerHelper.logRequestSuccess('getKillSwitchState', req, startTime);
+      
       return res.json({ success: true, state });
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to get kill switch state' });
+      ControllerHelper.handleError('getKillSwitchState', error, req, res, startTime);
+      return res;
     }
   }
 
@@ -737,9 +848,14 @@ export class AWSController {
   // Audit
   // ============================================================================
 
-  static async getAuditLogs(req: Request, res: Response): Promise<Response> {
+  static async getAuditLogs(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('getAuditLogs', req);
       const { connectionId, eventType, startDate, endDate, limit, offset } = req.query;
 
       const result = await auditLoggerService.query({
@@ -752,23 +868,37 @@ export class AWSController {
         offset: offset ? parseInt(offset as string) : 0,
       });
 
+      ControllerHelper.logRequestSuccess('getAuditLogs', req, startTime, {
+        connectionId: req.query.connectionId,
+        eventType: req.query.eventType
+      });
+      
       return res.json({ success: true, ...result });
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to get audit logs' });
+      ControllerHelper.handleError('getAuditLogs', error, req, res, startTime);
+      return res;
     }
   }
 
-  static getAuditAnchor(_req: Request, res: Response): Response {
+  static getAuditAnchor(req: AuthenticatedRequest, res: Response): Response {
+    const startTime = Date.now();
     try {
+      ControllerHelper.logRequestStart('getAuditAnchor', req);
       const anchorData = auditAnchorService.getPublicAnchorData();
+      
+      ControllerHelper.logRequestSuccess('getAuditAnchor', req, startTime);
+      
       return res.json({ success: true, ...anchorData });
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to get audit anchor' });
+      ControllerHelper.handleError('getAuditAnchor', error, req, res, startTime);
+      return res;
     }
   }
 
-  static async verifyAuditChain(req: Request, res: Response): Promise<Response> {
+  static async verifyAuditChain(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
+      ControllerHelper.logRequestStart('verifyAuditChain', req);
       const { startPosition, endPosition } = req.query;
       
       const result = await auditLoggerService.verifyChain(
@@ -776,9 +906,15 @@ export class AWSController {
         endPosition ? parseInt(endPosition as string) : undefined
       );
 
+      ControllerHelper.logRequestSuccess('verifyAuditChain', req, startTime, {
+        startPosition: req.query.startPosition,
+        endPosition: req.query.endPosition
+      });
+      
       return res.json({ success: true, verification: result });
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to verify audit chain' });
+      ControllerHelper.handleError('verifyAuditChain', error, req, res, startTime);
+      return res;
     }
   }
 
@@ -786,38 +922,56 @@ export class AWSController {
   // Utilities
   // ============================================================================
 
-  static getAllowedActions(_req: Request, res: Response): Response {
+  static getAllowedActions(req: AuthenticatedRequest, res: Response): Response {
+    const startTime = Date.now();
     try {
+      ControllerHelper.logRequestStart('getAllowedActions', req);
       const actions = intentParserService.getAvailableActions();
+      
+      ControllerHelper.logRequestSuccess('getAllowedActions', req, startTime, {
+        actionCount: actions.length
+      });
+      
       return res.json({ success: true, actions });
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to get allowed actions' });
+      ControllerHelper.handleError('getAllowedActions', error, req, res, startTime);
+      return res;
     }
   }
 
-  static getPermissionBoundaries(_req: Request, res: Response): Response {
+  static getPermissionBoundaries(req: AuthenticatedRequest, res: Response): Response {
+    const startTime = Date.now();
     try {
-      return res.json({
+      ControllerHelper.logRequestStart('getPermissionBoundaries', req);
+      
+      const result = {
         success: true,
         hardLimits: permissionBoundaryService.getHardLimits(),
         bannedActions: permissionBoundaryService.getBannedActions(),
         allowedServices: permissionBoundaryService.getAllowedServices(),
-      });
+      };
+      
+      ControllerHelper.logRequestSuccess('getPermissionBoundaries', req, startTime);
+      
+      return res.json(result);
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to get permission boundaries' });
+      ControllerHelper.handleError('getPermissionBoundaries', error, req, res, startTime);
+      return res;
     }
   }
 
-  static async getEmergencyStopInstructions(req: Request, res: Response): Promise<Response> {
+  static async getEmergencyStopInstructions(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     let tenantContext;
     try {
-      const userId = (req as any).user?.id;
-      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
-      const { connectionId } = req.params;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
       }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('getEmergencyStopInstructions', req);
+      const workspaceId = req.user?.workspaceId || (req as any).workspaceId;
+      const { connectionId } = req.params;
+      ServiceHelper.validateObjectId(connectionId, 'connectionId');
 
       // Create tenant context
       tenantContext = tenantIsolationService.createTenantContext(userId, workspaceId);
@@ -867,9 +1021,17 @@ export class AWSController {
       }
 
       const instructions = stsCredentialService.getEmergencyStopInstructions(connection.roleArn);
+      
+      ControllerHelper.logRequestSuccess('getEmergencyStopInstructions', req, startTime, {
+        connectionId
+      });
+      
       return res.json({ success: true, instructions });
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to get emergency stop instructions' });
+      ControllerHelper.handleError('getEmergencyStopInstructions', error, req, res, startTime, {
+        connectionId: req.params.connectionId
+      });
+      return res;
     } finally {
       tenantIsolationService.clearTenantContext();
     }
@@ -880,10 +1042,16 @@ export class AWSController {
    * @desc Get permission summary for a connection
    * @access Private
    */
-  static async getConnectionPermissions(req: Request, res: Response): Promise<Response> {
+  static async getConnectionPermissions(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('getConnectionPermissions', req);
       const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
 
       const connection = await AWSConnection.findOne({
         _id: new Types.ObjectId(id),
@@ -906,8 +1074,18 @@ export class AWSController {
           allowedServices: connection.allowedServices,
         },
       });
+      
+      ControllerHelper.logRequestSuccess('getConnectionPermissions', req, startTime, {
+        connectionId: id,
+        hasWrite
+      });
+      
+      return res;
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to get connection permissions' });
+      ControllerHelper.handleError('getConnectionPermissions', error, req, res, startTime, {
+        connectionId: req.params.id
+      });
+      return res;
     }
   }
 
@@ -916,10 +1094,16 @@ export class AWSController {
    * @desc Validate if an action is allowed for a connection
    * @access Private
    */
-  static async validateAction(req: Request, res: Response): Promise<Response> {
+  static async validateAction(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('validateAction', req);
       const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
       const { action, region } = req.body;
 
       if (!action) {
@@ -941,12 +1125,22 @@ export class AWSController {
         region
       );
 
+      ControllerHelper.logRequestSuccess('validateAction', req, startTime, {
+        connectionId: id,
+        action: req.body.action,
+        allowed: validation.allowed
+      });
+      
       return res.json({
         success: true,
         validation,
       });
     } catch (error) {
-      return res.status(500).json({ error: 'Failed to validate action' });
+      ControllerHelper.handleError('validateAction', error, req, res, startTime, {
+        connectionId: req.params.id,
+        action: req.body.action
+      });
+      return res;
     }
   }
 
@@ -959,10 +1153,16 @@ export class AWSController {
    * @desc List EC2 instances
    * @access Private
    */
-  static async listEC2Instances(req: Request, res: Response): Promise<Response> {
+  static async listEC2Instances(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('listEC2Instances', req);
       const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
       const { region } = req.query;
 
       const connection = await AWSConnection.findOne({
@@ -980,18 +1180,23 @@ export class AWSController {
         region as string | undefined
       );
 
+      ControllerHelper.logRequestSuccess('listEC2Instances', req, startTime, {
+        connectionId: id,
+        instanceCount: instances.length,
+        region: req.query.region
+      });
+      
       return res.json({
         success: true,
         instances,
         count: instances.length,
       });
     } catch (error) {
-      loggingService.error('Failed to list EC2 instances', {
-        component: 'AWSController',
-        operation: 'listEC2Instances',
-        error: error instanceof Error ? error.message : String(error),
+      ControllerHelper.handleError('listEC2Instances', error, req, res, startTime, {
+        connectionId: req.params.id,
+        region: req.query.region
       });
-      return res.status(500).json({ error: 'Failed to list EC2 instances' });
+      return res;
     }
   }
 
@@ -1000,10 +1205,16 @@ export class AWSController {
    * @desc Stop EC2 instances
    * @access Private
    */
-  static async stopEC2Instances(req: Request, res: Response): Promise<Response> {
+  static async stopEC2Instances(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('stopEC2Instances', req);
       const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
       const { instanceIds, region } = req.body;
 
       if (!instanceIds || !Array.isArray(instanceIds) || instanceIds.length === 0) {
@@ -1026,17 +1237,23 @@ export class AWSController {
         connectionId: connection._id,
       }, { service: 'ec2', operation: 'StopInstances', resources: instanceIds });
 
+      ControllerHelper.logRequestSuccess('stopEC2Instances', req, startTime, {
+        connectionId: id,
+        instanceCount: instanceIds.length,
+        region: req.body.region
+      });
+      
       return res.json({
         success: true,
         ...result,
       });
     } catch (error) {
-      loggingService.error('Failed to stop EC2 instances', {
-        component: 'AWSController',
-        operation: 'stopEC2Instances',
-        error: error instanceof Error ? error.message : String(error),
+      ControllerHelper.handleError('stopEC2Instances', error, req, res, startTime, {
+        connectionId: req.params.id,
+        instanceIds: req.body.instanceIds,
+        region: req.body.region
       });
-      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to stop EC2 instances' });
+      return res;
     }
   }
 
@@ -1045,10 +1262,16 @@ export class AWSController {
    * @desc Start EC2 instances
    * @access Private
    */
-  static async startEC2Instances(req: Request, res: Response): Promise<Response> {
+  static async startEC2Instances(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('startEC2Instances', req);
       const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
       const { instanceIds, region } = req.body;
 
       if (!instanceIds || !Array.isArray(instanceIds) || instanceIds.length === 0) {
@@ -1071,17 +1294,23 @@ export class AWSController {
         connectionId: connection._id,
       }, { service: 'ec2', operation: 'StartInstances', resources: instanceIds });
 
+      ControllerHelper.logRequestSuccess('startEC2Instances', req, startTime, {
+        connectionId: id,
+        instanceCount: instanceIds.length,
+        region: req.body.region
+      });
+      
       return res.json({
         success: true,
         ...result,
       });
     } catch (error) {
-      loggingService.error('Failed to start EC2 instances', {
-        component: 'AWSController',
-        operation: 'startEC2Instances',
-        error: error instanceof Error ? error.message : String(error),
+      ControllerHelper.handleError('startEC2Instances', error, req, res, startTime, {
+        connectionId: req.params.id,
+        instanceIds: req.body.instanceIds,
+        region: req.body.region
       });
-      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to start EC2 instances' });
+      return res;
     }
   }
 
@@ -1094,10 +1323,16 @@ export class AWSController {
    * @desc List S3 buckets
    * @access Private
    */
-  static async listS3Buckets(req: Request, res: Response): Promise<Response> {
+  static async listS3Buckets(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('listS3Buckets', req);
       const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
 
       const connection = await AWSConnection.findOne({
         _id: new Types.ObjectId(id),
@@ -1110,18 +1345,21 @@ export class AWSController {
 
       const buckets = await s3ServiceProvider.listBuckets(connection);
 
+      ControllerHelper.logRequestSuccess('listS3Buckets', req, startTime, {
+        connectionId: id,
+        bucketCount: buckets.length
+      });
+      
       return res.json({
         success: true,
         buckets,
         count: buckets.length,
       });
     } catch (error) {
-      loggingService.error('Failed to list S3 buckets', {
-        component: 'AWSController',
-        operation: 'listS3Buckets',
-        error: error instanceof Error ? error.message : String(error),
+      ControllerHelper.handleError('listS3Buckets', error, req, res, startTime, {
+        connectionId: req.params.id
       });
-      return res.status(500).json({ error: 'Failed to list S3 buckets' });
+      return res;
     }
   }
 
@@ -1134,10 +1372,16 @@ export class AWSController {
    * @desc List RDS instances
    * @access Private
    */
-  static async listRDSInstances(req: Request, res: Response): Promise<Response> {
+  static async listRDSInstances(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('listRDSInstances', req);
       const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
       const { region } = req.query;
 
       const connection = await AWSConnection.findOne({
@@ -1151,18 +1395,23 @@ export class AWSController {
 
       const instances = await rdsServiceProvider.listInstances(connection, region as string | undefined);
 
+      ControllerHelper.logRequestSuccess('listRDSInstances', req, startTime, {
+        connectionId: id,
+        instanceCount: instances.length,
+        region: req.query.region
+      });
+      
       return res.json({
         success: true,
         instances,
         count: instances.length,
       });
     } catch (error) {
-      loggingService.error('Failed to list RDS instances', {
-        component: 'AWSController',
-        operation: 'listRDSInstances',
-        error: error instanceof Error ? error.message : String(error),
+      ControllerHelper.handleError('listRDSInstances', error, req, res, startTime, {
+        connectionId: req.params.id,
+        region: req.query.region
       });
-      return res.status(500).json({ error: 'Failed to list RDS instances' });
+      return res;
     }
   }
 
@@ -1175,10 +1424,16 @@ export class AWSController {
    * @desc List Lambda functions
    * @access Private
    */
-  static async listLambdaFunctions(req: Request, res: Response): Promise<Response> {
+  static async listLambdaFunctions(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('listLambdaFunctions', req);
       const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
       const { region } = req.query;
 
       const connection = await AWSConnection.findOne({
@@ -1192,18 +1447,23 @@ export class AWSController {
 
       const functions = await lambdaServiceProvider.listFunctions(connection, region as string | undefined);
 
+      ControllerHelper.logRequestSuccess('listLambdaFunctions', req, startTime, {
+        connectionId: id,
+        functionCount: functions.length,
+        region: req.query.region
+      });
+      
       return res.json({
         success: true,
         functions,
         count: functions.length,
       });
     } catch (error) {
-      loggingService.error('Failed to list Lambda functions', {
-        component: 'AWSController',
-        operation: 'listLambdaFunctions',
-        error: error instanceof Error ? error.message : String(error),
+      ControllerHelper.handleError('listLambdaFunctions', error, req, res, startTime, {
+        connectionId: req.params.id,
+        region: req.query.region
       });
-      return res.status(500).json({ error: 'Failed to list Lambda functions' });
+      return res;
     }
   }
 
@@ -1216,10 +1476,16 @@ export class AWSController {
    * @desc Get current month costs summary
    * @access Private
    */
-  static async getCosts(req: Request, res: Response): Promise<Response> {
+  static async getCosts(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('getCosts', req);
       const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
 
       const connection = await AWSConnection.findOne({
         _id: new Types.ObjectId(id),
@@ -1232,17 +1498,19 @@ export class AWSController {
 
       const costs = await costExplorerServiceProvider.getCurrentMonthCosts(connection);
 
+      ControllerHelper.logRequestSuccess('getCosts', req, startTime, {
+        connectionId: id
+      });
+      
       return res.json({
         success: true,
         ...costs,
       });
     } catch (error) {
-      loggingService.error('Failed to get costs', {
-        component: 'AWSController',
-        operation: 'getCosts',
-        error: error instanceof Error ? error.message : String(error),
+      ControllerHelper.handleError('getCosts', error, req, res, startTime, {
+        connectionId: req.params.id
       });
-      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to get costs' });
+      return res;
     }
   }
 
@@ -1251,10 +1519,16 @@ export class AWSController {
    * @desc Get cost breakdown by service
    * @access Private
    */
-  static async getCostBreakdown(req: Request, res: Response): Promise<Response> {
+  static async getCostBreakdown(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('getCostBreakdown', req);
       const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
       const { startDate, endDate } = req.query;
 
       const connection = await AWSConnection.findOne({
@@ -1272,18 +1546,24 @@ export class AWSController {
 
       const breakdown = await costExplorerServiceProvider.getCostBreakdownByService(connection, start, end);
 
+      ControllerHelper.logRequestSuccess('getCostBreakdown', req, startTime, {
+        connectionId: id,
+        startDate: req.query.startDate,
+        endDate: req.query.endDate
+      });
+      
       return res.json({
         success: true,
         breakdown,
         period: { start, end },
       });
     } catch (error) {
-      loggingService.error('Failed to get cost breakdown', {
-        component: 'AWSController',
-        operation: 'getCostBreakdown',
-        error: error instanceof Error ? error.message : String(error),
+      ControllerHelper.handleError('getCostBreakdown', error, req, res, startTime, {
+        connectionId: req.params.id,
+        startDate: req.query.startDate,
+        endDate: req.query.endDate
       });
-      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to get cost breakdown' });
+      return res;
     }
   }
 
@@ -1292,10 +1572,16 @@ export class AWSController {
    * @desc Get cost forecast
    * @access Private
    */
-  static async getCostForecast(req: Request, res: Response): Promise<Response> {
+  static async getCostForecast(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('getCostForecast', req);
       const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
       const { granularity } = req.query;
 
       const connection = await AWSConnection.findOne({
@@ -1318,18 +1604,22 @@ export class AWSController {
         (granularity as 'DAILY' | 'MONTHLY') || 'DAILY'
       );
 
+      ControllerHelper.logRequestSuccess('getCostForecast', req, startTime, {
+        connectionId: id,
+        granularity: req.query.granularity
+      });
+      
       return res.json({
         success: true,
         forecast,
         period: { start, end },
       });
     } catch (error) {
-      loggingService.error('Failed to get cost forecast', {
-        component: 'AWSController',
-        operation: 'getCostForecast',
-        error: error instanceof Error ? error.message : String(error),
+      ControllerHelper.handleError('getCostForecast', error, req, res, startTime, {
+        connectionId: req.params.id,
+        granularity: req.query.granularity
       });
-      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to get cost forecast' });
+      return res;
     }
   }
 
@@ -1338,10 +1628,16 @@ export class AWSController {
    * @desc Get cost anomalies
    * @access Private
    */
-  static async getCostAnomalies(req: Request, res: Response): Promise<Response> {
+  static async getCostAnomalies(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('getCostAnomalies', req);
       const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
       const { startDate, endDate } = req.query;
 
       const connection = await AWSConnection.findOne({
@@ -1359,18 +1655,25 @@ export class AWSController {
         endDate as string | undefined
       );
 
+      ControllerHelper.logRequestSuccess('getCostAnomalies', req, startTime, {
+        connectionId: id,
+        anomalyCount: anomalies.length,
+        startDate: req.query.startDate,
+        endDate: req.query.endDate
+      });
+      
       return res.json({
         success: true,
         anomalies,
         count: anomalies.length,
       });
     } catch (error) {
-      loggingService.error('Failed to get cost anomalies', {
-        component: 'AWSController',
-        operation: 'getCostAnomalies',
-        error: error instanceof Error ? error.message : String(error),
+      ControllerHelper.handleError('getCostAnomalies', error, req, res, startTime, {
+        connectionId: req.params.id,
+        startDate: req.query.startDate,
+        endDate: req.query.endDate
       });
-      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to get cost anomalies' });
+      return res;
     }
   }
 
@@ -1379,10 +1682,16 @@ export class AWSController {
    * @desc Get cost optimization recommendations
    * @access Private
    */
-  static async getOptimizationRecommendations(req: Request, res: Response): Promise<Response> {
+  static async getOptimizationRecommendations(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = (req as any).user?.id;
+      if (!ControllerHelper.requireAuth(req, res)) {
+        return res;
+      }
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('getOptimizationRecommendations', req);
       const { id } = req.params;
+      ServiceHelper.validateObjectId(id, 'connectionId');
 
       const connection = await AWSConnection.findOne({
         _id: new Types.ObjectId(id),
@@ -1395,18 +1704,21 @@ export class AWSController {
 
       const insights = await costExplorerServiceProvider.getOptimizationInsights(connection);
 
+      ControllerHelper.logRequestSuccess('getOptimizationRecommendations', req, startTime, {
+        connectionId: id,
+        recommendationCount: insights.length
+      });
+      
       return res.json({
         success: true,
         recommendations: insights,
         count: insights.length,
       });
     } catch (error) {
-      loggingService.error('Failed to get optimization recommendations', {
-        component: 'AWSController',
-        operation: 'getOptimizationRecommendations',
-        error: error instanceof Error ? error.message : String(error),
+      ControllerHelper.handleError('getOptimizationRecommendations', error, req, res, startTime, {
+        connectionId: req.params.id
       });
-      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to get optimization recommendations' });
+      return res;
     }
   }
 }

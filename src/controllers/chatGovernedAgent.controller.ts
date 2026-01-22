@@ -1,18 +1,12 @@
 import { Response } from 'express';
-import { loggingService } from '../services/logging.service';
-import { TaskClassifierService } from '../services/taskClassifier.service';
-import { GovernedAgentService } from '../services/governedAgent.service';
-import { SSEService } from '../services/sse.service';
-import { ChatService } from '../services/chat.service';
+import { loggingService } from '@services/logging.service';
+import { TaskClassifierService } from '@services/taskClassifier.service';
+import { GovernedAgentService } from '@services/governedAgent.service';
+import { SSEService } from '@services/sse.service';
+import { GovernedPlanMessageCreator } from '@services/chat/autonomous';
 import mongoose from 'mongoose';
-
-export interface AuthenticatedRequest {
-    userId?: string;
-    body: any;
-    params: any;
-    query: any;
-    headers: any;
-}
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 /**
  * Controller for integrating governed agent with chat system
@@ -23,17 +17,15 @@ export class ChatGovernedAgentController {
      */
     static async classifyMessage(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('classifyMessage', req);
+        
         const { message } = req.body;
 
         try {
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
 
             if (!message || typeof message !== 'string') {
                 res.status(400).json({
@@ -59,14 +51,11 @@ export class ChatGovernedAgentController {
 
             const duration = Date.now() - startTime;
 
-            loggingService.info('Message classification complete', {
-                userId,
+            ControllerHelper.logRequestSuccess('classifyMessage', req, startTime, {
                 shouldUseGovernedAgent,
                 classificationType: classification.type,
                 complexity: classification.complexity,
-                riskLevel: classification.riskLevel,
-                duration,
-                component: 'ChatGovernedAgentController'
+                riskLevel: classification.riskLevel
             });
 
             res.json({
@@ -81,22 +70,7 @@ export class ChatGovernedAgentController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Message classification failed', {
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                userId,
-                component: 'ChatGovernedAgentController',
-                operation: 'classifyMessage'
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to classify message',
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
+            ControllerHelper.handleError('classifyMessage', error, req, res, startTime);
         }
     }
 
@@ -105,17 +79,15 @@ export class ChatGovernedAgentController {
      */
     static async initiateFromChat(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('initiateFromChat', req);
+        
         const { message, conversationId } = req.body;
 
         try {
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
 
             if (!message || typeof message !== 'string') {
                 res.status(400).json({
@@ -176,24 +148,19 @@ export class ChatGovernedAgentController {
             const taskId = (task as any)._id?.toString() || task.id;
 
             // Create a governed plan message in the chat
-            const planMessage = await ChatService.createGovernedPlanMessage(
+            const planMessage = await GovernedPlanMessageCreator.createPlanMessage(
                 chatId,
                 taskId,
                 userId
             );
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Governed task initiated successfully with chat context', {
-                userId,
+            ControllerHelper.logRequestSuccess('initiateFromChat', req, startTime, {
                 taskId,
                 chatId,
                 parentMessageId,
                 planMessageId: planMessage._id,
                 mode: task.mode,
-                status: task.status,
-                duration,
-                component: 'ChatGovernedAgentController'
+                status: task.status
             });
 
             res.json({
@@ -209,22 +176,7 @@ export class ChatGovernedAgentController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Governed task initiation failed', {
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                userId,
-                component: 'ChatGovernedAgentController',
-                operation: 'initiateFromChat'
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to initiate governed task',
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
+            ControllerHelper.handleError('initiateFromChat', error, req, res, startTime);
         }
     }
 
@@ -233,14 +185,16 @@ export class ChatGovernedAgentController {
      * GET /api/chat/governed/:taskId/stream
      */
     static async streamTaskProgress(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         const { taskId } = req.params;
-        const userId = req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('streamTaskProgress', req, { taskId });
 
         try {
-            if (!userId) {
-                res.status(401).json({ success: false, message: 'Authentication required' });
-                return;
-            }
+            ServiceHelper.validateObjectId(taskId, 'taskId');
 
             // Set SSE headers
             res.setHeader('Content-Type', 'text/event-stream');
@@ -364,9 +318,8 @@ export class ChatGovernedAgentController {
             });
 
         } catch (error: any) {
-            loggingService.error('Failed to set up SSE stream', { error: error.message || 'Unknown error', stack: error.stack, taskId, userId, component: 'ChatGovernedAgentController' });
             if (!res.headersSent) {
-                res.status(500).json({ success: false, message: 'Failed to set up SSE stream', error: error instanceof Error ? error.message : 'Unknown error' });
+                ControllerHelper.handleError('streamTaskProgress', error, req, res, startTime, { taskId });
             }
         }
     }
@@ -375,16 +328,16 @@ export class ChatGovernedAgentController {
      * Request plan generation (user manually triggers this after reviewing scope)
      */
     static async requestPlan(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         const { taskId } = req.params;
-        const userId = req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('requestPlan', req, { taskId });
 
         try {
-            if (!userId) {
-                res.status(401).json({ success: false, message: 'Authentication required' });
-                return;
-            }
-
-            loggingService.info('User requesting plan generation', { taskId, userId, component: 'ChatGovernedAgentController', operation: 'requestPlan' });
+            ServiceHelper.validateObjectId(taskId, 'taskId');
 
             // Trigger plan generation
             GovernedAgentService.generatePlan(taskId, userId).catch(error => {
@@ -396,14 +349,15 @@ export class ChatGovernedAgentController {
                 });
             });
 
+            ControllerHelper.logRequestSuccess('requestPlan', req, startTime, { taskId });
+
             res.json({
                 success: true,
                 message: 'Plan generation started'
             });
 
         } catch (error: any) {
-            loggingService.error('Failed to request plan generation', { error: error.message || 'Unknown error', stack: error.stack, taskId, userId, component: 'ChatGovernedAgentController' });
-            res.status(500).json({ success: false, message: 'Failed to request plan generation', error: error instanceof Error ? error.message : 'Unknown error' });
+            ControllerHelper.handleError('requestPlan', error, req, res, startTime, { taskId });
         }
     }
 
@@ -411,31 +365,30 @@ export class ChatGovernedAgentController {
      * Submit clarifying answers and trigger plan generation
      */
     static async submitClarifyingAnswers(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         const { taskId } = req.params;
         const { answers } = req.body;
-        const userId = req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('submitClarifyingAnswers', req, { taskId });
 
         try {
-            if (!userId) {
-                res.status(401).json({ success: false, message: 'Authentication required' });
-                return;
-            }
+            ServiceHelper.validateObjectId(taskId, 'taskId');
 
             if (!answers || typeof answers !== 'object') {
                 res.status(400).json({ success: false, message: 'Answers object is required' });
                 return;
             }
 
-            loggingService.info('User submitting clarifying answers', { 
-                taskId, 
-                userId, 
-                answersCount: Object.keys(answers).length,
-                component: 'ChatGovernedAgentController', 
-                operation: 'submitClarifyingAnswers' 
-            });
-
             // Submit answers and trigger plan generation
             await GovernedAgentService.submitClarifyingAnswers(taskId, userId, answers);
+
+            ControllerHelper.logRequestSuccess('submitClarifyingAnswers', req, startTime, {
+                taskId,
+                answersCount: Object.keys(answers).length
+            });
 
             res.json({
                 success: true,
@@ -443,18 +396,7 @@ export class ChatGovernedAgentController {
             });
 
         } catch (error: any) {
-            loggingService.error('Failed to submit clarifying answers', { 
-                error: error.message || 'Unknown error', 
-                stack: error.stack, 
-                taskId, 
-                userId, 
-                component: 'ChatGovernedAgentController' 
-            });
-            res.status(500).json({ 
-                success: false, 
-                message: 'Failed to submit answers', 
-                error: error instanceof Error ? error.message : 'Unknown error' 
-            });
+            ControllerHelper.handleError('submitClarifyingAnswers', error, req, res, startTime, { taskId });
         }
     }
 
@@ -462,16 +404,16 @@ export class ChatGovernedAgentController {
      * Approve plan and start execution
      */
     static async approvePlan(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         const { taskId } = req.params;
-        const userId = req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('approvePlan', req, { taskId });
 
         try {
-            if (!userId) {
-                res.status(401).json({ success: false, message: 'Authentication required' });
-                return;
-            }
-
-            loggingService.info('User approving plan and starting execution', { taskId, userId, component: 'ChatGovernedAgentController', operation: 'approvePlan' });
+            ServiceHelper.validateObjectId(taskId, 'taskId');
 
             // Trigger execution
             GovernedAgentService.executePlan(taskId, userId).catch(error => {
@@ -483,14 +425,15 @@ export class ChatGovernedAgentController {
                 });
             });
 
+            ControllerHelper.logRequestSuccess('approvePlan', req, startTime, { taskId });
+
             res.json({
                 success: true,
                 message: 'Execution started'
             });
 
         } catch (error: any) {
-            loggingService.error('Failed to approve and execute plan', { error: error.message || 'Unknown error', stack: error.stack, taskId, userId, component: 'ChatGovernedAgentController' });
-            res.status(500).json({ success: false, message: 'Failed to approve and execute plan', error: error instanceof Error ? error.message : 'Unknown error' });
+            ControllerHelper.handleError('approvePlan', error, req, res, startTime, { taskId });
         }
     }
 
@@ -498,22 +441,22 @@ export class ChatGovernedAgentController {
      * Request changes to the plan
      */
     static async requestPlanChanges(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         const { taskId } = req.params;
         const { feedback } = req.body;
-        const userId = req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('requestPlanChanges', req, { taskId });
 
         try {
-            if (!userId) {
-                res.status(401).json({ success: false, message: 'Authentication required' });
-                return;
-            }
+            ServiceHelper.validateObjectId(taskId, 'taskId');
 
             if (!feedback || typeof feedback !== 'string') {
                 res.status(400).json({ success: false, message: 'Feedback is required' });
                 return;
             }
-
-            loggingService.info('User requesting plan changes', { taskId, userId, feedback, component: 'ChatGovernedAgentController', operation: 'requestPlanChanges' });
 
             // Save the feedback to the task (appends to userRequest)
             await GovernedAgentService.saveTaskFeedback(taskId, userId, feedback);
@@ -528,14 +471,15 @@ export class ChatGovernedAgentController {
                 });
             });
 
+            ControllerHelper.logRequestSuccess('requestPlanChanges', req, startTime, { taskId });
+
             res.json({
                 success: true,
                 message: 'Plan regeneration started with your feedback'
             });
 
         } catch (error: any) {
-            loggingService.error('Failed to request plan changes', { error: error.message || 'Unknown error', stack: error.stack, taskId, userId, component: 'ChatGovernedAgentController' });
-            res.status(500).json({ success: false, message: 'Failed to request plan changes', error: error instanceof Error ? error.message : 'Unknown error' });
+            ControllerHelper.handleError('requestPlanChanges', error, req, res, startTime, { taskId });
         }
     }
 
@@ -543,18 +487,20 @@ export class ChatGovernedAgentController {
      * Go back to previous mode
      */
     static async goBack(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         const { taskId } = req.params;
-        const userId = req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('goBack', req, { taskId });
 
         try {
-            if (!userId) {
-                res.status(401).json({ success: false, message: 'Authentication required' });
-                return;
-            }
-
-            loggingService.info('User going back to previous mode', { taskId, userId, component: 'ChatGovernedAgentController', operation: 'goBack' });
+            ServiceHelper.validateObjectId(taskId, 'taskId');
 
             await GovernedAgentService.goBackToPreviousMode(taskId, userId);
+
+            ControllerHelper.logRequestSuccess('goBack', req, startTime, { taskId });
 
             res.json({
                 success: true,
@@ -562,8 +508,7 @@ export class ChatGovernedAgentController {
             });
 
         } catch (error: any) {
-            loggingService.error('Failed to go back', { error: error.message || 'Unknown error', stack: error.stack, taskId, userId, component: 'ChatGovernedAgentController' });
-            res.status(500).json({ success: false, message: 'Failed to go back', error: error instanceof Error ? error.message : 'Unknown error' });
+            ControllerHelper.handleError('goBack', error, req, res, startTime, { taskId });
         }
     }
 
@@ -571,24 +516,26 @@ export class ChatGovernedAgentController {
      * Navigate to a specific mode
      */
     static async navigateToMode(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         const { taskId } = req.params;
         const { mode } = req.body;
-        const userId = req.userId;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('navigateToMode', req, { taskId, mode });
 
         try {
-            if (!userId) {
-                res.status(401).json({ success: false, message: 'Authentication required' });
-                return;
-            }
+            ServiceHelper.validateObjectId(taskId, 'taskId');
 
             if (!mode || typeof mode !== 'string') {
                 res.status(400).json({ success: false, message: 'Mode is required' });
                 return;
             }
 
-            loggingService.info('User navigating to mode', { taskId, userId, mode, component: 'ChatGovernedAgentController', operation: 'navigateToMode' });
-
             await GovernedAgentService.navigateToMode(taskId, userId, mode as any);
+
+            ControllerHelper.logRequestSuccess('navigateToMode', req, startTime, { taskId, mode });
 
             res.json({
                 success: true,
@@ -596,8 +543,7 @@ export class ChatGovernedAgentController {
             });
 
         } catch (error: any) {
-            loggingService.error('Failed to navigate to mode', { error: error.message || 'Unknown error', stack: error.stack, taskId, userId, component: 'ChatGovernedAgentController' });
-            res.status(500).json({ success: false, message: 'Failed to navigate to mode', error: error instanceof Error ? error.message : 'Unknown error' });
+            ControllerHelper.handleError('navigateToMode', error, req, res, startTime, { taskId, mode });
         }
     }
 }

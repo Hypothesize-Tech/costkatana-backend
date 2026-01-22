@@ -8,39 +8,45 @@
 import { Response, NextFunction } from 'express';
 import { CortexTrainingDataCollectorService } from '../services/cortexTrainingDataCollector.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class CortexTrainingDataController {
     
     /**
      * Get training data statistics
      */
-    static async getTrainingStats(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getTrainingStats(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
         try {
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getTrainingStats', req);
+
             const collector = CortexTrainingDataCollectorService.getInstance();
             const stats = collector.getStats();
             
-            loggingService.info('Training data stats retrieved', {
-                userId: req.user?.id,
-                stats
-            });
+            ControllerHelper.logRequestSuccess('getTrainingStats', req, startTime);
             
             res.json({
                 success: true,
                 data: stats
             });
         } catch (error) {
-            loggingService.error('Error getting training stats', {
-                error: error instanceof Error ? error.message : String(error)
-            });
-            next(error);
+            ControllerHelper.handleError('getTrainingStats', error, req, res, startTime);
         }
     }
     
     /**
      * Export training data for model training
      */
-    static async exportTrainingData(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async exportTrainingData(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
         try {
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('exportTrainingData', req);
+
             const {
                 startDate,
                 endDate,
@@ -59,16 +65,14 @@ export class CortexTrainingDataController {
             
             // Only allow users to export their own data unless they're admin
             if (req.user?.role !== 'admin') {
-                filters.userId = req.user?.id;
+                filters.userId = userId;
             }
             
             const collector = CortexTrainingDataCollectorService.getInstance();
             const trainingData = await collector.exportTrainingData(filters);
             
-            loggingService.info('Training data exported', {
-                userId: req.user?.id,
-                count: trainingData.length,
-                filters
+            ControllerHelper.logRequestSuccess('exportTrainingData', req, startTime, {
+                count: trainingData.length
             });
             
             res.json({
@@ -78,19 +82,20 @@ export class CortexTrainingDataController {
                 filters
             });
         } catch (error) {
-            loggingService.error('Error exporting training data', {
-                error: error instanceof Error ? error.message : String(error),
-                userId: req.user?.id
-            });
-            next(error);
+            ControllerHelper.handleError('exportTrainingData', error, req, res, startTime);
         }
     }
     
     /**
      * Add user feedback to training data
      */
-    static async addUserFeedback(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async addUserFeedback(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
         try {
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('addUserFeedback', req);
+
             const { sessionId } = req.params;
             const { rating, isSuccessful, improvementSuggestions } = req.body;
             
@@ -102,6 +107,8 @@ export class CortexTrainingDataController {
                 });
                 return;
             }
+            
+            ServiceHelper.validateObjectId(sessionId, 'sessionId');
             
             if (rating !== undefined && (rating < 1 || rating > 5)) {
                 res.status(400).json({
@@ -123,11 +130,8 @@ export class CortexTrainingDataController {
             
             collector.addUserFeedback(sessionId, feedbackData);
             
-            loggingService.info('User feedback added to training data', {
-                userId: req.user?.id,
-                sessionId,
-                rating,
-                isSuccessful
+            ControllerHelper.logRequestSuccess('addUserFeedback', req, startTime, {
+                sessionId
             });
             
             res.json({
@@ -135,28 +139,27 @@ export class CortexTrainingDataController {
                 message: 'Feedback added successfully'
             });
         } catch (error) {
-            loggingService.error('Error adding user feedback', {
-                error: error instanceof Error ? error.message : String(error),
-                userId: req.user?.id,
-                sessionId: req.params.sessionId
-            });
-            next(error);
+            ControllerHelper.handleError('addUserFeedback', error, req, res, startTime);
         }
     }
     
     /**
      * Get training data insights and analytics - Optimized with async background processing
      */
-    static async getTrainingInsights(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getTrainingInsights(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
         try {
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getTrainingInsights', req);
+
             // Start background processing for detailed insights
             this.generateInsightsAsync(req.query, req.user);
             
             // Return basic stats immediately using optimized approach
             const basicInsights = await this.getBasicInsightsOptimized(req.query, req.user);
             
-            loggingService.info('Basic training insights generated', {
-                userId: req.user?.id,
+            ControllerHelper.logRequestSuccess('getTrainingInsights', req, startTime, {
                 totalSessions: basicInsights.totalSessions
             });
             
@@ -168,11 +171,7 @@ export class CortexTrainingDataController {
                 message: 'Detailed insights are being generated in the background'
             });
         } catch (error) {
-            loggingService.error('Error getting training insights', {
-                error: error instanceof Error ? error.message : String(error),
-                userId: req.user?.id
-            });
-            next(error);
+            ControllerHelper.handleError('getTrainingInsights', error, req, res, startTime);
         }
     }
     
