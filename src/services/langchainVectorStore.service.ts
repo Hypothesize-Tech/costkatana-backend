@@ -5,6 +5,7 @@ import { DocumentModel, IDocument } from '../models/Document';
 import { loggingService } from './logging.service';
 import mongoose from 'mongoose';
 import * as crypto from 'crypto';
+import IntelligentSearchStrategyService, { SearchStrategy } from './intelligentSearchStrategy.service';
 
 export interface MongoDBVectorStoreConfig {
     collectionName?: string;
@@ -406,7 +407,147 @@ export class MongoDBVectorStore extends VectorStore {
     }
 
     /**
+     * Intelligent search that automatically chooses between MMR and Cosine Similarity
+     * based on query complexity and specificity
+     */
+    async intelligentSearch(
+        query: string,
+        k: number = 4,
+        filter?: any
+    ): Promise<[LangchainDocument, number][]> {
+        try {
+            loggingService.info('🤖 Performing intelligent search with autonomous strategy selection', {
+                component: 'MongoDBVectorStore',
+                operation: 'intelligentSearch',
+                query: query.substring(0, 100),
+                limit: k
+            });
+
+            // Validate query
+            if (!query || query.trim().length === 0) {
+                loggingService.warn('Empty query provided to intelligentSearch, returning empty results');
+                return [];
+            }
+
+            // 1. Analyze query to determine optimal strategy
+            const analysis = await IntelligentSearchStrategyService.analyzeQuery(query);
+            
+            loggingService.info('📊 Query analysis completed', {
+                component: 'MongoDBVectorStore',
+                operation: 'intelligentSearch',
+                complexity: analysis.complexity,
+                specificity: analysis.specificity,
+                strategy: analysis.recommendedStrategy,
+                confidence: analysis.confidence
+            });
+
+            // 2. Get search configuration based on strategy
+            const searchConfig = IntelligentSearchStrategyService.getSearchConfig(
+                analysis.recommendedStrategy,
+                analysis.complexity
+            );
+
+            // 3. Execute search based on selected strategy
+            let results: [LangchainDocument, number][];
+
+            switch (analysis.recommendedStrategy) {
+                case SearchStrategy.MMR:
+                    loggingService.info('📊 Executing MMR search for diverse results', {
+                        component: 'MongoDBVectorStore',
+                        k: searchConfig.k,
+                        fetchK: searchConfig.fetchK,
+                        lambda: searchConfig.lambda
+                    });
+                    
+                    results = await this.maxMarginalRelevanceSearchWithScores(query, {
+                        k: searchConfig.k,
+                        fetchK: searchConfig.fetchK,
+                        lambda: searchConfig.lambda,
+                        filter
+                    });
+                    break;
+
+                case SearchStrategy.COSINE:
+                    loggingService.info('🎯 Executing Cosine Similarity search for precision', {
+                        component: 'MongoDBVectorStore',
+                        k: searchConfig.k,
+                        threshold: searchConfig.threshold
+                    });
+                    
+                    results = await this.similaritySearchWithScore(query, searchConfig.k, filter);
+                    
+                    // Filter by threshold if specified
+                    if (searchConfig.threshold) {
+                        results = results.filter(([_, score]) => score >= searchConfig.threshold!);
+                    }
+                    break;
+
+                case SearchStrategy.HYBRID:
+                    loggingService.info('⚡ Executing Hybrid search', {
+                        component: 'MongoDBVectorStore',
+                        k: searchConfig.k
+                    });
+                    
+                    // Hybrid: Get both MMR and Cosine results, merge intelligently
+                    const mmrResults = await this.maxMarginalRelevanceSearchWithScores(query, {
+                        k: Math.ceil(searchConfig.k / 2),
+                        fetchK: searchConfig.fetchK,
+                        lambda: searchConfig.lambda,
+                        filter
+                    });
+                    
+                    const cosineResults = await this.similaritySearchWithScore(
+                        query,
+                        Math.ceil(searchConfig.k / 2),
+                        filter
+                    );
+                    
+                    // Merge and deduplicate
+                    results = this.mergeSearchResults(mmrResults, cosineResults, searchConfig.k);
+                    break;
+
+                default:
+                    // Fallback to cosine
+                    results = await this.similaritySearchWithScore(query, k, filter);
+            }
+
+            loggingService.info('✅ Intelligent search completed', {
+                component: 'MongoDBVectorStore',
+                operation: 'intelligentSearch',
+                strategy: analysis.recommendedStrategy,
+                resultsFound: results.length,
+                confidence: analysis.confidence
+            });
+
+            // Add strategy metadata to results
+            results.forEach(([doc]) => {
+                doc.metadata = {
+                    ...doc.metadata,
+                    _searchStrategy: analysis.recommendedStrategy,
+                    _searchConfidence: analysis.confidence,
+                    _queryComplexity: analysis.complexity,
+                    _querySpecificity: analysis.specificity
+                };
+            });
+
+            return results;
+
+        } catch (error) {
+            loggingService.error('❌ Intelligent search failed', {
+                component: 'MongoDBVectorStore',
+                operation: 'intelligentSearch',
+                error: error instanceof Error ? error.message : String(error)
+            });
+            
+            // Fallback to traditional cosine similarity
+            loggingService.info('🔄 Falling back to traditional cosine similarity search');
+            return this.similaritySearchWithScore(query, k, filter);
+        }
+    }
+
+    /**
      * Similarity search with scores using MongoDB Atlas Vector Search
+     * (Traditional Cosine Similarity approach)
      */
     async similaritySearchWithScore(
         query: string,
@@ -669,8 +810,9 @@ export class MongoDBVectorStore extends VectorStore {
 
     /**
      * Max marginal relevance search - balances relevance and diversity
+     * Returns documents with scores
      */
-    async maxMarginalRelevanceSearch(
+    async maxMarginalRelevanceSearchWithScores(
         query: string,
         options: {
             k?: number;
@@ -678,7 +820,7 @@ export class MongoDBVectorStore extends VectorStore {
             lambda?: number;
             filter?: any;
         } = {}
-    ): Promise<LangchainDocument[]> {
+    ): Promise<[LangchainDocument, number][]> {
         const { k = 4, fetchK = 20, lambda = 0.5, filter } = options;
 
         // Fetch more candidates than needed
@@ -713,14 +855,14 @@ export class MongoDBVectorStore extends VectorStore {
         // Get query embedding
         // Validate query before embedding
         if (!query || query.trim().length === 0) {
-            loggingService.warn('Empty query provided to maxMarginalRelevanceSearch');
+            loggingService.warn('Empty query provided to maxMarginalRelevanceSearchWithScores');
             return [];
         }
         
         const queryEmbedding = await this.embeddings.embedQuery(query.trim());
         
         // MMR algorithm implementation with proper diversity calculation
-        const selected: LangchainDocument[] = [];
+        const selected: [LangchainDocument, number][] = [];
         const selectedEmbeddings: number[][] = [];
         const selectedIndices = new Set<number>();
 
@@ -731,7 +873,7 @@ export class MongoDBVectorStore extends VectorStore {
             for (let i = 0; i < candidatesWithScores.length; i++) {
                 if (selectedIndices.has(i)) continue;
 
-                const [, _] = candidatesWithScores[i];
+                const [, originalScore] = candidatesWithScores[i];
                 const candidateEmbedding = candidateEmbeddings[i];
                 
                 // Calculate relevance score (similarity to query)
@@ -757,7 +899,9 @@ export class MongoDBVectorStore extends VectorStore {
             }
 
             if (bestIdx !== -1) {
-                selected.push(candidatesWithScores[bestIdx][0]);
+                const [doc, originalScore] = candidatesWithScores[bestIdx];
+                // Return MMR score instead of original similarity score
+                selected.push([doc, bestScore]);
                 selectedEmbeddings.push(candidateEmbeddings[bestIdx]);
                 selectedIndices.add(bestIdx);
             } else {
@@ -765,15 +909,78 @@ export class MongoDBVectorStore extends VectorStore {
             }
         }
 
-        loggingService.info('MMR search completed', {
+        loggingService.info('MMR search with scores completed', {
             component: 'MongoDBVectorStore',
-            operation: 'maxMarginalRelevanceSearch',
+            operation: 'maxMarginalRelevanceSearchWithScores',
             candidatesCount: candidatesWithScores.length,
             selectedCount: selected.length,
             lambda
         });
 
         return selected;
+    }
+
+    /**
+     * Max marginal relevance search - balances relevance and diversity
+     */
+    async maxMarginalRelevanceSearch(
+        query: string,
+        options: {
+            k?: number;
+            fetchK?: number;
+            lambda?: number;
+            filter?: any;
+        } = {}
+    ): Promise<LangchainDocument[]> {
+        const results = await this.maxMarginalRelevanceSearchWithScores(query, options);
+        return results.map(([doc]) => doc);
+    }
+
+    /**
+     * Merge MMR and Cosine results intelligently
+     */
+    private mergeSearchResults(
+        mmrResults: [LangchainDocument, number][],
+        cosineResults: [LangchainDocument, number][],
+        k: number
+    ): [LangchainDocument, number][] {
+        // Create a map to track unique documents by content hash
+        const seenContent = new Set<string>();
+        const merged: [LangchainDocument, number][] = [];
+
+        // Interleave results - alternate between MMR (diversity) and Cosine (precision)
+        const maxLen = Math.max(mmrResults.length, cosineResults.length);
+        
+        for (let i = 0; i < maxLen && merged.length < k; i++) {
+            // Add MMR result if available
+            if (i < mmrResults.length) {
+                const [doc, score] = mmrResults[i];
+                const contentHash = crypto.createHash('sha256').update(doc.pageContent).digest('hex');
+                
+                if (!seenContent.has(contentHash)) {
+                    seenContent.add(contentHash);
+                    // Boost MMR scores slightly for diversity preference
+                    merged.push([doc, score * 1.05]);
+                }
+            }
+
+            // Add Cosine result if available
+            if (i < cosineResults.length && merged.length < k) {
+                const [doc, score] = cosineResults[i];
+                const contentHash = crypto.createHash('sha256').update(doc.pageContent).digest('hex');
+                
+                if (!seenContent.has(contentHash)) {
+                    seenContent.add(contentHash);
+                    merged.push([doc, score]);
+                }
+            }
+        }
+
+        // Sort by score (descending)
+        merged.sort((a, b) => b[1] - a[1]);
+
+        // Limit to k results
+        return merged.slice(0, k);
     }
 
     /**
