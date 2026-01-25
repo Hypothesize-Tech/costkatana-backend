@@ -44,6 +44,43 @@ export const VECTOR_SEARCH_INDEX_CONFIG = {
             {
                 type: 'filter',
                 path: 'createdAt'
+            },
+            // NEW: Enhanced semantic metadata filters
+            {
+                type: 'filter',
+                path: 'metadata.domain'
+            },
+            {
+                type: 'filter',
+                path: 'metadata.topic'
+            },
+            {
+                type: 'filter',
+                path: 'metadata.topics'
+            },
+            {
+                type: 'filter',
+                path: 'metadata.contentType'
+            },
+            {
+                type: 'filter',
+                path: 'metadata.technicalLevel'
+            },
+            {
+                type: 'filter',
+                path: 'metadata.importance'
+            },
+            {
+                type: 'filter',
+                path: 'metadata.semanticTags'
+            },
+            {
+                type: 'filter',
+                path: 'metadata.lastVerified'
+            },
+            {
+                type: 'filter',
+                path: 'metadata.deprecationDate'
             }
         ]
     }
@@ -93,6 +130,42 @@ export const VECTOR_SEARCH_INDEX_CONFIG = {
  *       {
  *         "type": "filter",
  *         "path": "createdAt"
+ *       },
+ *       {
+ *         "type": "filter",
+ *         "path": "metadata.domain"
+ *       },
+ *       {
+ *         "type": "filter",
+ *         "path": "metadata.topic"
+ *       },
+ *       {
+ *         "type": "filter",
+ *         "path": "metadata.topics"
+ *       },
+ *       {
+ *         "type": "filter",
+ *         "path": "metadata.contentType"
+ *       },
+ *       {
+ *         "type": "filter",
+ *         "path": "metadata.technicalLevel"
+ *       },
+ *       {
+ *         "type": "filter",
+ *         "path": "metadata.importance"
+ *       },
+ *       {
+ *         "type": "filter",
+ *         "path": "metadata.semanticTags"
+ *       },
+ *       {
+ *         "type": "filter",
+ *         "path": "metadata.lastVerified"
+ *       },
+ *       {
+ *         "type": "filter",
+ *         "path": "metadata.deprecationDate"
  *       }
  *     ]
  *   }
