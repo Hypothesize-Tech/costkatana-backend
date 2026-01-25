@@ -6,6 +6,7 @@ import { DocumentModel } from '../models/Document';
 import { loggingService } from './logging.service';
 import { redisService } from './redis.service';
 import { vectorStrategyService } from './vectorization/vectorStrategy.service';
+import { DomainType, ContentType, ImportanceLevel, TechnicalLevel } from '../types/metadata.types';
 
 export interface RetrievalOptions {
     userId?: string;
@@ -17,10 +18,29 @@ export interface RetrievalOptions {
         projectId?: string;
         conversationId?: string;
         documentIds?: string[]; // Filter by specific document IDs
+        
+        // NEW: Enhanced semantic metadata filters
+        domain?: DomainType[];
+        topics?: string[];
+        contentType?: ContentType[];
+        technicalLevel?: TechnicalLevel[];
+        importance?: ImportanceLevel[];
+        minQualityScore?: number;
+        maxAgeInDays?: number;
+        excludeDeprecated?: boolean;
+        mustContainKeywords?: string[];
+        mustNotContainKeywords?: string[];
     };
     includeScore?: boolean;
     useCache?: boolean;
     rerank?: boolean;
+    
+    // NEW: User context for personalization
+    userContext?: {
+        technicalLevel?: TechnicalLevel;
+        preferredTopics?: string[];
+        recentQueries?: string[];
+    };
 }
 
 export interface RetrievalResult {
@@ -44,6 +64,16 @@ interface MongoFilters {
     'metadata.tags'?: { $in: string[] };
     'metadata.documentId'?: { $in: string[] };
     createdAt?: { $gte: Date; $lte: Date };
+    
+    // NEW: Enhanced semantic metadata filters
+    'metadata.domain'?: { $in: DomainType[] };
+    'metadata.topics'?: { $in: string[] };
+    'metadata.contentType'?: { $in: ContentType[] };
+    'metadata.technicalLevel'?: { $in: TechnicalLevel[] };
+    'metadata.importance'?: { $in: ImportanceLevel[] };
+    'metadata.qualityScore'?: { $gte: number };
+    'metadata.lastVerified'?: { $gte: Date };
+    '$or'?: Array<Record<string, any>>;
 }
 
 interface ScoredDocument {
@@ -56,6 +86,27 @@ export class RetrievalService {
     private cacheTTL = 3600; // 1 hour
     private vectorStore?: MongoDBVectorStore;
     private embeddings?: SafeBedrockEmbeddings;
+
+    // Static reranking configuration - no environment variables needed
+    private readonly RERANKING_CONFIG = {
+        ENABLED: true,
+        IMPORTANCE_WEIGHTS: {
+            critical: 1.5,
+            high: 1.2,
+            medium: 1.0,
+            low: 0.8
+        },
+        QUALITY_WEIGHT: 0.5,
+        FRESHNESS_WEIGHT: 0.2,
+        FRESHNESS_DECAY_DAYS: 90,
+        TECHNICAL_MATCH_BOOST: 1.3,
+        TOPIC_OVERLAP_BOOST: 0.1,
+        DEPRECATION_PENALTY: 0.3,
+        RECENT_DOCUMENT_DAYS: 7,
+        RECENT_DOCUMENT_BOOST: 0.5,
+        ACCESS_COUNT_THRESHOLD: 10,
+        ACCESS_COUNT_BOOST: 0.3
+    };
 
     /**
      * Initialize with LangChain VectorStore
@@ -104,6 +155,37 @@ export class RetrievalService {
                 options
             });
 
+            // NEW: Load user preferences and enhance options
+            if (options.userId && !options.userContext) {
+                const userPreferences = await this.loadUserPreferences(options.userId);
+                
+                if (userPreferences) {
+                    // Enhance options with user context
+                    options.userContext = {
+                        technicalLevel: userPreferences.technicalLevel,
+                        preferredTopics: userPreferences.commonTopics,
+                        recentQueries: [] // Could load from conversation memory
+                    };
+                    
+                    // Auto-add preferred topics to filters (boost relevant content)
+                    if (userPreferences.commonTopics && userPreferences.commonTopics.length > 0) {
+                        if (!options.filters) {
+                            options.filters = {};
+                        }
+                        // Don't override existing topics, just add user's preferred topics
+                        const existingTopics = options.filters.topics || [];
+                        options.filters.topics = [...existingTopics, ...userPreferences.commonTopics];
+                    }
+
+                    loggingService.info('Enhanced retrieval with user preferences', {
+                        component: 'RetrievalService',
+                        userId: options.userId,
+                        technicalLevel: userPreferences.technicalLevel,
+                        preferredTopics: userPreferences.commonTopics?.length || 0
+                    });
+                }
+            }
+
             // PRIORITY: If specific documentIds are provided, search directly by IDs first
             // This is more reliable than vector search for user-uploaded documents
             if (options.filters?.documentIds && options.filters.documentIds.length > 0) {
@@ -129,7 +211,7 @@ export class RetrievalService {
                     });
                     
                     // Apply reranking and return
-                    const rerankedResults = await this.rerankResults(query, directResults, limit);
+                    const rerankedResults = await this.rerankResults(query, directResults, limit, options);
                     const sources = this.extractSources(rerankedResults);
                     
                     return {
@@ -203,7 +285,7 @@ export class RetrievalService {
 
             // Stage 3: Re-ranking (if enabled)
             if (options.rerank && filteredResults.length > limit) {
-                filteredResults = this.rerankResults(query, filteredResults, limit);
+                filteredResults = this.rerankResults(query, filteredResults, limit, options);
             } else {
                 filteredResults = filteredResults.slice(0, limit);
             }
@@ -287,6 +369,7 @@ export class RetrievalService {
             // Build filter
             const filter: any = {};
 
+            // Existing filters
             if (options.userId) {
                 filter['metadata.userId'] = options.userId;
             }
@@ -312,6 +395,44 @@ export class RetrievalService {
                     $gte: options.filters.dateRange.from,
                     $lte: options.filters.dateRange.to
                 };
+            }
+
+            // NEW: Enhanced semantic metadata filters
+            if (options.filters?.domain && options.filters.domain.length > 0) {
+                filter['metadata.domain'] = { $in: options.filters.domain };
+            }
+
+            if (options.filters?.topics && options.filters.topics.length > 0) {
+                filter['metadata.topics'] = { $in: options.filters.topics };
+            }
+
+            if (options.filters?.contentType && options.filters.contentType.length > 0) {
+                filter['metadata.contentType'] = { $in: options.filters.contentType };
+            }
+
+            if (options.filters?.technicalLevel && options.filters.technicalLevel.length > 0) {
+                filter['metadata.technicalLevel'] = { $in: options.filters.technicalLevel };
+            }
+
+            if (options.filters?.importance && options.filters.importance.length > 0) {
+                filter['metadata.importance'] = { $in: options.filters.importance };
+            }
+
+            if (options.filters?.minQualityScore !== undefined) {
+                filter['metadata.qualityScore'] = { $gte: options.filters.minQualityScore };
+            }
+
+            if (options.filters?.maxAgeInDays !== undefined) {
+                const cutoffDate = new Date();
+                cutoffDate.setDate(cutoffDate.getDate() - options.filters.maxAgeInDays);
+                filter['metadata.lastVerified'] = { $gte: cutoffDate };
+            }
+
+            if (options.filters?.excludeDeprecated) {
+                filter['$or'] = [
+                    { 'metadata.deprecationDate': { $exists: false } },
+                    { 'metadata.deprecationDate': { $gt: new Date() } }
+                ];
             }
 
             // Use vector strategy service (handles FAISS/MongoDB routing based on config)
@@ -427,6 +548,7 @@ export class RetrievalService {
             // Build filter for MongoDB
             const mongoFilters: MongoFilters = {};
 
+            // Existing filters
             if (options.userId) {
                 mongoFilters['metadata.userId'] = options.userId;
             }
@@ -457,6 +579,45 @@ export class RetrievalService {
                     $lte: options.filters.dateRange.to
                 };
             }
+
+            // NEW: Enhanced semantic metadata filters
+            if (options.filters?.domain && options.filters.domain.length > 0) {
+                mongoFilters['metadata.domain'] = { $in: options.filters.domain };
+            }
+
+            if (options.filters?.topics && options.filters.topics.length > 0) {
+                mongoFilters['metadata.topics'] = { $in: options.filters.topics };
+            }
+
+            if (options.filters?.contentType && options.filters.contentType.length > 0) {
+                mongoFilters['metadata.contentType'] = { $in: options.filters.contentType };
+            }
+
+            if (options.filters?.technicalLevel && options.filters.technicalLevel.length > 0) {
+                mongoFilters['metadata.technicalLevel'] = { $in: options.filters.technicalLevel };
+            }
+
+            if (options.filters?.importance && options.filters.importance.length > 0) {
+                mongoFilters['metadata.importance'] = { $in: options.filters.importance };
+            }
+
+            if (options.filters?.minQualityScore !== undefined) {
+                mongoFilters['metadata.qualityScore'] = { $gte: options.filters.minQualityScore };
+            }
+
+            if (options.filters?.maxAgeInDays !== undefined) {
+                const cutoffDate = new Date();
+                cutoffDate.setDate(cutoffDate.getDate() - options.filters.maxAgeInDays);
+                mongoFilters['metadata.lastVerified'] = { $gte: cutoffDate };
+            }
+
+            if (options.filters?.excludeDeprecated) {
+                mongoFilters['$or'] = [
+                    { 'metadata.deprecationDate': { $exists: false } },
+                    { 'metadata.deprecationDate': { $gt: new Date() } }
+                ];
+            }
+
             const results = await vectorStoreService.searchMongoDB(query, limit, mongoFilters);
 
             return results;
@@ -493,9 +654,9 @@ export class RetrievalService {
     }
 
     /**
-     * Re-rank results using relevance scoring
+     * Re-rank results using advanced relevance scoring with metadata signals
      */
-    private rerankResults(query: string, documents: Document[], limit: number): Document[] {
+    private rerankResults(query: string, documents: Document[], limit: number, options?: RetrievalOptions): Document[] {
         try {
             // Simple re-ranking based on query term frequency and document metadata
             const queryTerms = query.toLowerCase().split(/\s+/);
@@ -503,26 +664,69 @@ export class RetrievalService {
             const scored: ScoredDocument[] = documents.map(doc => {
                 let score = (doc.metadata.score as number) ?? 0;
 
-                // Boost score based on query term matches in content
+                // Existing: Boost score based on query term matches in content
                 const content = doc.pageContent.toLowerCase();
                 queryTerms.forEach(term => {
                     const matches = (content.match(new RegExp(term, 'g')) ?? []).length;
                     score += matches * 0.1;
                 });
 
-                // Boost recent documents
+                // NEW: Importance-based boosting (using static config)
+                const importanceWeight = this.RERANKING_CONFIG.IMPORTANCE_WEIGHTS[
+                    doc.metadata.importance as keyof typeof this.RERANKING_CONFIG.IMPORTANCE_WEIGHTS
+                ] ?? 1.0;
+                score *= importanceWeight;
+
+                // NEW: Quality score boosting (using static config)
+                if (doc.metadata.qualityScore) {
+                    score *= (this.RERANKING_CONFIG.QUALITY_WEIGHT + 
+                             (doc.metadata.qualityScore as number) * this.RERANKING_CONFIG.QUALITY_WEIGHT);
+                }
+
+                // NEW: Freshness decay (using static config)
+                if (doc.metadata.lastVerified) {
+                    const daysSinceVerified = this.getDaysSince(doc.metadata.lastVerified as Date);
+                    const freshnessScore = Math.exp(
+                        -daysSinceVerified / this.RERANKING_CONFIG.FRESHNESS_DECAY_DAYS
+                    );
+                    score *= (1 - this.RERANKING_CONFIG.FRESHNESS_WEIGHT + 
+                             freshnessScore * this.RERANKING_CONFIG.FRESHNESS_WEIGHT);
+                }
+
+                // NEW: User context matching (using static config)
+                if (options?.userContext?.technicalLevel && 
+                    doc.metadata.technicalLevel === options.userContext.technicalLevel) {
+                    score *= this.RERANKING_CONFIG.TECHNICAL_MATCH_BOOST;
+                }
+
+                // NEW: Topic relevance (using static config)
+                if (options?.userContext?.preferredTopics && doc.metadata.topics) {
+                    const docTopics = doc.metadata.topics as string[];
+                    const topicOverlap = options.userContext.preferredTopics.filter(
+                        topic => docTopics.includes(topic)
+                    ).length;
+                    score *= (1 + topicOverlap * this.RERANKING_CONFIG.TOPIC_OVERLAP_BOOST);
+                }
+
+                // NEW: Deprecation penalty (using static config)
+                if (doc.metadata.deprecationDate && 
+                    new Date() > new Date(doc.metadata.deprecationDate as string)) {
+                    score *= this.RERANKING_CONFIG.DEPRECATION_PENALTY;
+                }
+
+                // Existing: Recent documents boost (using static config)
                 if (doc.metadata.createdAt) {
                     const createdAt = doc.metadata.createdAt as string | Date;
                     const age = Date.now() - new Date(createdAt).getTime();
                     const daysSinceCreation = age / (1000 * 60 * 60 * 24);
-                    if (daysSinceCreation < 7) {
-                        score += 0.5; // Boost recent documents
+                    if (daysSinceCreation < this.RERANKING_CONFIG.RECENT_DOCUMENT_DAYS) {
+                        score += this.RERANKING_CONFIG.RECENT_DOCUMENT_BOOST;
                     }
                 }
 
-                // Boost frequently accessed documents
-                if ((doc.metadata.accessCount as number) > 10) {
-                    score += 0.3;
+                // Existing: Frequently accessed boost (using static config)
+                if ((doc.metadata.accessCount as number) > this.RERANKING_CONFIG.ACCESS_COUNT_THRESHOLD) {
+                    score += this.RERANKING_CONFIG.ACCESS_COUNT_BOOST;
                 }
 
                 return { doc, score };
@@ -539,6 +743,36 @@ export class RetrievalService {
                 error: error instanceof Error ? error.message : String(error)
             });
             return documents.slice(0, limit);
+        }
+    }
+
+    /**
+     * Helper method to calculate days since a given date
+     */
+    private getDaysSince(date: Date): number {
+        const now = new Date();
+        const diff = now.getTime() - new Date(date).getTime();
+        return Math.floor(diff / (1000 * 60 * 60 * 24));
+    }
+
+    /**
+     * Load user preferences from Memory models for personalized retrieval
+     */
+    private async loadUserPreferences(userId?: string): Promise<any | null> {
+        if (!userId) return null;
+        
+        try {
+            const { UserPreference } = await import('../models/Memory');
+            const preferences = await UserPreference.findOne({ userId, isActive: true });
+            
+            return preferences;
+        } catch (error) {
+            loggingService.warn('Failed to load user preferences', {
+                component: 'RetrievalService',
+                userId,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return null;
         }
     }
 

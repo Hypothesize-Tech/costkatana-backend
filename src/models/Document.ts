@@ -12,6 +12,7 @@ export interface IDocument extends Document {
     
     // Metadata
     metadata: {
+        // Existing fields
         source: 'knowledge-base' | 'conversation' | 'telemetry' | 'user-upload' | 'activity';
         sourceType: string; // file type: md, pdf, txt, json, etc.
         userId?: string; // For user-scoped documents
@@ -27,6 +28,46 @@ export interface IDocument extends Document {
         tags?: string[]; // Custom tags
         language?: string; // Programming language for code files
         customMetadata?: Record<string, any>; // Flexible additional metadata
+        
+        // NEW: Semantic metadata fields for enhanced RAG retrieval
+        domain?: 'ai-optimization' | 'cost-tracking' | 'api-usage' | 'documentation' | 'general';
+        topic?: string; // Primary topic (e.g., "prompt optimization", "budget management")
+        topics?: string[]; // Multiple topics for multi-topic documents
+        contentType?: 'code' | 'explanation' | 'example' | 'configuration' | 'troubleshooting' | 'tutorial';
+        
+        // NEW: Quality and importance indicators
+        importance?: 'low' | 'medium' | 'high' | 'critical';
+        qualityScore?: number; // 0-1 range
+        
+        // NEW: Technical level
+        technicalLevel?: 'beginner' | 'intermediate' | 'advanced';
+        
+        // NEW: Semantic tags (auto-generated)
+        semanticTags?: string[]; // e.g., ['technical', 'beginner-friendly', 'production-ready']
+        
+        // NEW: Relationship metadata
+        relatedDocumentIds?: string[];
+        prerequisites?: string[];
+        
+        // NEW: Freshness tracking
+        version?: string;
+        lastVerified?: Date;
+        deprecationDate?: Date;
+        
+        // NEW: Hierarchical structure
+        sectionTitle?: string;
+        sectionLevel?: number;
+        sectionPath?: string[];
+        
+        // NEW: Context preservation
+        precedingContext?: string;
+        followingContext?: string;
+        
+        // NEW: Content indicators
+        containsCode?: boolean;
+        containsEquations?: boolean;
+        containsLinks?: string[];
+        containsImages?: boolean;
     };
     
     // Chunking info
@@ -74,6 +115,7 @@ const DocumentSchema = new Schema<IDocument>({
         }
     },
     metadata: {
+        // Existing fields
         source: {
             type: String,
             enum: ['knowledge-base', 'conversation', 'telemetry', 'user-upload', 'activity'],
@@ -115,7 +157,83 @@ const DocumentSchema = new Schema<IDocument>({
             index: true
         },
         language: String,
-        customMetadata: Schema.Types.Mixed
+        customMetadata: Schema.Types.Mixed,
+        
+        // NEW: Semantic metadata fields for enhanced RAG retrieval
+        domain: {
+            type: String,
+            enum: ['ai-optimization', 'cost-tracking', 'api-usage', 'documentation', 'general'],
+            index: true
+        },
+        topic: {
+            type: String,
+            index: true
+        },
+        topics: {
+            type: [String],
+            index: true
+        },
+        contentType: {
+            type: String,
+            enum: ['code', 'explanation', 'example', 'configuration', 'troubleshooting', 'tutorial'],
+            index: true
+        },
+        
+        // NEW: Quality and importance indicators
+        importance: {
+            type: String,
+            enum: ['low', 'medium', 'high', 'critical'],
+            index: true
+        },
+        qualityScore: {
+            type: Number,
+            min: 0,
+            max: 1,
+            index: true
+        },
+        
+        // NEW: Technical level
+        technicalLevel: {
+            type: String,
+            enum: ['beginner', 'intermediate', 'advanced'],
+            index: true
+        },
+        
+        // NEW: Semantic tags (auto-generated)
+        semanticTags: {
+            type: [String],
+            index: true
+        },
+        
+        // NEW: Relationship metadata
+        relatedDocumentIds: [String],
+        prerequisites: [String],
+        
+        // NEW: Freshness tracking
+        version: String,
+        lastVerified: {
+            type: Date,
+            index: true
+        },
+        deprecationDate: {
+            type: Date,
+            index: true
+        },
+        
+        // NEW: Hierarchical structure
+        sectionTitle: String,
+        sectionLevel: Number,
+        sectionPath: [String],
+        
+        // NEW: Context preservation
+        precedingContext: String,
+        followingContext: String,
+        
+        // NEW: Content indicators
+        containsCode: Boolean,
+        containsEquations: Boolean,
+        containsLinks: [String],
+        containsImages: Boolean
     },
     chunkIndex: {
         type: Number,
@@ -164,6 +282,14 @@ DocumentSchema.index({ 'metadata.userId': 1, status: 1, createdAt: -1 });
 DocumentSchema.index({ contentHash: 1, 'metadata.userId': 1, 'metadata.documentId': 1 }, { unique: true });
 DocumentSchema.index({ parentDocumentId: 1, chunkIndex: 1 });
 DocumentSchema.index({ status: 1, lastAccessedAt: -1 }); // For cleanup jobs
+
+// NEW: Compound indexes for semantic metadata fields
+DocumentSchema.index({ 'metadata.domain': 1, 'metadata.topic': 1 });
+DocumentSchema.index({ 'metadata.contentType': 1, 'metadata.technicalLevel': 1 });
+DocumentSchema.index({ 'metadata.importance': 1, 'metadata.qualityScore': -1 });
+DocumentSchema.index({ 'metadata.lastVerified': -1, status: 1 });
+DocumentSchema.index({ 'metadata.topics': 1, 'metadata.domain': 1 });
+DocumentSchema.index({ 'metadata.semanticTags': 1, status: 1 });
 
 // TTL index - archive old inactive documents (optional, configurable)
 // DocumentSchema.index({ lastAccessedAt: 1 }, { 
