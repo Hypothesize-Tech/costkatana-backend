@@ -212,7 +212,7 @@ export interface BedrockConfig {
 }
 
 export interface TrackingConfig {
-    enableAutoTracking: boolean;
+    /** Tracking is always on; no option to disable (required for usage and cost attribution). */
     enableSessionReplay?: boolean;
     retentionDays?: number;
     storageType?: 'memory' | 'file' | 'custom';

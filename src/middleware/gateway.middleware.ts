@@ -84,7 +84,6 @@ declare global {
                 cortexHybridExecution?: boolean;
                 cortexFragmentCache?: boolean;
                 cortexMetadata?: any;
-                autoTrack?: boolean;
                 budgetReservationId?: string;
                 isAgentRequest?: boolean;
                 agentId?: string;
@@ -1031,13 +1030,7 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
     context.omitRequest = req.headers['costkatana-omit-request'] === 'true';
     context.omitResponse = req.headers['costkatana-omit-response'] === 'true';
     
-    // Process auto-track header (default: true for backward compatibility)
-    const autoTrackHeader = req.headers['costkatana-auto-track'] as string;
-    if (autoTrackHeader !== undefined) {
-        context.autoTrack = autoTrackHeader === 'true';
-    } else {
-        context.autoTrack = true; // Default to true
-    }
+    // Tracking is always on; no option to disable (required for usage and cost attribution).
 
     // 🚀 CORTEX PROCESSING HEADERS
     context.cortexEnabled = req.headers['costkatana-enable-cortex'] === 'true';

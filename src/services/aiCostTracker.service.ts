@@ -177,7 +177,6 @@ export class AICostTrackerService {
         };
 
         const tracking: TrackingConfig = {
-            enableAutoTracking: true,
             enableSessionReplay: process.env.ENABLE_SESSION_REPLAY === 'true',
             retentionDays: 90,
             sessionReplayTimeout: parseInt(process.env.SESSION_REPLAY_TIMEOUT || '30')
@@ -543,9 +542,9 @@ export class AICostTrackerService {
                             metadata: metadata?.metadata?.workspace
                         });
 
-                        // Record tracking state
+                        // Record tracking state (tracking is always on; no option to disable)
                         const trackingState = {
-                            enabled: this.config?.tracking?.enableAutoTracking ?? false,
+                            enabled: true,
                             sessionReplayEnabled: this.config?.tracking?.enableSessionReplay ?? false,
                             timestamp: new Date(),
                             request: { 
