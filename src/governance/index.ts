@@ -1,6 +1,6 @@
 /**
- * Agent Governance System
- * Central export for all governance components
+ * Governance infrastructure (sandbox, audit, identity).
+ * Central export for governance-related components.
  */
 
 // Models
@@ -51,13 +51,6 @@ export {
   SandboxExecutionResult
 } from '../services/agentSandbox.service';
 
-export {
-  agentGovernanceService,
-  AgentGovernanceService,
-  GovernanceCheckResult,
-  GovernedExecutionRequest
-} from '../services/agentGovernance.service';
-
 // Middleware
 export {
   agentSandboxMiddleware,
@@ -65,34 +58,15 @@ export {
   requireAgentAction
 } from '../middleware/agentSandbox.middleware';
 
-// Controllers
-export { AgentGovernanceController } from '../controllers/agentGovernance.controller';
-
-// Configuration
-export {
-  AgentGovernanceConfig,
-  DEFAULT_AGENT_GOVERNANCE_CONFIG,
-  getAgentGovernanceConfig,
-  validateGovernanceConfig
-} from '../config/agentGovernance.config';
-
-import { getAgentGovernanceConfig, validateGovernanceConfig } from '../config/agentGovernance.config';
 import { agentSandboxService } from '../services/agentSandbox.service';
 import { agentDecisionAuditService } from '../services/agentDecisionAudit.service';
 
 /**
- * Initialize governance system
+ * Initialize governance system (sandbox and audit services).
+ * Agent Governance feature has been removed; this initializes remaining infrastructure.
  */
 export async function initializeGovernance(): Promise<void> {
-  const config = getAgentGovernanceConfig();
-  validateGovernanceConfig(config);
-  
-  console.log('✅ Agent Governance System initialized');
-  console.log(`   - Governance: ${config.enabled ? 'ENABLED' : 'DISABLED'}`);
-  console.log(`   - Sandbox: ${config.sandbox.defaultIsolation}`);
-  console.log(`   - Audit Level: ${config.audit.level}`);
-  console.log(`   - Rate Limits: ${config.rateLimit.defaultRequestsPerMinute}/min`);
-  console.log(`   - Budget: $${config.budget.defaultBudgetPerRequest}/request`);
+  console.log('✅ Governance infrastructure (sandbox, audit) ready');
 }
 
 /**
@@ -102,6 +76,6 @@ export async function shutdownGovernance(): Promise<void> {
   await agentSandboxService.shutdown();
   agentDecisionAuditService.stopFlushTimer();
   
-  console.log('✅ Agent Governance System shutdown complete');
+  console.log('✅ Governance infrastructure shutdown complete');
 }
 

@@ -31,3 +31,7 @@ export { ModularRAGOrchestrator, modularRAGOrchestrator } from './orchestrator/m
 // Configuration
 export * from './config/default.config';
 
+// Evaluation (RAGAS-aligned metrics)
+export { RAGEvaluator, ragEvaluator } from './evaluation';
+export type { EvaluationMetrics, EvaluationInput } from './evaluation';
+

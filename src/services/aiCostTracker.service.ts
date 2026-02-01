@@ -436,13 +436,11 @@ export class AICostTrackerService {
             setImmediate(async () => {
                 try {
                     const { costStreamingService } = await import('./costStreaming.service');
-                    const { UnexplainedCostService } = await import('./unexplainedCost.service');
                     const { TrueCostService } = await import('./trueCost.service');
 
                     // 🎯 P0: Calculate true cost (API + infrastructure)
-                    // Extract requestId from metadata (could be in metadata.requestId or metadata.metadata.requestId)
-                    const requestId = (metadata as any)?.requestId || 
-                                    (metadata as any)?.metadata?.requestId || 
+                    const requestId = (metadata as any)?.requestId ||
+                                    (metadata as any)?.metadata?.requestId ||
                                     `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                     const trueCost = await TrueCostService.calculateTrueCost({
                         requestId,
@@ -454,9 +452,9 @@ export class AICostTrackerService {
                         outputTokens: finalCompletionTokens,
                         totalTokens: finalTotalTokens,
                         latencyMs: metadata?.metadata?.executionTime || 1000,
-                        vectorDBQueries: 0, // Would be tracked separately
+                        vectorDBQueries: 0,
                         embeddingsGenerated: 0,
-                        cacheHits: 0, // Would come from cache service
+                        cacheHits: 0,
                         cacheMisses: 0,
                         logVolumeBytes: JSON.stringify(request).length + JSON.stringify(response).length,
                         responseBytes: JSON.stringify(response).length,
@@ -464,25 +462,7 @@ export class AICostTrackerService {
                         workflowId: metadata?.workflowId
                     });
 
-                    // 🎯 P1: AI-powered automatic feature attribution
-                    const featureAttribution = await UnexplainedCostService.detectAndAttributeFeature(
-                        userId,
-                        {
-                            operation: metadata?.workflowName || metadata?.endpoint || 'ai.request',
-                            model: request.model,
-                            cost: estimatedCost,
-                            tokens: finalTotalTokens,
-                            metadata: {
-                                service: metadata?.service,
-                                workflowId: metadata?.workflowId,
-                                workflowName: metadata?.workflowName,
-                                promptTemplateId: metadata?.promptTemplateId,
-                                projectId: metadata?.projectId,
-                                agentId: (metadata?.metadata as any)?.agentId,
-                                agentName: (metadata?.metadata as any)?.agentName
-                            }
-                        }
-                    );
+                    const operationLabel = metadata?.workflowName || metadata?.endpoint || 'ai.request';
 
                     costStreamingService.emitCostEvent({
                         eventType: 'cost_tracked',
@@ -494,16 +474,15 @@ export class AICostTrackerService {
                             vendor: providerString,
                             cost: estimatedCost,
                             tokens: finalTotalTokens,
-                            operation: featureAttribution.feature,
+                            operation: operationLabel,
                             template: metadata?.promptTemplateId,
                             metadata: {
-                                trueCost: trueCost.totalCost, // 🎯 P0: Include true cost in metadata
+                                trueCost: trueCost.totalCost,
                                 promptTokens: finalPromptTokens,
                                 completionTokens: finalCompletionTokens,
                                 service: metadata?.service,
                                 workflowId: metadata?.workflowId,
                                 projectId: metadata?.projectId,
-                                // 🎯 P0: True cost breakdown
                                 trueCostBreakdown: {
                                     apiCost: trueCost.apiCost,
                                     infrastructureCost: trueCost.totalCost - trueCost.apiCost,
@@ -514,11 +493,7 @@ export class AICostTrackerService {
                                     cachingCost: trueCost.cachingCost,
                                     loggingCost: trueCost.loggingCost,
                                     observabilityCost: trueCost.observabilityCost
-                                },
-                                // 🎯 P1: Feature attribution metadata
-                                featureCategory: featureAttribution.category,
-                                featureConfidence: featureAttribution.confidence,
-                                featureAttribution: featureAttribution.metadata
+                                }
                             }
                         }
                     });

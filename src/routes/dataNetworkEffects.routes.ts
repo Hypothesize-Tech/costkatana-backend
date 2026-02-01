@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import { authenticate, authorize } from '../middleware/auth.middleware';
 import { ModelPerformanceFingerprintService } from '../services/modelPerformanceFingerprint.service';
 import { LearningLoopService } from '../services/learningLoop.service';
 import { AgentBehaviorAnalyticsService } from '../services/agentBehaviorAnalytics.service';
@@ -10,6 +11,10 @@ import { sanitizeModelIdsInObject } from '../utils/modelIdSanitizer';
 import mongoose from 'mongoose';
 
 const router = express.Router();
+
+// Admin-only: all Data Network Effects routes require authentication and admin role
+router.use(authenticate);
+router.use(authorize('admin'));
 
 // ============================================================================
 // MODEL PERFORMANCE FINGERPRINTS
@@ -782,7 +787,7 @@ router.get('/benchmarks/compare', async (req: Request, res: Response): Promise<R
 /**
  * Run all background jobs once (admin only)
  */
-router.post('/admin/run-jobs', async (_req: Request, res: Response): Promise<Response> => {
+router.post('/run-jobs', async (_req: Request, res: Response): Promise<Response> => {
   try {
     // Run in background
     runAllJobsOnce().catch(error => {

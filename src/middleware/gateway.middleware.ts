@@ -90,7 +90,6 @@ declare global {
                 agentIdentityId?: string;
                 agentToken?: string;
                 agentType?: string;
-                agentGovernanceEnabled?: boolean;
             };
         }
     }
@@ -661,7 +660,6 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
                     agentIdentityId: (agentIdentity._id as mongoose.Types.ObjectId).toString(),
                     agentToken: authValue,
                     agentType: agentIdentity.agentType,
-                    agentGovernanceEnabled: true,
                     workspaceId: agentIdentity.workspaceId?.toString(),
                     organizationId: agentIdentity.organizationId?.toString()
                 };

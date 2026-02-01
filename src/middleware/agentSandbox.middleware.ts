@@ -1,6 +1,4 @@
 import { Request, Response, NextFunction } from 'express';
-import mongoose from 'mongoose';
-import { agentGovernanceService } from '../services/agentGovernance.service';
 import { loggingService } from '../services/logging.service';
 
 // Extend Express Request type to include agent context
@@ -59,73 +57,17 @@ export const agentSandboxMiddleware = (options: {
         return;
       }
 
-      loggingService.info('Agent token detected - performing governance checks', {
+      loggingService.info('Agent token detected - Agent Governance disabled', {
         component: 'AgentSandboxMiddleware',
         operation: 'agentSandboxMiddleware'
       });
 
-      // Perform comprehensive governance check
-      const governanceResult = await agentGovernanceService.performGovernanceCheck(
-        agentToken,
-        options.action,
-        {
-          resource: options.resource,
-          estimatedCost: extractEstimatedCost(req)
-        }
-      );
-
-      if (!governanceResult.allowed) {
-        loggingService.warn('Agent governance check failed', {
-          component: 'AgentSandboxMiddleware',
-          operation: 'agentSandboxMiddleware',
-          reason: governanceResult.reason,
-          violations: governanceResult.violations
-        });
-
-        res.status(403).json({
-          error: 'Agent governance check failed',
-          message: governanceResult.reason || 'Permission denied',
-          violations: governanceResult.violations,
-          details: {
-            permissionResult: governanceResult.permissionResult,
-            rateLimitResult: governanceResult.rateLimitResult,
-            budgetResult: governanceResult.budgetResult
-          }
-        });
-        return;
-      }
-
-      // Attach agent context to request
-      const identity = governanceResult.identity!;
-      req.agentContext = {
-        agentId: identity.agentId,
-        agentIdentityId: (identity._id as mongoose.Types.ObjectId).toString(),
-        userId: governanceResult.identity!.userId.toString(),
-        workspaceId: governanceResult.identity!.workspaceId?.toString(),
-        organizationId: governanceResult.identity!.organizationId?.toString(),
-        token: agentToken,
-        governanceCheckPassed: true
-      };
-
-      // Add governance headers
-      res.setHeader('X-Agent-Governance', 'enabled');
-      res.setHeader('X-Agent-Id', governanceResult.identity!.agentId);
-      res.setHeader('X-Agent-Sandbox-Required', governanceResult.identity!.sandboxRequired.toString());
-      
-      if (governanceResult.rateLimitResult) {
-        res.setHeader('X-Agent-RateLimit-Remaining', governanceResult.rateLimitResult.remaining.toString());
-        res.setHeader('X-Agent-RateLimit-Limit', governanceResult.rateLimitResult.limit.toString());
-        res.setHeader('X-Agent-RateLimit-Reset', governanceResult.rateLimitResult.resetAt.toISOString());
-      }
-
-      loggingService.info('Agent governance check passed', {
-        component: 'AgentSandboxMiddleware',
-        operation: 'agentSandboxMiddleware',
-        agentId: governanceResult.identity!.agentId,
-        totalTime: `${Date.now() - startTime}ms`
+      // Agent Governance feature removed: deny agent token requests with 403
+      res.status(403).json({
+        error: 'Agent governance disabled',
+        message: 'Agent Governance has been removed. Agent token authentication is not available.'
       });
-
-      next();
+      return;
     } catch (error) {
       loggingService.error('Agent sandbox middleware error', {
         component: 'AgentSandboxMiddleware',
@@ -136,8 +78,8 @@ export const agentSandboxMiddleware = (options: {
 
       // Fail secure - deny on error
       res.status(500).json({
-        error: 'Agent governance check failed',
-        message: 'Internal error during governance check'
+        error: 'Agent sandbox middleware error',
+        message: 'Internal error during request processing'
       });
     }
   };
@@ -174,26 +116,6 @@ function extractAgentToken(req: Request): string | null {
   }
 
   return null;
-}
-
-/**
- * Extract estimated cost from request
- */
-function extractEstimatedCost(req: Request): number | undefined {
-  // Check header
-  const costHeader = req.headers['x-estimated-cost'] as string;
-  if (costHeader) {
-    const cost = parseFloat(costHeader);
-    if (!isNaN(cost)) return cost;
-  }
-
-  // Check body
-  if (req.body?.estimatedCost) {
-    const cost = parseFloat(req.body.estimatedCost);
-    if (!isNaN(cost)) return cost;
-  }
-
-  return undefined;
 }
 
 /**

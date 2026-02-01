@@ -3,7 +3,10 @@ import { ChatBedrockConverse } from '@langchain/aws';
 import { loggingService } from '../../services/logging.service';
 
 /**
- * Evaluation metrics for RAG system quality assessment
+ * Evaluation metrics for RAG system quality assessment (RAGAS-aligned).
+ * Eval LLM calls use the default Bedrock client and are not attributed to the cost
+ * pipeline; when using a traced LLM client, pass sourceTag: 'rag_eval' in options
+ * so eval cost can be attributed separately.
  */
 
 export interface EvaluationMetrics {
@@ -22,10 +25,22 @@ export interface EvaluationInput {
   groundTruth?: string;
 }
 
+export interface RAGEvaluatorOptions {
+  /**
+   * When using a traced LLM client that supports metadata, pass sourceTag: 'rag_eval'
+   * so eval cost can be attributed separately from production traffic.
+   * Ignored when using the default Bedrock client.
+   */
+  sourceTag?: string;
+}
+
 export class RAGEvaluator {
   private llm: ChatBedrockConverse;
+  /** Reserved for future cost attribution when traced LLM is injected */
+  private readonly sourceTag: string | undefined;
 
-  constructor() {
+  constructor(options?: RAGEvaluatorOptions) {
+    this.sourceTag = options?.sourceTag;
     this.llm = new ChatBedrockConverse({
       model: 'amazon.nova-micro-v1:0',
       region: process.env.AWS_REGION ?? 'us-east-1',
