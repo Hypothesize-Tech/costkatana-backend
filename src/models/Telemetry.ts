@@ -87,7 +87,7 @@ export interface ITelemetry extends Document {
   semantic_content?: string; // The text that was embedded
   cost_narrative?: string; // AI-generated cost story
   
-  // Cost Attribution Fields for Unexplained Cost Analysis
+  // Cost Attribution Fields
   cost_attribution?: {
     system_prompt_tokens?: number;
     system_prompt_cost?: number;
@@ -252,7 +252,7 @@ const TelemetrySchema = new Schema<ITelemetry>({
   semantic_content: String, // The text that was embedded
   cost_narrative: String, // AI-generated cost story
   
-  // Cost Attribution Fields for Unexplained Cost Analysis
+  // Cost Attribution Fields
   cost_attribution: {
     system_prompt_tokens: Number,
     system_prompt_cost: Number,

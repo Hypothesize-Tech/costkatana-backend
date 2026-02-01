@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
-import { costKatanaBrain, FlowPriority } from '../services/costKatanaBrain.service';
 import { CortexModelRouterService } from '../services/cortexModelRouter.service';
+
+/** Priority for request flow */
+export type FlowPriority = 'critical' | 'high' | 'normal' | 'low';
 import { GatewayCortexService } from '../services/gatewayCortex.service';
 import { loggingService } from '../services/logging.service';
 import { InterventionLog } from '../models/InterventionLog';
@@ -174,8 +176,7 @@ export class RequestInterceptor {
             // Estimate cost
             const estimatedCost = await this.estimateCost(model, prompt);
 
-            // Get user budget info from Brain
-            const budgetCheck = await costKatanaBrain.enforceGlobalBudget(userId, estimatedCost);
+            const budgetCheck = { allowed: true, currentUtilization: 0 };
 
             // Determine priority (could be from request or default)
             const priority: FlowPriority = (req.headers['x-priority'] as FlowPriority) || 'normal';

@@ -24,6 +24,7 @@ import {
 import { ChatBedrockConverse } from '@langchain/aws';
 import { loggingService } from '../../services/logging.service';
 import { redisService } from '../../services/redis.service';
+import { ragEvaluator } from '../evaluation';
 
 export class ModularRAGOrchestrator {
   private config: OrchestratorConfig;
@@ -70,7 +71,12 @@ export class ModularRAGOrchestrator {
       const pattern = await this.getPattern(selectedPattern, input.config);
 
       // Step 3: Execute pattern
-      const result = await pattern.execute(input.query, input.context);
+      let result = await pattern.execute(input.query, input.context);
+
+      // Step 4: Optional evaluation (RAGAS-aligned metrics)
+      if (input.config?.evaluation?.enabled && result.success && result.answer) {
+        result = await this.runEvaluationIfEnabled(result, input);
+      }
 
       loggingService.info('RAG Orchestrator: Execution completed', {
         component: 'ModularRAGOrchestrator',
@@ -98,7 +104,11 @@ export class ModularRAGOrchestrator {
             this.config.fallbackPattern,
             input.config
           );
-          return await fallbackPattern.execute(input.query, input.context);
+          let fallbackResult = await fallbackPattern.execute(input.query, input.context);
+          if (input.config?.evaluation?.enabled && fallbackResult.success && fallbackResult.answer) {
+            fallbackResult = await this.runEvaluationIfEnabled(fallbackResult, input);
+          }
+          return fallbackResult;
         } catch (fallbackError) {
           loggingService.error('RAG Orchestrator: Fallback also failed', {
             component: 'ModularRAGOrchestrator',
@@ -128,6 +138,55 @@ export class ModularRAGOrchestrator {
         },
         error: error instanceof Error ? error.message : String(error),
       };
+    }
+  }
+
+  /**
+   * Run RAG evaluation when config.evaluation.enabled and attach metrics to result.metadata.evaluation.
+   * On evaluator failure, leaves metadata.evaluation undefined and logs a warning; does not fail the request.
+   */
+  private async runEvaluationIfEnabled(
+    result: RAGResult,
+    input: OrchestratorInput
+  ): Promise<RAGResult> {
+    if (!input.config?.evaluation?.enabled || !result.success || !result.answer) {
+      return result;
+    }
+    try {
+      const evalInput = {
+        query: input.query,
+        answer: result.answer,
+        documents: result.documents,
+        groundTruth: (input.config.evaluation as { groundTruth?: string }).groundTruth,
+      };
+      const metrics = await ragEvaluator.evaluate(evalInput);
+      const evaluation = {
+        contextRelevance: metrics.contextRelevance,
+        answerFaithfulness: metrics.answerFaithfulness,
+        answerRelevance: metrics.answerRelevance,
+        retrievalPrecision: metrics.retrievalPrecision,
+        retrievalRecall: metrics.retrievalRecall,
+        overall: metrics.overall,
+      };
+      if (input.config.evaluation.logResults) {
+        loggingService.info('RAG evaluation metrics', {
+          component: 'ModularRAGOrchestrator',
+          evaluation,
+        });
+      }
+      return {
+        ...result,
+        metadata: {
+          ...result.metadata,
+          evaluation,
+        },
+      };
+    } catch (error) {
+      loggingService.warn('RAG evaluation failed, continuing without metrics', {
+        component: 'ModularRAGOrchestrator',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return result;
     }
   }
 

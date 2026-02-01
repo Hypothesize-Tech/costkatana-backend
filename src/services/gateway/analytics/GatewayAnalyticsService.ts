@@ -65,17 +65,7 @@ export class GatewayAnalyticsService {
      */
     static async trackUsage(req: Request, response: any, retryAttempts?: number): Promise<void> {
         const context = req.gatewayContext!;
-        
-        // Skip tracking if autoTrack is disabled
-        if (context.autoTrack === false) {
-            loggingService.debug('Gateway usage tracking skipped (autoTrack disabled)', {
-                userId: context.userId,
-                requestId: context.requestId,
-                targetUrl: context.targetUrl
-            });
-            return;
-        }
-        
+
         try {
             // Extract prompt from request body
             let extractedPrompt = '';

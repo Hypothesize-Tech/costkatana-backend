@@ -5,7 +5,7 @@ import { loggingService } from '../services/logging.service';
 
 /**
  * Model Discovery Cron Job
- * Runs daily at 2 AM UTC to discover and update AI model pricing
+ * Runs monthly (1st of each month at 2 AM UTC) to discover and update AI model pricing
  */
 export class ModelDiscoveryJob {
     private static isRunning = false;
@@ -27,7 +27,7 @@ export class ModelDiscoveryJob {
      * Start the cron job
      */
     static start(): void {
-        const schedule = process.env.MODEL_DISCOVERY_CRON_SCHEDULE || '0 2 * * *';
+        const schedule = '0 2 1 * *';
         const enabled = process.env.MODEL_DISCOVERY_ENABLED !== 'false';
 
         if (!enabled) {
@@ -91,7 +91,7 @@ export class ModelDiscoveryJob {
         const startTime = Date.now();
         const results: any[] = [];
 
-        loggingService.info('==== Starting daily model discovery job ====');
+        loggingService.info('==== Starting monthly model discovery job ====');
 
         try {
             for (const provider of this.PROVIDERS) {
@@ -177,18 +177,17 @@ export class ModelDiscoveryJob {
         schedule: string;
         enabled: boolean;
     } {
-        const schedule = process.env.MODEL_DISCOVERY_CRON_SCHEDULE || '0 2 * * *';
+        const schedule = '0 2 1 * *';
         const enabled = process.env.MODEL_DISCOVERY_ENABLED !== 'false';
 
         // Calculate next run time (approximate)
         let nextRun: Date | null = null;
         if (enabled && this.task) {
-            // Simple calculation for daily 2 AM UTC
+            // Next run: 1st of (this or next) month at 2 AM UTC
             const now = new Date();
-            const next = new Date(now);
-            next.setUTCHours(2, 0, 0, 0);
+            const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 2, 0, 0, 0));
             if (next <= now) {
-                next.setUTCDate(next.getUTCDate() + 1);
+                next.setUTCMonth(next.getUTCMonth() + 1);
             }
             nextRun = next;
         }
