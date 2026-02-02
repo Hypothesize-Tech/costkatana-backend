@@ -160,7 +160,7 @@ export interface IAgentDecisionAudit extends Document {
     | 'capability_invocation'
     | 'data_access'
     | 'api_call'
-    | 'workflow_step'
+    | 'agent_trace_step'
     | 'optimization'
     | 'other';
   
@@ -445,7 +445,7 @@ const AgentDecisionAuditSchema = new Schema<IAgentDecisionAudit>({
       'capability_invocation',
       'data_access',
       'api_call',
-      'workflow_step',
+      'agent_trace_step',
       'optimization',
       'other'
     ],

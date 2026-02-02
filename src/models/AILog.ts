@@ -55,9 +55,9 @@ export interface IAILogDocument {
     // Context metadata
     ipAddress?: string;
     userAgent?: string;
-    workflowId?: string;
-    workflowName?: string;
-    workflowStep?: string;
+    traceId?: string;
+    traceName?: string;
+    traceStep?: string;
     experimentId?: string;
     experimentName?: string;
     notebookId?: string;
@@ -221,12 +221,12 @@ const aiLogSchema = new Schema<IAILog>({
     // Context metadata
     ipAddress: String,
     userAgent: String,
-    workflowId: {
+    traceId: {
         type: String,
         index: true
     },
-    workflowName: String,
-    workflowStep: String,
+    traceName: String,
+    traceStep: String,
     experimentId: {
         type: String,
         index: true
@@ -302,7 +302,7 @@ aiLogSchema.index({ userId: 1, timestamp: -1 }); // User logs ordered by time
 aiLogSchema.index({ service: 1, model: 1, timestamp: -1 }); // Service/model performance
 aiLogSchema.index({ success: 1, timestamp: -1 }); // Error tracking
 aiLogSchema.index({ requestId: 1, timestamp: 1 }); // Distributed tracing
-aiLogSchema.index({ workflowId: 1, timestamp: 1 }); // Workflow tracking
+aiLogSchema.index({ traceId: 1, timestamp: 1 }); // Agent trace tracking
 aiLogSchema.index({ experimentId: 1, timestamp: 1 }); // Experiment tracking
 aiLogSchema.index({ cost: -1, timestamp: -1 }); // Expensive operations
 aiLogSchema.index({ responseTime: -1, timestamp: -1 }); // Slow operations

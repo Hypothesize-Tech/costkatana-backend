@@ -37,9 +37,9 @@ declare global {
                 firewallAdvanced?: boolean;
                 firewallPromptThreshold?: number;
                 firewallLlamaThreshold?: number;
-                workflowId?: string;
-                workflowName?: string;
-                workflowStep?: string;
+                traceName?: string;
+                traceStep?: string;
+                traceSequence?: number;
                 cacheUserScope?: string;
                 cacheTTL?: number;
                 cacheBucketMaxSize?: number;
@@ -1182,10 +1182,17 @@ export const processGatewayHeaders = async (req: Request, res: Response, next: N
     context.modelOverride = req.headers['costkatana-model-override'] as string;
     context.rateLimitPolicy = req.headers['costkatana-ratelimit-policy'] as string;
 
-    // Process workflow headers
-    context.workflowId = req.headers['costkatana-workflow-id'] as string;
-    context.workflowName = req.headers['costkatana-workflow-name'] as string;
-    context.workflowStep = req.headers['costkatana-workflow-step'] as string;
+    // Process agent trace headers (costkatana-trace-id, costkatana-trace-name, costkatana-trace-step)
+    const traceIdHeader = req.headers['costkatana-trace-id'] as string;
+    if (traceIdHeader) {
+        context.traceId = traceIdHeader;
+    }
+    context.traceName = req.headers['costkatana-trace-name'] as string;
+    context.traceStep = req.headers['costkatana-trace-step'] as string;
+    const traceSeqHeader = req.headers['costkatana-trace-sequence'] as string;
+    if (traceSeqHeader) {
+        (context as any).traceSequence = parseInt(traceSeqHeader, 10) || 0;
+    }
 
     // Process custom properties (CostKatana-Property-[Name])
     context.properties = {};
@@ -1236,9 +1243,8 @@ export const processGatewayHeaders = async (req: Request, res: Response, next: N
         propertyCount: Object.keys(context.properties || {}).length,
         sessionId: context.sessionId,
         traceId: context.traceId,
-        workflowId: context.workflowId,
-        workflowName: context.workflowName,
-        workflowStep: context.workflowStep
+        traceName: context.traceName,
+        traceStep: context.traceStep
     });
 
     // Apply guardrails checking if user is authenticated

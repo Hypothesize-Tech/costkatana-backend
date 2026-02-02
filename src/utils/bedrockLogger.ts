@@ -10,7 +10,7 @@ interface BedrockLogContext {
     userId?: string;
     projectId?: string;
     requestId?: string;
-    workflowId?: string;
+    traceId?: string;
     experimentId?: string;
     sessionId?: string;
     cortexEnabled?: boolean;
@@ -149,7 +149,7 @@ export function wrapBedrockClient(
                 parameters,
                 result,
                 cost,
-                workflowId: context.workflowId,
+                traceId: context.traceId,
                 experimentId: context.experimentId,
                 sessionId: context.sessionId,
                 cortexEnabled: context.cortexEnabled,
@@ -186,7 +186,7 @@ export function wrapBedrockClient(
                 errorType,
                 errorCode: error.name || error.code,
                 errorStack: error.stack,
-                workflowId: context.workflowId,
+                traceId: context.traceId,
                 experimentId: context.experimentId,
                 sessionId: context.sessionId,
                 cortexEnabled: context.cortexEnabled,
@@ -288,7 +288,7 @@ export function extractBedrockContext(req: any): BedrockLogContext {
         userId: req.user?.id || req.userId,
         projectId: req.projectId || req.body?.projectId || req.query?.projectId,
         requestId: req.aiLogContext?.requestId || req.headers?.['x-request-id'],
-        workflowId: req.body?.workflowId || req.query?.workflowId,
+        traceId: req.body?.traceId || req.query?.traceId || req.gatewayContext?.traceId,
         experimentId: req.body?.experimentId || req.query?.experimentId,
         sessionId: req.body?.sessionId || req.query?.sessionId,
         cortexEnabled: req.body?.cortex?.enabled || false,

@@ -44,7 +44,7 @@ export interface ISubscription extends Document {
         requestsPerMonth: number;
         logsPerMonth: number;
         projects: number;
-        workflows: number;
+        agentTraces: number;
         seats: number;
         cortexDailyUsage: {
             limit: number; // 0, 3, 30, or -1 for unlimited
@@ -68,7 +68,7 @@ export interface ISubscription extends Document {
         tokensUsed: number;
         requestsUsed: number;
         logsUsed: number;
-        workflowsUsed: number;
+        agentTracesUsed: number;
         optimizationsUsed: number;
         currentPeriodStart: Date;
         currentPeriodEnd: Date;
@@ -169,7 +169,7 @@ const subscriptionSchema = new Schema<ISubscription>({
             type: Number,
             required: true,
         },
-        workflows: {
+        agentTraces: {
             type: Number,
             required: true,
         },
@@ -215,7 +215,7 @@ const subscriptionSchema = new Schema<ISubscription>({
             type: Number,
             default: 0,
         },
-        workflowsUsed: {
+        agentTracesUsed: {
             type: Number,
             default: 0,
         },

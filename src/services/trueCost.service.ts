@@ -68,7 +68,7 @@ export interface RequestMetrics {
   
   // Context
   projectId?: string;
-  workflowId?: string;
+  traceId?: string;
 }
 
 export class TrueCostService {
@@ -586,7 +586,7 @@ export class TrueCostService {
           logVolumeBytes: doc.logVolumeBytes,
           responseBytes: doc.responseBytes,
           projectId: doc.projectId,
-          workflowId: doc.workflowId
+          traceId: doc.traceId
         };
 
         const tcc = await this.calculateTrueCost(metrics);

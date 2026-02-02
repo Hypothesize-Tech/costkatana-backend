@@ -975,7 +975,7 @@ The Cost Katana Team
 
             return {
                 workflowId,
-                workflowName: workflowInfo.workflowName || 'Unknown Workflow',
+                workflowName: workflowInfo.traceName || 'Unknown Workflow',
                 platform: workflowInfo.automationPlatform || 'unknown',
                 timeRange: { startDate, endDate },
                 totalCost,

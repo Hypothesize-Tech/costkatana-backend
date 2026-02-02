@@ -188,7 +188,7 @@ export const logAIEndpoint = (options: {
                     errorType,
                     ipAddress: req.ip || req.headers['x-forwarded-for'] as string,
                     userAgent: req.headers['user-agent'],
-                    workflowId: req.body?.workflowId || req.query?.workflowId as string,
+                    traceId: req.body?.traceId || req.query?.traceId as string,
                     experimentId: req.body?.experimentId || req.query?.experimentId as string,
                     sessionId: req.body?.sessionId || req.query?.sessionId as string,
                     cortexEnabled: req.body?.cortex?.enabled || false,
