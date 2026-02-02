@@ -20,9 +20,10 @@ export interface UsageTrackingMetadata {
     projectId?: string;
     tags: string[];
     costAllocation?: any;
-    workflowId?: string;
-    workflowName?: string;
-    workflowStep?: string;
+    traceId?: string;
+    traceName?: string;
+    traceStep?: string;
+    traceSequence?: number;
     requestId?: string;
     metadata: {
         workspace: { gatewayRequest: boolean };
@@ -38,12 +39,12 @@ export interface UsageTrackingMetadata {
             minTimeout: number;
             maxTimeout: number;
         };
-        workflowContext: {
-            workflowId?: string;
-            workflowName?: string;
-            workflowStep?: string;
-            sessionId?: string;
+        traceContext: {
             traceId?: string;
+            traceName?: string;
+            traceStep?: string;
+            traceSequence?: number;
+            sessionId?: string;
         };
         requestId?: string;
     };
@@ -128,9 +129,9 @@ export class GatewayAnalyticsService {
                 tags: context.properties ? Object.keys(context.properties) : [],
                 costAllocation: context.properties,
                 // Add workflow tracking data
-                workflowId: context.workflowId,
-                workflowName: context.workflowName,
-                workflowStep: context.workflowStep,
+                traceId: context.traceId,
+                traceName: context.traceName,
+                traceStep: context.traceStep,
                 // Add request ID for feedback tracking
                 requestId: context.requestId,
                 metadata: {
@@ -148,13 +149,13 @@ export class GatewayAnalyticsService {
                         minTimeout: context.retryMinTimeout ?? DEFAULT_RETRY_MIN_TIMEOUT,
                         maxTimeout: context.retryMaxTimeout ?? DEFAULT_RETRY_MAX_TIMEOUT
                     } : undefined,
-                    // Include workflow context in metadata
-                    workflowContext: {
-                        workflowId: context.workflowId,
-                        workflowName: context.workflowName,
-                        workflowStep: context.workflowStep,
-                        sessionId: context.sessionId,
-                        traceId: context.traceId
+                    // Include agent trace context in metadata
+                    traceContext: {
+                        traceId: context.traceId,
+                        traceName: context.traceName,
+                        traceStep: context.traceStep,
+                        traceSequence: (context as any).traceSequence,
+                        sessionId: context.sessionId
                     },
                     // Add request ID for feedback correlation
                     requestId: context.requestId
@@ -199,9 +200,9 @@ export class GatewayAnalyticsService {
                 userId: context.userId,
                 service: metadata.service,
                 projectId: context.budgetId,
-                workflowId: context.workflowId,
-                workflowName: context.workflowName,
-                workflowStep: context.workflowStep,
+                traceId: context.traceId,
+                traceName: context.traceName,
+                traceStep: context.traceStep,
                 retryAttempts: retryAttempts || 0,
                 retryEnabled: context.retryEnabled,
                 proxyKeyId: context.proxyKeyId,

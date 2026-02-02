@@ -4,7 +4,7 @@ import mongoose, { Schema, Document } from 'mongoose';
  * Tool or action chosen by the agent
  */
 export interface AgentAction {
-  actionType: 'tool_call' | 'model_invocation' | 'workflow_step' | 'data_retrieval' | 'external_api' | 'decision_point';
+  actionType: 'tool_call' | 'model_invocation' | 'agent_trace_step' | 'data_retrieval' | 'external_api' | 'decision_point';
   actionName: string;
   
   // Tool/model details
@@ -109,7 +109,7 @@ export interface AgentAnomaly {
  * Agent configuration at time of execution
  */
 export interface AgentConfiguration {
-  agentType: 'chat' | 'workflow' | 'optimization' | 'analysis' | 'multi_agent' | 'custom';
+  agentType: 'chat' | 'agent_trace' | 'optimization' | 'analysis' | 'multi_agent' | 'custom';
   agentVersion?: string;
   
   // Model configuration
@@ -215,7 +215,7 @@ const AgentActionSchema = new Schema({
   actionType: {
     type: String,
     required: true,
-    enum: ['tool_call', 'model_invocation', 'workflow_step', 'data_retrieval', 'external_api', 'decision_point']
+    enum: ['tool_call', 'model_invocation', 'agent_trace_step', 'data_retrieval', 'external_api', 'decision_point']
   },
   actionName: { type: String, required: true },
   toolId: String,
@@ -291,7 +291,7 @@ const AgentConfigurationSchema = new Schema({
   agentType: {
     type: String,
     required: true,
-    enum: ['chat', 'workflow', 'optimization', 'analysis', 'multi_agent', 'custom']
+    enum: ['chat', 'agent_trace', 'optimization', 'analysis', 'multi_agent', 'custom']
   },
   agentVersion: String,
   primaryModel: { type: String, required: true },

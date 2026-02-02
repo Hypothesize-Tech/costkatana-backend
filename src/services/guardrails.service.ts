@@ -25,7 +25,7 @@ export interface PlanLimits {
     requestsPerMonth: number;
     logsPerMonth: number;
     projects: number;
-    workflows: number;
+    agentTraces: number;
     seats: number;
     models: string[];
     features: string[];
@@ -100,7 +100,7 @@ export class GuardrailsService {
             requestsPerMonth: 10_000,
             logsPerMonth: 15_000,
             projects: 5,
-            workflows: 10,
+            agentTraces: 10,
             seats: 1,
             models: ['claude-3-haiku', 'gpt-3.5-turbo', 'gemini-1.5-flash'],
             features: ['basic_analytics', 'usage_tracking', 'unified_endpoint']
@@ -110,7 +110,7 @@ export class GuardrailsService {
             requestsPerMonth: 50_000,
             logsPerMonth: -1, // Unlimited
             projects: -1, // Unlimited
-            workflows: 100,
+            agentTraces: 100,
             seats: -1, // Paid per seat
             models: ['*'], // All models
             features: ['advanced_analytics', 'predictive_analytics', 'batch_processing', 
@@ -122,7 +122,7 @@ export class GuardrailsService {
             requestsPerMonth: 100_000,
             logsPerMonth: -1, // Unlimited
             projects: -1, // Unlimited
-            workflows: 100, // Per user
+            agentTraces: 100, // Per user
             seats: 20, // Included seats
             models: ['*'], // All models
             features: ['advanced_analytics', 'predictive_analytics', 'batch_processing', 
@@ -134,7 +134,7 @@ export class GuardrailsService {
             requestsPerMonth: -1, // Unlimited
             logsPerMonth: -1, // Unlimited
             projects: -1, // Unlimited
-            workflows: -1, // Unlimited
+            agentTraces: -1, // Unlimited
             seats: -1, // Custom
             models: ['*', 'custom'], // All models + custom
             features: ['*'] // All features
@@ -190,7 +190,7 @@ export class GuardrailsService {
             }
 
             // Skip check for unlimited (-1) limits
-            if (planLimits.workflows === -1) {
+            if (planLimits.agentTraces === -1) {
                 return null;
             }
 
@@ -478,7 +478,7 @@ export class GuardrailsService {
                     requests: subscription.usage.requestsUsed || allMetrics.usage.requestCount || 0,
                     logs: subscription.usage.logsUsed || allMetrics.logs.count || 0,
                     projects: allMetrics.projects.count || 0,
-                    workflows: subscription.usage.workflowsUsed || allMetrics.workflows.count || 0,
+                    workflows: subscription.usage.agentTracesUsed || allMetrics.workflows.count || 0,
                     cost: allMetrics.usage.totalCost || 0, // Cost from actual usage records
                     period: 'monthly'
                 };
@@ -640,8 +640,8 @@ export class GuardrailsService {
                     (usage.logs / planLimits.logsPerMonth) * 100,
                 projects: planLimits.projects === -1 ? 0 : 
                     (usage.projects / planLimits.projects) * 100,
-                workflows: planLimits.workflows === -1 ? 0 : 
-                    (usage.workflows / planLimits.workflows) * 100
+                workflows: planLimits.agentTraces === -1 ? 0 : 
+                    (usage.workflows / planLimits.agentTraces) * 100
             };
 
             // Get daily usage trend

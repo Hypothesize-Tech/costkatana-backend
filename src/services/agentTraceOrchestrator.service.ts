@@ -43,9 +43,9 @@ export interface WorkflowStep {
     };
 }
 
-export interface WorkflowExecution {
+export interface AgentTraceExecution {
     id: string;
-    workflowId: string;
+    traceId: string;
     name: string;
     userId: string;
     status: 'running' | 'completed' | 'failed' | 'paused' | 'cancelled';
@@ -66,7 +66,7 @@ export interface WorkflowExecution {
         tags?: string[];
         [key: string]: any;
     };
-    traceId: string;
+    executionTraceId?: string; // Unique trace id for this execution (uuid)
     parentExecutionId?: string; // For nested workflows
 }
 
@@ -146,9 +146,9 @@ export interface WorkflowMetrics {
     }[];
 }
 
-export class WorkflowOrchestratorService extends EventEmitter {
-    private static instance: WorkflowOrchestratorService;
-    private activeExecutions = new Map<string, WorkflowExecution>();
+export class AgentTraceOrchestratorService extends EventEmitter {
+    private static instance: AgentTraceOrchestratorService;
+    private activeExecutions = new Map<string, AgentTraceExecution>();
     private templates = new Map<string, WorkflowTemplate>();
     
     // 🎯 P1: Semantic cache for workflow steps (70-80% cost savings)
@@ -236,17 +236,17 @@ export class WorkflowOrchestratorService extends EventEmitter {
         }
     }
 
-    public static getInstance(): WorkflowOrchestratorService {
-        if (!WorkflowOrchestratorService.instance) {
-            WorkflowOrchestratorService.instance = new WorkflowOrchestratorService();
+    public static getInstance(): AgentTraceOrchestratorService {
+        if (!AgentTraceOrchestratorService.instance) {
+            AgentTraceOrchestratorService.instance = new AgentTraceOrchestratorService();
         }
-        return WorkflowOrchestratorService.instance;
+        return AgentTraceOrchestratorService.instance;
     }
 
     /**
      * Create a new workflow template
      */
-    async createWorkflowTemplate(template: Omit<WorkflowTemplate, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>): Promise<WorkflowTemplate> {
+    async createAgentTraceTemplate(template: Omit<WorkflowTemplate, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>): Promise<WorkflowTemplate> {
         const workflowTemplate: WorkflowTemplate = {
             ...template,
             id: uuidv4(),
@@ -280,7 +280,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
     /**
      * Execute a workflow from template
      */
-    async executeWorkflow(
+    async executeTrace(
         templateId: string,
         userId: string,
         input?: any,
@@ -290,7 +290,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
             environment?: string;
             tags?: string[];
         }
-    ): Promise<WorkflowExecution> {
+    ): Promise<AgentTraceExecution> {
         // Validate subscription before workflow execution
         const { SubscriptionService } = await import('./subscription.service');
         const subscription = await SubscriptionService.getSubscriptionByUserId(userId);
@@ -316,14 +316,14 @@ export class WorkflowOrchestratorService extends EventEmitter {
         await SubscriptionService.checkRequestQuota(userId);
         await SubscriptionService.validateAndReserveTokens(userId, 1000); // Estimate 1000 tokens per workflow
 
-        const template = await this.getWorkflowTemplate(templateId);
+        const template = await this.getAgentTraceTemplate(templateId);
         if (!template) {
             throw new Error(`Workflow template ${templateId} not found`);
         }
 
-        const execution: WorkflowExecution = {
+        const execution: AgentTraceExecution = {
             id: uuidv4(),
-            workflowId: templateId,
+            traceId: templateId,
             name: template.name,
             userId,
             status: 'running',
@@ -333,7 +333,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 status: 'pending'
             })),
             input,
-            traceId: uuidv4(),
+            executionTraceId: uuidv4(),
             parentExecutionId: options?.parentExecutionId,
             metadata: {
                 environment: options?.environment || 'production',
@@ -363,7 +363,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
         this.emit('workflow:started', execution);
 
         // Start execution asynchronously
-        this.runWorkflowExecution(execution, template, options?.variables).catch(error => {
+        this.runAgentTraceExecution(execution, template, options?.variables).catch(error => {
             loggingService.error('Workflow execution failed', { executionId: execution.id, error });
         });
 
@@ -373,8 +373,8 @@ export class WorkflowOrchestratorService extends EventEmitter {
     /**
      * Run workflow execution
      */
-    private async runWorkflowExecution(
-        execution: WorkflowExecution,
+    private async runAgentTraceExecution(
+        execution: AgentTraceExecution,
         template: WorkflowTemplate,
         variables?: Record<string, any>
     ): Promise<void> {
@@ -495,12 +495,12 @@ export class WorkflowOrchestratorService extends EventEmitter {
      */
     private async executeStep(
         step: WorkflowStep,
-        execution: WorkflowExecution,
+        execution: AgentTraceExecution,
         variables?: Record<string, any>
     ): Promise<void> {
         // 🎯 P1: Check semantic cache before execution
         const cacheKey = this.generateStepCacheKey(
-            execution.workflowId,
+            execution.traceId,
             step.id,
             step.input,
             variables
@@ -1042,7 +1042,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
     /**
      * Get workflow template
      */
-    async getWorkflowTemplate(templateId: string): Promise<WorkflowTemplate | null> {
+    async getAgentTraceTemplate(templateId: string): Promise<WorkflowTemplate | null> {
         // Check memory first
         if (this.templates.has(templateId)) {
             return this.templates.get(templateId)!;
@@ -1120,7 +1120,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
     /**
      * Get workflow execution
      */
-    async getWorkflowExecution(executionId: string): Promise<WorkflowExecution | null> {
+    async getTraceExecution(executionId: string): Promise<AgentTraceExecution | null> {
         // Check active executions first
         if (this.activeExecutions.has(executionId)) {
             return this.activeExecutions.get(executionId)!;
@@ -1142,11 +1142,11 @@ export class WorkflowOrchestratorService extends EventEmitter {
     /**
      * Get workflow metrics
      */
-    async getWorkflowMetrics(workflowId: string, timeRange?: string): Promise<WorkflowMetrics> {
+    async getTraceMetrics(traceId: string, timeRange?: string): Promise<WorkflowMetrics> {
         // Get real metrics from stored executions
         try {
-            // Get executions from Redis for this workflow
-            const executions = await this.getExecutionsForWorkflow(workflowId, timeRange);
+            // Get executions from Redis for this trace
+            const executions = await this.getExecutionsForTrace(traceId, timeRange);
             
             if (executions.length === 0) {
                 return {
@@ -1213,9 +1213,9 @@ export class WorkflowOrchestratorService extends EventEmitter {
         }
     }
 
-    private async getExecutionsForWorkflow(workflowId: string, timeRange?: string): Promise<WorkflowExecution[]> {
+    private async getExecutionsForTrace(traceId: string, timeRange?: string): Promise<AgentTraceExecution[]> {
         try {
-            // Get all execution keys for this workflow
+            // Get all execution keys for this trace
             const pattern = `workflow:execution:*`;
             let executionKeys: string[] = [];
             
@@ -1233,16 +1233,16 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 }
             }
 
-            const executions: WorkflowExecution[] = [];
+            const executions: AgentTraceExecution[] = [];
             
             for (const key of executionKeys) {
                 try {
                     const cacheResult = await redisService.checkCache(key);
                     if (cacheResult.hit) {
-                        const execution = cacheResult.data as WorkflowExecution;
+                        const execution = cacheResult.data as AgentTraceExecution;
                         
-                        // Filter by workflow ID
-                        if (execution.workflowId === workflowId) {
+                        // Filter by trace ID
+                        if (execution.traceId === traceId) {
                             // Apply time range filter if specified
                             if (timeRange) {
                                 const now = new Date();
@@ -1280,7 +1280,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
         }
     }
 
-    private calculateStepPerformance(executions: WorkflowExecution[]) {
+    private calculateStepPerformance(executions: AgentTraceExecution[]) {
         const stepStats = new Map<string, { durations: number[], costs: number[], successes: number, total: number }>();
         
         executions.forEach(execution => {
@@ -1310,7 +1310,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
         }));
     }
 
-    private calculateTrends(executions: WorkflowExecution[]) {
+    private calculateTrends(executions: AgentTraceExecution[]) {
         // Group executions by day and calculate trends
         const dailyStats = new Map<string, { executions: number, totalDuration: number, totalCost: number, successes: number }>();
         
@@ -1339,7 +1339,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
     /**
      * Pause workflow execution
      */
-    async pauseWorkflow(executionId: string): Promise<void> {
+    async pauseTrace(executionId: string): Promise<void> {
         const execution = this.activeExecutions.get(executionId);
         if (execution) {
             execution.status = 'paused';
@@ -1351,7 +1351,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
     /**
      * Resume workflow execution
      */
-    async resumeWorkflow(executionId: string): Promise<void> {
+    async resumeTrace(executionId: string): Promise<void> {
         const execution = this.activeExecutions.get(executionId);
         if (execution && execution.status === 'paused') {
             execution.status = 'running';
@@ -1363,7 +1363,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
     /**
      * Cancel workflow execution
      */
-    async cancelWorkflow(executionId: string): Promise<void> {
+    async cancelTrace(executionId: string): Promise<void> {
         const execution = this.activeExecutions.get(executionId);
         if (execution) {
             execution.status = 'cancelled';
@@ -1387,7 +1387,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
         return chunks;
     }
 
-    private async updateExecutionInRedis(execution: WorkflowExecution): Promise<void> {
+    private async updateExecutionInRedis(execution: AgentTraceExecution): Promise<void> {
         try {
             await redisService.storeCache(
                 `workflow:execution:${execution.id}`,
@@ -1399,7 +1399,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
         }
     }
 
-    private calculateExecutionMetrics(execution: WorkflowExecution): void {
+    private calculateExecutionMetrics(execution: AgentTraceExecution): void {
         const completedSteps = execution.steps.filter(step => step.status === 'completed');
         
         execution.metadata!.totalCost = completedSteps.reduce((sum, step) => 
@@ -1419,4 +1419,4 @@ export class WorkflowOrchestratorService extends EventEmitter {
     }
 }
 
-export const workflowOrchestrator = WorkflowOrchestratorService.getInstance();
+export const agentTraceOrchestrator = AgentTraceOrchestratorService.getInstance();

@@ -236,9 +236,10 @@ export class AICostTrackerService {
             costAllocation?: Record<string, any>;
             promptTemplateId?: string;
             // Workflow tracking fields
-            workflowId?: string;
-            workflowName?: string;
-            workflowStep?: string;
+            traceId?: string;
+            traceName?: string;
+            traceStep?: string;
+            traceSequence?: number;
             metadata?: {
                 workspace?: any;
                 codeContext?: any;
@@ -335,9 +336,10 @@ export class AICostTrackerService {
             tags?: string[];
             costAllocation?: Record<string, any>;
             promptTemplateId?: string;
-            workflowId?: string;
-            workflowName?: string;
-            workflowStep?: string;
+            traceId?: string;
+            traceName?: string;
+            traceStep?: string;
+            traceSequence?: number;
             metadata?: {
                 workspace?: any;
                 codeContext?: any;
@@ -391,7 +393,7 @@ export class AICostTrackerService {
             // Parallel operations for approval check and workflow sequence
             const [approvalResult, workflowSequence] = await Promise.all([
                 this.checkProjectApproval(metadata, estimatedCost, finalTotalTokens, userId, request),
-                this.getWorkflowSequence(metadata?.workflowId)
+                this.getTraceSequence(metadata?.traceId)
             ]);
 
             if (approvalResult?.requiresApproval) {
@@ -417,9 +419,10 @@ export class AICostTrackerService {
                 },
                 tags: metadata?.tags || [],
                 costAllocation: metadata?.costAllocation,
-                workflowId: metadata?.workflowId,
-                workflowName: metadata?.workflowName,
-                workflowStep: metadata?.workflowStep,
+                traceId: metadata?.traceId,
+                traceName: metadata?.traceName,
+                traceStep: metadata?.traceStep,
+                traceSequence: metadata?.traceSequence,
                 workflowSequence: workflowSequence,
                 optimizationApplied: false,
                 errorOccurred: false,
@@ -459,10 +462,10 @@ export class AICostTrackerService {
                         logVolumeBytes: JSON.stringify(request).length + JSON.stringify(response).length,
                         responseBytes: JSON.stringify(response).length,
                         projectId: metadata?.projectId,
-                        workflowId: metadata?.workflowId
+                        traceId: metadata?.traceId
                     });
 
-                    const operationLabel = metadata?.workflowName || metadata?.endpoint || 'ai.request';
+                    const operationLabel = metadata?.traceName || metadata?.endpoint || 'ai.request';
 
                     costStreamingService.emitCostEvent({
                         eventType: 'cost_tracked',
@@ -481,7 +484,7 @@ export class AICostTrackerService {
                                 promptTokens: finalPromptTokens,
                                 completionTokens: finalCompletionTokens,
                                 service: metadata?.service,
-                                workflowId: metadata?.workflowId,
+                                traceId: metadata?.traceId,
                                 projectId: metadata?.projectId,
                                 trueCostBreakdown: {
                                     apiCost: trueCost.apiCost,
@@ -776,18 +779,18 @@ export class AICostTrackerService {
     /**
      * Optimized workflow sequence calculation
      */
-    private static async getWorkflowSequence(workflowId?: string): Promise<number | undefined> {
-        if (!workflowId) {
+    private static async getTraceSequence(traceId?: string): Promise<number | undefined> {
+        if (!traceId) {
             return undefined;
         }
         
         try {
-            const existingCount = await Usage.countDocuments({ workflowId });
+            const existingCount = await Usage.countDocuments({ traceId });
             return existingCount + 1;
         } catch (error) {
             loggingService.warn('Could not calculate workflow sequence', {
                 error: error instanceof Error ? error.message : String(error),
-                workflowId
+                traceId
             });
             return 1; // Default to 1 if count fails
         }

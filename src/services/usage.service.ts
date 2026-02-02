@@ -134,13 +134,13 @@ export class UsageService {
             const usage = new Usage(usageData);
             const savedUsage = await usage.save();
             
-            // DEBUG: Check workflow fields after MongoDB save
-            loggingService.info('🔍 WORKFLOW DEBUG - After MongoDB save:', { value:  { 
+            // DEBUG: Check agent trace fields after MongoDB save
+            loggingService.info('🔍 AGENT TRACE DEBUG - After MongoDB save:', { value:  { 
                 _id: savedUsage._id,
-                workflowId: savedUsage.workflowId,
-                workflowName: savedUsage.workflowName,
-                workflowStep: savedUsage.workflowStep,
-                workflowSequence: savedUsage.workflowSequence
+                traceId: savedUsage.traceId,
+                traceName: savedUsage.traceName,
+                traceStep: savedUsage.traceStep,
+                traceSequence: savedUsage.traceSequence
              } });
             
             return savedUsage;

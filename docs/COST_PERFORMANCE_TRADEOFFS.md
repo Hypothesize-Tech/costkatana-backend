@@ -13,7 +13,6 @@ This document makes **implicit cost-performance tradeoffs explicit** by document
 | Location | Decision | Status | Priority |
 |----------|----------|--------|----------|
 | `optimization.service.ts:651` | `operation: 'answer'` hardcoded | ❌ Implicit | P0 - Critical |
-| `costIntelligence.config.ts:139` | `fallbackStrategy: 'balanced'` | ✅ Explicit | P1 - Document |
 | `optimization.service.ts:1633` | GPT-4o-mini as fallback pricing | ❌ Implicit | P1 - Document |
 | `aiRouter.service.ts` | Provider selection weights | ✅ Explicit | P2 - Enhance |
 | `servicePrioritization.service.ts` | 5-tier degradation | ✅ Explicit | P2 - Document |
@@ -176,28 +175,11 @@ if (fallbackPricing.errorOnMissingPricing) {
 
 ---
 
-### 3. Routing Strategy Configuration
+### 3. Fallback Pricing Strategy (P1 - Document)
 
-**Location**: `costkatana-backend/src/config/costIntelligence.config.ts:139`
+*(Routing strategy configuration was removed with Cost Intelligence Stack. Fallback pricing and routing decisions remain in optimization and service prioritization services.)*
 
-```typescript
-routing: {
-    enabled: true,
-    useTelemetryData: true,
-    fallbackStrategy: 'balanced',  // ✅ Explicit default
-    planTierMapping: {
-        free: 'fast',
-        plus: 'balanced',
-        pro: 'premium',
-        enterprise: 'expert'
-    }
-}
-```
-
-#### Strategic Assessment
-**Well-documented tradeoff** with explicit configuration. Good example of strategy > syntax.
-
-#### Tradeoff Quantification
+#### Tradeoff Quantification (reference)
 ```typescript
 const strategyImpact = {
     cost: {
@@ -363,12 +345,12 @@ Optional:    ████░░░░░░░░░░░░░░░░░░�
 ### Phase 2: High Priority (P1)
 - [ ] **Week 2**: Enhance fallback pricing strategy
   - Implement conservative/optimistic/strict fallback modes
-  - Add configuration to costIntelligence.config.ts
+  - Add configuration to optimization/routing services
   - Document pricing assumptions in code
   - Add pricing accuracy metrics to telemetry
 
 - [ ] **Week 3**: Document routing strategy tradeoffs
-  - Add comprehensive comments to costIntelligence.config.ts
+  - Add comprehensive comments to routing/optimization config
   - Create decision matrix for strategy selection
   - Document in architecture pages (done ✅)
 
@@ -422,7 +404,6 @@ const tradeoffMetrics = {
 ## References
 
 - **Architecture Docs**: `/architecture/cost-performance`
-- **Config File**: `src/config/costIntelligence.config.ts`
 - **Optimization Service**: `src/services/optimization.service.ts`
 - **Service Prioritization**: `src/services/servicePrioritization.service.ts`
 

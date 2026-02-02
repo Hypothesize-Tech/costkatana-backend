@@ -16,7 +16,7 @@ export const SUBSCRIPTION_PLAN_LIMITS = {
         requestsPerMonth: 5_000, // 5K requests
         logsPerMonth: 5_000, // 5K logs
         projects: 1,
-        workflows: 10,
+        agentTraces: 10,
         seats: 1,
         cortexDailyUsage: {
             limit: 0, // Not available
@@ -29,7 +29,7 @@ export const SUBSCRIPTION_PLAN_LIMITS = {
         requestsPerMonth: 10_000, // 10K requests
         logsPerMonth: -1, // Unlimited
         projects: -1, // Unlimited
-        workflows: 100,
+        agentTraces: 100,
         seats: 1,
         cortexDailyUsage: {
             limit: 0, // Not available
@@ -45,7 +45,7 @@ export const SUBSCRIPTION_PLAN_LIMITS = {
         requestsPerMonth: 50_000, // 50K requests
         logsPerMonth: -1, // Unlimited
         projects: -1, // Unlimited
-        workflows: 100, // Per user
+        agentTraces: 100, // Per user
         seats: 1, // Base seat included, additional at $20/user/month
         cortexDailyUsage: {
             limit: 0, // Not available
@@ -62,7 +62,7 @@ export const SUBSCRIPTION_PLAN_LIMITS = {
         requestsPerMonth: -1, // Unlimited
         logsPerMonth: -1, // Unlimited
         projects: -1, // Unlimited
-        workflows: -1, // Unlimited
+        agentTraces: -1, // Unlimited
         seats: -1, // Custom
         cortexDailyUsage: {
             limit: -1, // Unlimited
@@ -125,7 +125,7 @@ export class SubscriptionService {
                     requestsPerMonth: limits.requestsPerMonth,
                     logsPerMonth: limits.logsPerMonth,
                     projects: limits.projects,
-                    workflows: limits.workflows,
+                    agentTraces: limits.agentTraces,
                     seats: limits.seats,
                     cortexDailyUsage: {
                         limit: limits.cortexDailyUsage.limit,
@@ -139,7 +139,7 @@ export class SubscriptionService {
                     tokensUsed: 0,
                     requestsUsed: 0,
                     logsUsed: 0,
-                    workflowsUsed: 0,
+                    agentTracesUsed: 0,
                     optimizationsUsed: 0,
                     currentPeriodStart: now,
                     currentPeriodEnd: periodEnd,
@@ -198,7 +198,7 @@ export class SubscriptionService {
                 requestsPerMonth: limits.requestsPerMonth,
                 logsPerMonth: limits.logsPerMonth,
                 projects: limits.projects,
-                workflows: limits.workflows,
+                agentTraces: limits.agentTraces,
                 seats: limits.seats,
                 cortexDailyUsage: {
                     limit: limits.cortexDailyUsage.limit,
@@ -392,7 +392,7 @@ export class SubscriptionService {
                 requestsPerMonth: limits.requestsPerMonth,
                 logsPerMonth: limits.logsPerMonth,
                 projects: limits.projects,
-                workflows: limits.workflows,
+                agentTraces: limits.agentTraces,
                 seats: limits.seats,
                 cortexDailyUsage: {
                     limit: limits.cortexDailyUsage.limit,
@@ -786,7 +786,7 @@ export class SubscriptionService {
                     requestsPerMonth: limits.requestsPerMonth,
                     logsPerMonth: limits.logsPerMonth,
                     projects: limits.projects,
-                    workflows: limits.workflows,
+                    agentTraces: limits.agentTraces,
                     seats: limits.seats,
                     cortexDailyUsage: {
                         limit: limits.cortexDailyUsage.limit,
@@ -1349,11 +1349,11 @@ export class SubscriptionService {
                         : (subscription.usage.logsUsed || 0) / subscription.limits.logsPerMonth * 100,
                 },
                 workflows: {
-                    used: subscription.usage.workflowsUsed || 0,
-                    limit: subscription.limits.workflows,
-                    percentage: subscription.limits.workflows === -1 
+                    used: subscription.usage.agentTracesUsed || 0,
+                    limit: subscription.limits.agentTraces,
+                    percentage: subscription.limits.agentTraces === -1 
                         ? 0 
-                        : (subscription.usage.workflowsUsed || 0) / subscription.limits.workflows * 100,
+                        : (subscription.usage.agentTracesUsed || 0) / subscription.limits.agentTraces * 100,
                 },
                 cortex: {
                     used: subscription.limits.cortexDailyUsage.currentCount || 0,
@@ -1548,7 +1548,7 @@ export class SubscriptionService {
                         requestsPerMonth: freeLimits.requestsPerMonth,
                         logsPerMonth: freeLimits.logsPerMonth,
                         projects: freeLimits.projects,
-                        workflows: freeLimits.workflows,
+                        agentTraces: freeLimits.agentTraces,
                         seats: freeLimits.seats,
                         cortexDailyUsage: {
                             limit: freeLimits.cortexDailyUsage.limit,

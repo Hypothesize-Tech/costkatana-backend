@@ -47,9 +47,10 @@ export interface AILogEntry {
     errorCode?: string;
     ipAddress?: string;
     userAgent?: string;
-    workflowId?: string;
-    workflowName?: string;
-    workflowStep?: string;
+    traceId?: string;
+    traceName?: string;
+    traceStep?: string;
+    traceSequence?: number;
     experimentId?: string;
     experimentName?: string;
     notebookId?: string;
@@ -228,9 +229,10 @@ export class AILoggerService {
             errorCode: entry.errorCode,
             ipAddress: entry.ipAddress,
             userAgent: entry.userAgent,
-            workflowId: entry.workflowId,
-            workflowName: entry.workflowName,
-            workflowStep: entry.workflowStep,
+            traceId: entry.traceId,
+            traceName: entry.traceName,
+            traceStep: entry.traceStep,
+            traceSequence: entry.traceSequence,
             experimentId: entry.experimentId,
             experimentName: entry.experimentName,
             notebookId: entry.notebookId,

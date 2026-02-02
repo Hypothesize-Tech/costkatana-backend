@@ -2,21 +2,21 @@ import mongoose from 'mongoose';
 import { Usage } from '../models/Usage';
 import { loggingService } from './logging.service';
 
-export interface WorkflowSummary {
-    workflowId: string;
-    workflowName: string;
-    automationPlatform?: 'zapier' | 'make' | 'n8n'; // Add automation platform
+export interface AgentTraceSummary {
+    traceId: string;
+    traceName: string;
+    automationPlatform?: 'zapier' | 'make' | 'n8n';
     totalCost: number;
     totalTokens: number;
     requestCount: number;
     averageCost: number;
-    steps: WorkflowStep[];
+    steps: AgentTraceStep[];
     startTime: Date;
     endTime: Date;
     duration: number; // in milliseconds
 }
 
-export interface WorkflowStep {
+export interface AgentTraceStep {
     step: string;
     sequence: number;
     cost: number;
@@ -27,12 +27,12 @@ export interface WorkflowStep {
     timestamp: Date;
 }
 
-export interface WorkflowAnalytics {
-    totalWorkflows: number;
+export interface AgentTraceAnalytics {
+    totalTraces: number;
     totalCost: number;
-    averageWorkflowCost: number;
-    topWorkflowTypes: Array<{
-        workflowName: string;
+    averageTraceCost: number;
+    topTraceTypes: Array<{
+        traceName: string;
         count: number;
         totalCost: number;
         averageCost: number;
@@ -45,49 +45,44 @@ export interface WorkflowAnalytics {
     }>;
 }
 
-export class WorkflowService {
+export class AgentTraceService {
     /**
-     * Get detailed workflow information by workflow ID
+     * Get detailed agent trace information by trace ID
      */
-    static async getWorkflowDetails(workflowId: string, userId?: string): Promise<WorkflowSummary | null> {
+    static async getAgentTraceDetails(traceId: string, userId?: string): Promise<AgentTraceSummary | null> {
         try {
-            // Handle automation workflow IDs (format: platform_workflowId)
             let query: any;
-            if (workflowId.includes('_') && ['zapier', 'make', 'n8n'].some(platform => workflowId.startsWith(platform + '_'))) {
-                // Automation workflow ID format: platform_workflowId
-                const [platform, actualWorkflowId] = workflowId.split('_', 2);
+            if (traceId.includes('_') && ['zapier', 'make', 'n8n'].some(platform => traceId.startsWith(platform + '_'))) {
+                const [platform, actualTraceId] = traceId.split('_', 2);
                 query = {
                     automationPlatform: platform,
                     $or: [
-                        { workflowId: actualWorkflowId },
-                        { workflowName: actualWorkflowId }
+                        { traceId: actualTraceId },
+                        { traceName: actualTraceId }
                     ]
                 };
             } else {
-                // Regular workflow
-                query = { workflowId };
+                query = { traceId };
             }
-            
+
             if (userId) {
                 query.userId = new mongoose.Types.ObjectId(userId);
             }
 
-            const workflowRequests = await Usage.find(query)
-                .sort({ workflowSequence: 1, createdAt: 1 })
+            const traceRequests = await Usage.find(query)
+                .sort({ traceSequence: 1, createdAt: 1 })
                 .lean();
 
-            if (workflowRequests.length === 0) {
+            if (traceRequests.length === 0) {
                 return null;
             }
 
-            // Calculate totals
-            const totalCost = workflowRequests.reduce((sum, req) => sum + req.cost, 0);
-            const totalTokens = workflowRequests.reduce((sum, req) => sum + req.totalTokens, 0);
-            const requestCount = workflowRequests.length;
+            const totalCost = traceRequests.reduce((sum, req) => sum + req.cost, 0);
+            const totalTokens = traceRequests.reduce((sum, req) => sum + req.totalTokens, 0);
+            const requestCount = traceRequests.length;
             const averageCost = totalCost / requestCount;
 
-            // Build steps
-            const steps: WorkflowStep[] = workflowRequests.map((req, index) => ({
+            const steps: AgentTraceStep[] = traceRequests.map((req, index) => ({
                 step: req.traceStep || req.traceName || `/step-${index + 1}`,
                 sequence: req.traceSequence || index + 1,
                 cost: req.cost,
@@ -98,15 +93,14 @@ export class WorkflowService {
                 timestamp: req.createdAt
             }));
 
-            // Calculate duration
-            const startTime = workflowRequests[0].createdAt;
-            const endTime = workflowRequests[workflowRequests.length - 1].createdAt;
+            const startTime = traceRequests[0].createdAt;
+            const endTime = traceRequests[traceRequests.length - 1].createdAt;
             const duration = endTime.getTime() - startTime.getTime();
 
             return {
-                workflowId,
-                workflowName: workflowRequests[0].traceName || 'Unknown Workflow',
-                automationPlatform: workflowRequests[0].automationPlatform || undefined,
+                traceId,
+                traceName: traceRequests[0].traceName || 'Unknown Trace',
+                automationPlatform: traceRequests[0].automationPlatform || undefined,
                 totalCost,
                 totalTokens,
                 requestCount,
@@ -116,27 +110,26 @@ export class WorkflowService {
                 endTime,
                 duration
             };
-
         } catch (error) {
-            loggingService.error('Error getting workflow details:', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('Error getting agent trace details:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
 
     /**
-     * Get all workflows for a user with pagination
+     * Get all agent traces for a user with pagination
      */
-    static async getUserWorkflows(
+    static async getAgentTraces(
         userId: string,
         options: {
             page?: number;
             limit?: number;
-            workflowName?: string;
+            traceName?: string;
             startDate?: Date;
             endDate?: Date;
         } = {}
     ): Promise<{
-        workflows: WorkflowSummary[];
+        traces: AgentTraceSummary[];
         pagination: {
             currentPage: number;
             totalPages: number;
@@ -145,20 +138,19 @@ export class WorkflowService {
         };
     }> {
         try {
-            const { page = 1, limit = 20, workflowName, startDate, endDate } = options;
+            const { page = 1, limit = 20, traceName, startDate, endDate } = options;
             const skip = (page - 1) * limit;
 
-            // Build match query - include both regular workflows and automation workflows
             const matchQuery: any = {
                 userId: new mongoose.Types.ObjectId(userId),
                 $or: [
-                    { workflowId: { $exists: true, $ne: null } },
+                    { traceId: { $exists: true, $ne: null } },
                     { automationPlatform: { $exists: true, $ne: null } }
                 ]
             };
 
-            if (workflowName) {
-                matchQuery.workflowName = { $regex: workflowName, $options: 'i' };
+            if (traceName) {
+                matchQuery.traceName = { $regex: traceName, $options: 'i' };
             }
 
             if (startDate || endDate) {
@@ -167,32 +159,30 @@ export class WorkflowService {
                 if (endDate) matchQuery.createdAt.$lte = endDate;
             }
 
-            // Aggregate workflows
             const pipeline = [
                 { $match: matchQuery },
                 {
                     $addFields: {
-                        // Create a unique workflow key for grouping
-                        workflowKey: {
+                        traceKey: {
                             $cond: {
                                 if: { $ne: ['$automationPlatform', null] },
                                 then: {
                                     $concat: [
                                         '$automationPlatform',
                                         '_',
-                                        { $ifNull: ['$workflowId', '$workflowName'] }
+                                        { $ifNull: ['$traceId', '$traceName'] }
                                     ]
                                 },
-                                else: { $ifNull: ['$workflowId', { $concat: ['workflow_', { $ifNull: ['$workflowName', 'unknown'] }] }] }
+                                else: { $ifNull: ['$traceId', { $concat: ['trace_', { $ifNull: ['$traceName', 'unknown'] }] }] }
                             }
                         }
                     }
                 },
                 {
                     $group: {
-                        _id: '$workflowKey',
-                        workflowId: { $first: '$workflowId' },
-                        workflowName: { $first: '$workflowName' },
+                        _id: '$traceKey',
+                        traceId: { $first: '$traceId' },
+                        traceName: { $first: '$traceName' },
                         automationPlatform: { $first: '$automationPlatform' },
                         totalCost: { $sum: '$cost' },
                         totalTokens: { $sum: '$totalTokens' },
@@ -201,8 +191,8 @@ export class WorkflowService {
                         endTime: { $max: '$createdAt' },
                         steps: {
                             $push: {
-                                step: '$workflowStep',
-                                sequence: '$workflowSequence',
+                                step: '$traceStep',
+                                sequence: '$traceSequence',
                                 cost: '$cost',
                                 tokens: '$totalTokens',
                                 responseTime: '$responseTime',
@@ -225,28 +215,28 @@ export class WorkflowService {
                 { $limit: limit }
             ];
 
-            const [workflows, totalCount] = await Promise.all([
+            const [traces, totalCount] = await Promise.all([
                 Usage.aggregate(pipeline),
                 Usage.aggregate([
                     { $match: matchQuery },
                     {
                         $addFields: {
-                            workflowKey: {
+                            traceKey: {
                                 $cond: {
                                     if: { $ne: ['$automationPlatform', null] },
                                     then: {
                                         $concat: [
                                             '$automationPlatform',
                                             '_',
-                                            { $ifNull: ['$workflowId', '$workflowName'] }
+                                            { $ifNull: ['$traceId', '$traceName'] }
                                         ]
                                     },
-                                    else: { $ifNull: ['$workflowId', { $concat: ['workflow_', { $ifNull: ['$workflowName', 'unknown'] }] }] }
+                                    else: { $ifNull: ['$traceId', { $concat: ['trace_', { $ifNull: ['$traceName', 'unknown'] }] }] }
                                 }
                             }
                         }
                     },
-                    { $group: { _id: '$workflowKey' } },
+                    { $group: { _id: '$traceKey' } },
                     { $count: 'total' }
                 ])
             ]);
@@ -254,11 +244,10 @@ export class WorkflowService {
             const totalItems = totalCount[0]?.total || 0;
             const totalPages = Math.ceil(totalItems / limit);
 
-            // Format workflows
-            const formattedWorkflows: WorkflowSummary[] = workflows.map(wf => ({
-                workflowId: wf._id,
-                workflowName: wf.workflowName || 'Unknown Workflow',
-                automationPlatform: wf.automationPlatform || undefined, // Include automation platform
+            const formattedTraces: AgentTraceSummary[] = traces.map(wf => ({
+                traceId: wf._id,
+                traceName: wf.traceName || 'Unknown Trace',
+                automationPlatform: wf.automationPlatform || undefined,
                 totalCost: wf.totalCost,
                 totalTokens: wf.totalTokens,
                 requestCount: wf.requestCount,
@@ -270,7 +259,7 @@ export class WorkflowService {
             }));
 
             return {
-                workflows: formattedWorkflows,
+                traces: formattedTraces,
                 pagination: {
                     currentPage: page,
                     totalPages,
@@ -278,30 +267,28 @@ export class WorkflowService {
                     itemsPerPage: limit
                 }
             };
-
         } catch (error) {
-            loggingService.error('Error getting user workflows:', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('Error getting agent traces:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
 
     /**
-     * Get workflow analytics for a user
+     * Get agent trace analytics for a user
      */
-    static async getWorkflowAnalytics(
+    static async getAgentTraceAnalytics(
         userId: string,
         options: {
             startDate?: Date;
             endDate?: Date;
         } = {}
-    ): Promise<WorkflowAnalytics> {
+    ): Promise<AgentTraceAnalytics> {
         try {
             const { startDate, endDate } = options;
 
-            // Build match query
             const matchQuery: any = {
                 userId: new mongoose.Types.ObjectId(userId),
-                workflowId: { $exists: true, $ne: null }
+                traceId: { $exists: true, $ne: null }
             };
 
             if (startDate || endDate) {
@@ -310,33 +297,31 @@ export class WorkflowService {
                 if (endDate) matchQuery.createdAt.$lte = endDate;
             }
 
-            // Get workflow type analytics
-            const workflowTypesPipeline = [
+            const traceTypesPipeline = [
                 { $match: matchQuery },
                 {
                     $group: {
-                        _id: '$workflowName',
+                        _id: '$traceName',
                         count: { $sum: 1 },
                         totalCost: { $sum: '$cost' },
-                        uniqueWorkflows: { $addToSet: '$workflowId' }
+                        uniqueTraces: { $addToSet: '$traceId' }
                     }
                 },
                 {
                     $addFields: {
-                        workflowCount: { $size: '$uniqueWorkflows' },
-                        averageCost: { $divide: ['$totalCost', '$workflowCount'] }
+                        traceCount: { $size: '$uniqueTraces' },
+                        averageCost: { $divide: ['$totalCost', '$traceCount'] }
                     }
                 },
                 { $sort: { totalCost: -1 as -1 } },
                 { $limit: 10 }
             ];
 
-            // Get step analytics
             const stepsPipeline = [
-                { $match: { ...matchQuery, workflowStep: { $exists: true, $ne: null } } },
+                { $match: { ...matchQuery, traceStep: { $exists: true, $ne: null } } },
                 {
                     $group: {
-                        _id: '$workflowStep',
+                        _id: '$traceStep',
                         totalCost: { $sum: '$cost' },
                         count: { $sum: 1 }
                     }
@@ -350,39 +335,38 @@ export class WorkflowService {
                 { $limit: 10 }
             ];
 
-            // Get overall stats
             const overallPipeline = [
                 { $match: matchQuery },
                 {
                     $group: {
                         _id: null,
                         totalCost: { $sum: '$cost' },
-                        uniqueWorkflows: { $addToSet: '$workflowId' }
+                        uniqueTraces: { $addToSet: '$traceId' }
                     }
                 },
                 {
                     $addFields: {
-                        totalWorkflows: { $size: '$uniqueWorkflows' },
-                        averageWorkflowCost: { $divide: ['$totalCost', { $size: '$uniqueWorkflows' }] }
+                        totalTraces: { $size: '$uniqueTraces' },
+                        averageTraceCost: { $divide: ['$totalCost', { $size: '$uniqueTraces' }] }
                     }
                 }
             ];
 
-            const [workflowTypes, steps, overall] = await Promise.all([
-                Usage.aggregate(workflowTypesPipeline),
+            const [traceTypes, steps, overall] = await Promise.all([
+                Usage.aggregate(traceTypesPipeline),
                 Usage.aggregate(stepsPipeline),
                 Usage.aggregate(overallPipeline)
             ]);
 
-            const overallStats = overall[0] || { totalWorkflows: 0, totalCost: 0, averageWorkflowCost: 0 };
+            const overallStats = overall[0] || { totalTraces: 0, totalCost: 0, averageTraceCost: 0 };
 
             return {
-                totalWorkflows: overallStats.totalWorkflows,
+                totalTraces: overallStats.totalTraces,
                 totalCost: overallStats.totalCost,
-                averageWorkflowCost: overallStats.averageWorkflowCost,
-                topWorkflowTypes: workflowTypes.map(wt => ({
-                    workflowName: wt._id || 'Unknown',
-                    count: wt.workflowCount,
+                averageTraceCost: overallStats.averageTraceCost,
+                topTraceTypes: traceTypes.map(wt => ({
+                    traceName: wt._id || 'Unknown',
+                    count: wt.traceCount,
                     totalCost: wt.totalCost,
                     averageCost: wt.averageCost
                 })),
@@ -393,29 +377,27 @@ export class WorkflowService {
                     averageCost: step.averageCost
                 }))
             };
-
         } catch (error) {
-            loggingService.error('Error getting workflow analytics:', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('Error getting agent trace analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
 
     /**
-     * Get workflow comparison data
+     * Compare agent traces
      */
-    static async compareWorkflows(
-        workflowIds: string[],
+    static async compareAgentTraces(
+        traceIds: string[],
         userId?: string
-    ): Promise<WorkflowSummary[]> {
+    ): Promise<AgentTraceSummary[]> {
         try {
-            const workflows = await Promise.all(
-                workflowIds.map(id => this.getWorkflowDetails(id, userId))
+            const traces = await Promise.all(
+                traceIds.map(id => this.getAgentTraceDetails(id, userId))
             );
 
-            return workflows.filter(wf => wf !== null) as WorkflowSummary[];
-
+            return traces.filter(t => t !== null) as AgentTraceSummary[];
         } catch (error) {
-            loggingService.error('Error comparing workflows:', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('Error comparing agent traces:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

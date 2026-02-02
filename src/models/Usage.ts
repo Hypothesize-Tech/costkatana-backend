@@ -55,10 +55,10 @@ export interface IUsage {
     isServerError?: boolean; // Quick flag for 5xx errors
     ipAddress?: string;
     userAgent?: string;
-    workflowId?: string;
-    workflowName?: string;
-    workflowStep?: string;
-    workflowSequence?: number;
+    traceId?: string;
+    traceName?: string;
+    traceStep?: string;
+    traceSequence?: number;
     // Automation platform tracking
     automationPlatform?: 'zapier' | 'make' | 'n8n';
     automationConnectionId?: string;
@@ -77,7 +77,7 @@ export interface IUsage {
             source: 'user_provided' | 'context_inferred' | 'default' | 'missing';
             reasoning?: string;
         }>;
-        context: 'chat' | 'optimization' | 'visual-compliance' | 'workflow' | 'api';
+        context: 'chat' | 'optimization' | 'visual-compliance' | 'agent_trace' | 'api';
         templateVersion?: number;
     };
     createdAt: Date;
@@ -200,17 +200,17 @@ const usageSchema = new Schema<IUsage>({
     },
     ipAddress: String,
     userAgent: String,
-    // Workflow tracking fields
-    workflowId: {
+    // Agent trace tracking fields
+    traceId: {
         type: String
     },
-    workflowName: {
+    traceName: {
         type: String
     },
-    workflowStep: {
+    traceStep: {
         type: String
     },
-    workflowSequence: {
+    traceSequence: {
         type: Number,
         min: 0
     },
@@ -257,7 +257,7 @@ const usageSchema = new Schema<IUsage>({
         }],
         context: {
             type: String,
-            enum: ['chat', 'optimization', 'visual-compliance', 'workflow', 'api']
+            enum: ['chat', 'optimization', 'visual-compliance', 'agent_trace', 'api']
         },
         templateVersion: Number
     }
@@ -292,7 +292,7 @@ usageSchema.index({ userId: 1, 'templateUsage.templateId': 1, createdAt: -1 });
 usageSchema.index({ automationPlatform: 1, createdAt: -1 });
 usageSchema.index({ automationConnectionId: 1, createdAt: -1 });
 usageSchema.index({ userId: 1, automationPlatform: 1, createdAt: -1 });
-usageSchema.index({ workflowId: 1, automationPlatform: 1, createdAt: -1 });
+usageSchema.index({ traceId: 1, automationPlatform: 1, createdAt: -1 });
 
 // Virtual for cost per token
 usageSchema.virtual('costPerToken').get(function () {

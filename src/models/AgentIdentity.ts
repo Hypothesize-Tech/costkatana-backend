@@ -17,7 +17,7 @@ export interface IAgentCapability {
 export interface IAgentIdentity extends Document {
   agentId: string;
   agentName: string;
-  agentType: 'recommendation' | 'github' | 'multiagent' | 'custom' | 'workflow' | 'automation';
+  agentType: 'recommendation' | 'github' | 'multiagent' | 'custom' | 'agent_trace' | 'automation';
   
   // Ownership and hierarchy
   userId: mongoose.Types.ObjectId;
@@ -119,7 +119,7 @@ const AgentIdentitySchema = new Schema<IAgentIdentity>({
   },
   agentType: { 
     type: String, 
-    enum: ['recommendation', 'github', 'multiagent', 'custom', 'workflow', 'automation'],
+    enum: ['recommendation', 'github', 'multiagent', 'custom', 'agent_trace', 'automation'],
     required: true,
     index: true
   },

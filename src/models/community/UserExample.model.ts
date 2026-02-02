@@ -46,7 +46,7 @@ const UserExampleSchema = new Schema<IUserExample>(
         category: {
             type: String,
             required: true,
-            enum: ['getting-started', 'integration', 'optimization', 'analytics', 'gateway', 'workflows', 'other'],
+            enum: ['getting-started', 'integration', 'optimization', 'analytics', 'gateway', 'agent_trace', 'other'],
         },
         tags: [{
             type: String,
