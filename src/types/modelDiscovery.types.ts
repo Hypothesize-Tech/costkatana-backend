@@ -21,6 +21,7 @@ export interface RawPricingData {
 export interface ModelDiscoveryResult {
     provider: string;
     modelsDiscovered: number;
+    modelsSkipped?: number;
     modelsValidated: number;
     modelsFailed: number;
     errors: string[];
