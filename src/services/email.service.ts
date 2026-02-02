@@ -228,6 +228,72 @@ export class EmailService {
     });
   }
 
+  /**
+   * Send onboarding credentials email (API key + project ID) for existing users completing magic link.
+   */
+  static async sendOnboardingCredentialsEmail(
+    to: string,
+    userName: string,
+    apiKey: string,
+    projectId: string
+  ): Promise<void> {
+    const year = this.getCurrentYear();
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; color: #1f2937; background: #f8fafc; margin: 0; padding: 40px 20px; }
+            .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+            .header { background: linear-gradient(135deg, #059669 0%, #047857 100%); color: white; padding: 32px 24px; text-align: center; }
+            .header h1 { margin: 0; font-size: 24px; font-weight: 700; }
+            .content { padding: 32px 24px; }
+            .content h2 { color: #1f2937; font-size: 18px; font-weight: 600; margin: 0 0 16px 0; }
+            .content p { color: #4b5563; margin: 12px 0; font-size: 14px; }
+            .code-block { background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px; font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; margin: 12px 0; }
+            .label { font-weight: 600; color: #374151; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+            .note { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; margin: 16px 0; border-radius: 4px; font-size: 13px; color: #92400e; }
+            .footer { text-align: center; padding: 24px; color: #6b7280; font-size: 12px; background: #f9fafb; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Your Cost Katana API Key and Project</h1>
+            </div>
+            <div class="content">
+              <p>Hi ${userName},</p>
+              <p>Here are your API credentials for Cost Katana. Save them securely; the API key is shown only once.</p>
+
+              <div class="label">API Key</div>
+              <div class="code-block">${apiKey}</div>
+
+              <div class="label">Default Project ID</div>
+              <div class="code-block">${projectId}</div>
+              <p>Requests without the <code>CostKatana-Project-Id</code> header will be attributed to this project.</p>
+
+              <h2>Usage</h2>
+              <p>Include these headers in your API requests:</p>
+              <div class="code-block">CostKatana-Auth: Bearer ${apiKey}</div>
+              <div class="code-block">CostKatana-Project-Id: ${projectId}</div>
+
+              <div class="note"><strong>Note:</strong> Store your API key securely. Do not share it or commit it to version control.</div>
+            </div>
+            <div class="footer">
+              <p>© ${year} Cost Katana. This email was sent because you completed onboarding.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    await this.sendEmail({
+      to,
+      subject: 'Your Cost Katana API key and project',
+      html,
+    });
+  }
+
   static async sendSecondaryEmailVerification(email: string, verificationUrl: string, userName: string): Promise<void> {
     const year = this.getCurrentYear();
     const html = `

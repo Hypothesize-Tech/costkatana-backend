@@ -346,9 +346,16 @@ export class OnboardingController {
                     requestId: req.headers['x-request-id'] as string
                 });
                 
-                // Queue welcome email for background processing
+                // Queue welcome email for background processing (include API key and projectId)
                 this.queueBackgroundOperation(async () => {
-                    await this.sendWelcomeEmailWithCircuitBreaker(email, cleanedUser?.name || name || email.split('@')[0], tempPassword, source);
+                    await this.sendWelcomeEmailWithCircuitBreaker(
+                        email,
+                        cleanedUser?.name || name || email.split('@')[0],
+                        tempPassword,
+                        source,
+                        apiKey,
+                        defaultProject._id.toString()
+                    );
                 });
                 
                 // Store the temp password to show on success page
@@ -585,6 +592,27 @@ export class OnboardingController {
                         requireApprovalAbove: 100,
                         enablePromptLibrary: true,
                         enableCostAllocation: true
+                    }
+                });
+            }
+
+            // Send API key + projectId email for existing users (new users get it in welcome email)
+            if (!isNewUser && apiKey && defaultProject && defaultProject._id !== 'already_created') {
+                const projectIdStr = typeof defaultProject._id === 'string' ? defaultProject._id : (defaultProject._id as any).toString();
+                this.queueBackgroundOperation(async () => {
+                    try {
+                        const { EmailService } = await import('../services/email.service');
+                        await EmailService.sendOnboardingCredentialsEmail(
+                            email,
+                            cleanedUser?.name || name || email.split('@')[0],
+                            apiKey,
+                            projectIdStr
+                        );
+                    } catch (err) {
+                        loggingService.error('Failed to send onboarding credentials email', {
+                            email,
+                            error: err instanceof Error ? err.message : String(err)
+                        });
                     }
                 });
             }
@@ -880,10 +908,12 @@ export class OnboardingController {
      * Send welcome email with circuit breaker protection
      */
     private static async sendWelcomeEmailWithCircuitBreaker(
-        email: string, 
-        name: string, 
-        tempPassword: string, 
-        source: string
+        email: string,
+        name: string,
+        tempPassword: string,
+        source: string,
+        apiKey?: string,
+        projectId?: string
     ): Promise<void> {
         // Check if circuit breaker is open
         if (this.isEmailCircuitBreakerOpen()) {
@@ -895,11 +925,11 @@ export class OnboardingController {
             const { EmailService } = await import('../services/email.service');
             const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3000';
             const loginUrl = `${frontendUrl}/login`;
-            
+
             await EmailService.sendEmail({
                 to: email,
                 subject: '🎉 Welcome to Cost Katana! Your Account is Ready',
-                html: this.generateWelcomeEmailHtml(name, email, tempPassword, source, loginUrl)
+                html: this.generateWelcomeEmailHtml(name, email, tempPassword, source, loginUrl, apiKey, projectId)
             });
 
             // Reset failure count on success
@@ -943,12 +973,27 @@ export class OnboardingController {
      * Generate welcome email HTML
      */
     private static generateWelcomeEmailHtml(
-        name: string, 
-        email: string, 
-        tempPassword: string, 
-        source: string, 
-        loginUrl: string
+        name: string,
+        email: string,
+        tempPassword: string,
+        source: string,
+        loginUrl: string,
+        apiKey?: string,
+        projectId?: string
     ): string {
+        const apiKeySection = (apiKey && projectId) ? `
+                <div class="credentials-box">
+                    <h3>🔑 Your API Key and Project</h3>
+                    <p style="font-size: 12px; color: #6b7280; margin-bottom: 8px;">Save these securely; the API key is shown only once.</p>
+                    <p><strong>API Key:</strong></p>
+                    <div class="code-block">${apiKey}</div>
+                    <p><strong>Default Project ID:</strong></p>
+                    <div class="code-block">${projectId}</div>
+                    <p style="font-size: 13px; color: #6b7280;">Requests without the <code>CostKatana-Project-Id</code> header will use this project.</p>
+                    <p style="font-size: 13px; margin-top: 12px;"><strong>Usage:</strong> <code>CostKatana-Auth: Bearer &lt;api_key&gt;</code> and optional <code>CostKatana-Project-Id: &lt;project_id&gt;</code></p>
+                </div>
+        ` : '';
+
         return `
         <!DOCTYPE html>
         <html>
@@ -959,6 +1004,7 @@ export class OnboardingController {
                 .content { padding: 30px 20px; background: #f8fafc; }
                 .credentials-box { background: white; border: 2px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 20px 0; }
                 .password { font-family: Monaco, monospace; font-size: 18px; font-weight: bold; color: #059669; background: #f0f9ff; padding: 10px; border-radius: 4px; text-align: center; margin: 10px 0; letter-spacing: 2px; }
+                .code-block { font-family: Monaco, monospace; font-size: 13px; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; word-break: break-all; margin: 8px 0; }
                 .login-btn { display: inline-block; background: #3b82f6; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 20px 0; }
                 .important { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; padding: 15px; margin: 20px 0; }
                 .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
@@ -980,6 +1026,7 @@ export class OnboardingController {
                     <div class="password">${tempPassword}</div>
                     <p style="font-size: 14px; color: #6b7280;">You can change this password after logging in</p>
                 </div>
+                ${apiKeySection}
 
                 <div style="text-align: center;">
                     <a href="${loginUrl}" class="login-btn">Login to Cost Katana Dashboard</a>

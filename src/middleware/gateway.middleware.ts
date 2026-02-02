@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import mongoose from 'mongoose';
 import { loggingService } from '../services/logging.service';
 import { User } from '../models/User';
+import { Project } from '../models/Project';
 import { AuthService } from '../services/auth.service';
 import { decrypt } from '../utils/helpers';
 import { KeyVaultService } from '../services/keyVault.service';
@@ -941,7 +942,7 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
 /**
  * Gateway header processing middleware - processes all CostKATANA headers
  */
-export const processGatewayHeaders = (req: Request, res: Response, next: NextFunction): void => {
+export const processGatewayHeaders = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     if (!req.gatewayContext) {
         req.gatewayContext = { startTime: Date.now() };
     }
@@ -967,6 +968,33 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
             projectId,
             requestId: context.requestId
         });
+    } else if (context.userId) {
+        // Resolve default project when header is missing so usage is attributed correctly
+        try {
+            const project = await Project.findOne({ ownerId: context.userId })
+                .sort({ createdAt: 1 })
+                .limit(1)
+                .select('_id')
+                .lean();
+            if (project && project._id) {
+                context.projectId = project._id.toString();
+                loggingService.debug('Default project resolved for user', {
+                    component: 'GatewayMiddleware',
+                    operation: 'processGatewayHeaders',
+                    type: 'default_project_resolved',
+                    projectId: context.projectId,
+                    userId: context.userId,
+                    requestId: context.requestId
+                });
+            }
+        } catch (err) {
+            loggingService.warn('Failed to resolve default project for user', {
+                component: 'GatewayMiddleware',
+                operation: 'processGatewayHeaders',
+                userId: context.userId,
+                error: err instanceof Error ? err.message : String(err)
+            });
+        }
     }
 
     // Process CostKatana-Auth-Method header (for authentication method override)
