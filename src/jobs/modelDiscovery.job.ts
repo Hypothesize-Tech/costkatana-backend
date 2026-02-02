@@ -24,16 +24,10 @@ export class ModelDiscoveryJob {
     ];
 
     /**
-     * Start the cron job
+     * Start the cron job (always on, runs 1st of each month at 2 AM UTC)
      */
     static start(): void {
         const schedule = '0 2 1 * *';
-        const enabled = process.env.MODEL_DISCOVERY_ENABLED !== 'false';
-
-        if (!enabled) {
-            loggingService.info('Model discovery cron job is disabled');
-            return;
-        }
 
         loggingService.info(`Starting model discovery cron job with schedule: ${schedule}`);
 
@@ -178,11 +172,10 @@ export class ModelDiscoveryJob {
         enabled: boolean;
     } {
         const schedule = '0 2 1 * *';
-        const enabled = process.env.MODEL_DISCOVERY_ENABLED !== 'false';
 
         // Calculate next run time (approximate)
         let nextRun: Date | null = null;
-        if (enabled && this.task) {
+        if (this.task) {
             // Next run: 1st of (this or next) month at 2 AM UTC
             const now = new Date();
             const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 2, 0, 0, 0));
@@ -197,7 +190,7 @@ export class ModelDiscoveryJob {
             lastRun: this.lastRun,
             nextRun,
             schedule,
-            enabled
+            enabled: true
         };
     }
 

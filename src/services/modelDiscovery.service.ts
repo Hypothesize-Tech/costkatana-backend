@@ -107,7 +107,35 @@ export class ModelDiscoveryService {
     };
 
     /**
-     * Main discovery method - discovers models for a single provider
+     * Normalize model name for DB comparison (lowercase, trim, collapse spaces).
+     */
+    private static normalizeModelNameForComparison(name: string): string {
+        return name
+            .toLowerCase()
+            .trim()
+            .replace(/\s+/g, ' ')
+            .replace(/\s*[-–—]\s*/g, '-');
+    }
+
+    /**
+     * Get set of normalized model identifiers (modelId + modelName) already in DB for a provider.
+     */
+    private static async getExistingModelIdentifiers(provider: string): Promise<Set<string>> {
+        const docs = await AIModelPricing.find(
+            { provider, isActive: true },
+            { modelId: 1, modelName: 1 }
+        ).lean();
+        const set = new Set<string>();
+        for (const doc of docs) {
+            set.add(this.normalizeModelNameForComparison(doc.modelId));
+            set.add(this.normalizeModelNameForComparison(doc.modelName));
+        }
+        return set;
+    }
+
+    /**
+     * Main discovery method - discovers models for a single provider.
+     * Only runs Google Search + LLM for models not already in the DB.
      */
     static async discoverModelsForProvider(provider: string): Promise<ModelDiscoveryResult> {
         const startTime = Date.now();
@@ -130,7 +158,7 @@ export class ModelDiscoveryService {
         };
 
         try {
-            // Phase 1: Discover model names
+            // Phase 1: Discover model names (Google Search + LLM)
             const modelNames = await this.searchModelList(config);
             
             if (modelNames.length === 0) {
@@ -146,15 +174,40 @@ export class ModelDiscoveryService {
                 models: modelNames
             });
 
-            // Phase 2: Get pricing for each model
+            // Filter to only models not already in DB
+            const existingSet = await this.getExistingModelIdentifiers(provider);
+            const newModels = modelNames.filter(
+                name => !existingSet.has(this.normalizeModelNameForComparison(name))
+            );
+            const modelsSkipped = modelNames.length - newModels.length;
+            result.modelsSkipped = modelsSkipped;
+
+            if (modelsSkipped > 0) {
+                loggingService.info(`Skipping ${modelsSkipped} models already in DB for ${provider}`, {
+                    provider,
+                    modelsSkipped,
+                    newModelsCount: newModels.length
+                });
+            }
+
+            if (newModels.length === 0) {
+                result.duration = Date.now() - startTime;
+                loggingService.info(`All ${modelNames.length} models already in DB for ${provider}, no pricing search needed`, {
+                    provider,
+                    duration: result.duration
+                });
+                return result;
+            }
+
+            // Phase 2: Get pricing only for new models (Google Search + LLM per model)
             const pricingResults = await Promise.allSettled(
-                modelNames.map(modelName => this.searchModelPricing(config, modelName))
+                newModels.map(modelName => this.searchModelPricing(config, modelName))
             );
 
             // Phase 3: Validate and store
             for (let i = 0; i < pricingResults.length; i++) {
                 const pricingResult = pricingResults[i];
-                const modelName = modelNames[i];
+                const modelName = newModels[i];
 
                 if (pricingResult.status === 'fulfilled' && pricingResult.value) {
                     const validationResult = this.validateAndNormalize(pricingResult.value, provider);
@@ -189,6 +242,7 @@ export class ModelDiscoveryService {
             loggingService.info(`Model discovery completed for ${provider}`, {
                 provider,
                 discovered: result.modelsDiscovered,
+                skipped: result.modelsSkipped,
                 validated: result.modelsValidated,
                 failed: result.modelsFailed,
                 duration: result.duration
