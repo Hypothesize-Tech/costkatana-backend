@@ -620,7 +620,7 @@ export class UsageController {
                     order,
                 }, filters.projectId, filters);
             } else {
-                // Use regular getUsage if no search query
+                // Use regular getUsage for standard functionality
                 result = await UsageService.getUsage(filters, {
                     page,
                     limit,
@@ -630,14 +630,17 @@ export class UsageController {
             }
 
             ControllerHelper.logRequestSuccess('getUsage', req, startTime, {
-                resultCount: result.data.length,
-                hasSearchQuery: !!searchQuery
+                resultCount: (result as any).data?.length || 0,
+                hasSearchQuery: !!searchQuery,
             });
 
+            // Return standard response structure
+            const standardResult = result as any;
             res.json({
                 success: true,
-                data: result.data,
-                pagination: result.pagination,
+                data: standardResult.data,
+                pagination: standardResult.pagination,
+                summary: standardResult.summary,
             });
         } catch (error: any) {
             ControllerHelper.handleError('getUsage', error, req, res, startTime);
@@ -723,6 +726,66 @@ export class UsageController {
             ControllerHelper.handleError('getUsageStats', error, req, res, startTime, {
                 period: req.query.period,
                 projectId: req.query.projectId
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get a single usage record by ID
+     */
+    static async getUsageById(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        
+        try {
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+            const userId = req.userId!;
+            const { usageId } = req.params;
+
+            ControllerHelper.logRequestStart('getUsageById', req);
+
+            if (!usageId) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Usage ID is required',
+                });
+                return;
+            }
+
+            // Validate ObjectId format
+            try {
+                ServiceHelper.validateObjectId(usageId, 'usageId');
+            } catch (validationError) {
+                res.status(400).json({
+                    success: false,
+                    message: validationError instanceof Error ? validationError.message : 'Invalid usage ID format',
+                });
+                return;
+            }
+
+            const usage = await UsageService.getUsageById(usageId, userId);
+
+            if (!usage) {
+                res.status(404).json({
+                    success: false,
+                    message: `Usage record with ID ${usageId} not found`,
+                });
+                return;
+            }
+
+            ControllerHelper.logRequestSuccess('getUsageById', req, startTime, {
+                usageId
+            });
+
+            res.json({
+                success: true,
+                data: usage,
+            });
+        } catch (error: any) {
+            ControllerHelper.handleError('getUsageById', error, req, res, startTime, {
+                usageId: req.params.usageId
             });
             next(error);
         }
@@ -1005,123 +1068,6 @@ export class UsageController {
         } catch (error: any) {
             ControllerHelper.handleError('exportUsage', error, req, res, startTime, {
                 format: req.query.format,
-                projectId: req.query.projectId
-            });
-            next(error);
-        }
-    }
-
-    static async getRealTimeUsageSummary(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
-        const startTime = Date.now();
-        
-        try {
-            if (!ControllerHelper.requireAuth(req, res)) {
-                return;
-            }
-            const userId = req.userId!;
-            ControllerHelper.logRequestStart('getRealTimeUsageSummary', req);
-            const { projectId } = req.query;
-
-            const summary = await UsageService.getRealTimeUsageSummary(userId, projectId as string | undefined);
-
-            ControllerHelper.logRequestSuccess('getRealTimeUsageSummary', req, startTime, {
-                projectId: req.query.projectId
-            });
-
-            res.json({
-                success: true,
-                data: summary
-            });
-        } catch (error: any) {
-            ControllerHelper.handleError('getRealTimeUsageSummary', error, req, res, startTime, {
-                projectId: req.query.projectId
-            });
-            next(error);
-        }
-    }
-
-    static async getRealTimeRequests(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
-        const startTime = Date.now();
-        
-        try {
-            if (!ControllerHelper.requireAuth(req, res)) {
-                return;
-            }
-            const userId = req.userId!;
-            ControllerHelper.logRequestStart('getRealTimeRequests', req);
-            const { projectId, limit = 100 } = req.query;
-
-            const requests = await UsageService.getRealTimeRequests(userId, projectId as string | undefined, parseInt(limit as string));
-
-            ControllerHelper.logRequestSuccess('getRealTimeRequests', req, startTime, {
-                projectId: req.query.projectId,
-                limit: req.query.limit,
-                requestCount: requests.length
-            });
-
-            res.json({
-                success: true,
-                data: requests
-            });
-        } catch (error: any) {
-            ControllerHelper.handleError('getRealTimeRequests', error, req, res, startTime, {
-                projectId: req.query.projectId,
-                limit: req.query.limit
-            });
-            next(error);
-        }
-    }
-
-    static async getUsageAnalytics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<Response | void> {
-        const startTime = Date.now();
-        
-        try {
-            if (!ControllerHelper.requireAuth(req, res)) {
-                return;
-            }
-            const userId = req.userId!;
-            ControllerHelper.logRequestStart('getUsageAnalytics', req);
-            const { 
-                timeRange, 
-                status, 
-                model, 
-                service, 
-                projectId 
-            } = req.query;
-
-            // Use timeout handling for analytics
-            const timeoutPromise = new Promise<never>((_, reject) => {
-                setTimeout(() => reject(new Error('Analytics timeout')), UsageController.ANALYTICS_TIMEOUT);
-            });
-
-            const analyticsPromise = UsageService.getUsageAnalytics(userId, {
-                timeRange: timeRange as '1h' | '24h' | '7d' | '30d',
-                status: status as 'all' | 'success' | 'error',
-                model: model as string,
-                service: service as string,
-                projectId: projectId as string
-            });
-
-            const analytics = await Promise.race([analyticsPromise, timeoutPromise]);
-
-            ControllerHelper.logRequestSuccess('getUsageAnalytics', req, startTime, {
-                timeRange: req.query.timeRange,
-                status: req.query.status,
-                model: req.query.model,
-                service: req.query.service,
-                projectId: req.query.projectId
-            });
-
-            res.json({
-                success: true,
-                data: analytics
-            });
-        } catch (error: any) {
-            ControllerHelper.handleError('getUsageAnalytics', error, req, res, startTime, {
-                timeRange: req.query.timeRange,
-                status: req.query.status,
-                model: req.query.model,
-                service: req.query.service,
                 projectId: req.query.projectId
             });
             next(error);

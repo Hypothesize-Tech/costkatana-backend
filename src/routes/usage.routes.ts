@@ -43,9 +43,6 @@ router.get('/search', validateQuery(paginationSchema), asyncHandler(UsageControl
 router.get('/export', asyncHandler(UsageController.exportUsage));
 
 // Real-time usage tracking dashboard routes
-router.get('/realtime/summary', authenticate, asyncHandler(UsageController.getRealTimeUsageSummary));
-router.get('/realtime/requests', authenticate, asyncHandler(UsageController.getRealTimeRequests));
-router.get('/analytics', authenticate, asyncHandler(UsageController.getUsageAnalytics));
 
 // CLI-specific analytics endpoint
 router.get('/analytics/cli', authenticate, asyncHandler(UsageController.getCLIAnalytics));
@@ -57,5 +54,8 @@ router.put('/:usageId/properties', authenticate, asyncHandler(UsageController.up
 
 // Add the SSE route
 router.get('/stream', authenticate, UsageController.streamUsageUpdates);
+
+// Get single usage record by ID - requires authentication (MUST be last GET route to avoid conflicts)
+router.get('/:usageId', authenticate, asyncHandler(UsageController.getUsageById));
 
 export default router;

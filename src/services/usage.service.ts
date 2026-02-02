@@ -304,9 +304,223 @@ export class UsageService {
 
             const result = paginate(data, total, options);
 
-            return result;
+            // Calculate summary statistics from all matching documents (not just current page)
+            const [summaryData, chartData] = await Promise.all([
+                Usage.aggregate([
+                    { $match: query },
+                    {
+                        $group: {
+                            _id: null,
+                            totalCost: { $sum: '$cost' },
+                            totalTokens: { $sum: '$totalTokens' },
+                            totalPromptTokens: { $sum: '$promptTokens' },
+                            totalCompletionTokens: { $sum: '$completionTokens' },
+                            totalCalls: { $sum: 1 },
+                            avgResponseTime: { $avg: '$responseTime' },
+                            avgCostPerCall: { $avg: '$cost' },
+                        }
+                    }
+                ]),
+                // Aggregate data by date for chart
+                Usage.aggregate([
+                    { $match: query },
+                    {
+                        $group: {
+                            _id: {
+                                $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+                            },
+                            cost: { $sum: '$cost' },
+                            calls: { $sum: 1 },
+                            tokens: { $sum: '$totalTokens' },
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 0,
+                            date: '$_id',
+                            cost: 1,
+                            calls: 1,
+                            tokens: 1,
+                        }
+                    },
+                    { $sort: { date: 1 } }
+                ])
+            ]);
+
+            const summary = summaryData.length > 0 ? {
+                totalCost: summaryData[0].totalCost || 0,
+                totalTokens: summaryData[0].totalTokens || 0,
+                totalPromptTokens: summaryData[0].totalPromptTokens || 0,
+                totalCompletionTokens: summaryData[0].totalCompletionTokens || 0,
+                totalCalls: summaryData[0].totalCalls || 0,
+                avgResponseTime: summaryData[0].avgResponseTime || 0,
+                avgCostPerCall: summaryData[0].avgCostPerCall || 0,
+                chartData: chartData || [],
+            } : {
+                totalCost: 0,
+                totalTokens: 0,
+                totalPromptTokens: 0,
+                totalCompletionTokens: 0,
+                totalCalls: 0,
+                avgResponseTime: 0,
+                avgCostPerCall: 0,
+                chartData: [],
+            };
+
+            return {
+                ...result,
+                summary
+            };
         } catch (error) {
             loggingService.error('Error fetching usage:', { error: error instanceof Error ? error.message : String(error) });
+            throw error;
+        }
+    }
+
+    /**
+     * Get usage by project ID with pagination
+     */
+    static async getContextualData(usageRecords: IUsage[]): Promise<any> {
+        try {
+            // Extract context information from usage records
+            const contextData = {
+                templates: new Map<string, any>(),
+                workflows: new Map<string, any>(),
+                projects: new Map<string, any>(),
+                services: new Map<string, any>(),
+                totalContextItems: 0,
+            };
+
+            for (const usage of usageRecords) {
+                // Extract template context
+                if (usage.metadata?.templateId || usage.metadata?.templateName) {
+                    const templateKey = usage.metadata.templateId || usage.metadata.templateName;
+                    if (!contextData.templates.has(templateKey)) {
+                        contextData.templates.set(templateKey, {
+                            id: usage.metadata.templateId,
+                            name: usage.metadata.templateName,
+                            version: usage.metadata.templateVersion,
+                            usageCount: 0,
+                            totalCost: 0,
+                            variables: usage.metadata.templateVariables || {},
+                        });
+                    }
+                    const template = contextData.templates.get(templateKey);
+                    template.usageCount += 1;
+                    template.totalCost += usage.cost;
+                }
+
+                // Extract workflow context
+                if ((usage as any).workflowId || (usage as any).workflowName || usage.metadata?.workflowId || usage.metadata?.workflowName) {
+                    const workflowKey = (usage as any).workflowId || (usage as any).workflowName || usage.metadata?.workflowId || usage.metadata?.workflowName;
+                    if (!contextData.workflows.has(workflowKey)) {
+                        contextData.workflows.set(workflowKey, {
+                            id: (usage as any).workflowId || usage.metadata?.workflowId,
+                            name: (usage as any).workflowName || usage.metadata?.workflowName,
+                            steps: new Set<string>(),
+                            usageCount: 0,
+                            totalCost: 0,
+                        });
+                    }
+                    const workflow = contextData.workflows.get(workflowKey);
+                    if (workflow) {
+                        workflow.usageCount += 1;
+                        workflow.totalCost += usage.cost;
+                        if ((usage as any).workflowStep || usage.metadata?.workflowStep) {
+                            workflow.steps.add((usage as any).workflowStep || usage.metadata?.workflowStep);
+                        }
+                    }
+                }
+
+                // Extract project context
+                if (usage.projectId) {
+                    const projectKey = usage.projectId.toString();
+                    if (!contextData.projects.has(projectKey)) {
+                        contextData.projects.set(projectKey, {
+                            id: usage.projectId,
+                            usageCount: 0,
+                            totalCost: 0,
+                            services: new Set<string>(),
+                            models: new Set<string>(),
+                        });
+                    }
+                    const project = contextData.projects.get(projectKey);
+                    project.usageCount += 1;
+                    project.totalCost += usage.cost;
+                    project.services.add(usage.service);
+                    project.models.add(usage.model);
+                }
+
+                // Extract service context
+                if (!contextData.services.has(usage.service)) {
+                    contextData.services.set(usage.service, {
+                        name: usage.service,
+                        models: new Set<string>(),
+                        usageCount: 0,
+                        totalCost: 0,
+                        avgResponseTime: 0,
+                        totalResponseTime: 0,
+                        errorCount: 0,
+                    });
+                }
+                const service = contextData.services.get(usage.service);
+                service.usageCount += 1;
+                service.totalCost += usage.cost;
+                service.totalResponseTime += usage.responseTime;
+                service.models.add(usage.model);
+                if (usage.errorOccurred) {
+                    service.errorCount += 1;
+                }
+            }
+
+            // Convert Sets to Arrays and calculate averages
+            const result = {
+                templates: Array.from(contextData.templates.values()),
+                workflows: Array.from(contextData.workflows.values()).map(w => ({
+                    ...w,
+                    steps: Array.from(w.steps),
+                })),
+                projects: Array.from(contextData.projects.values()).map(p => ({
+                    ...p,
+                    services: Array.from(p.services),
+                    models: Array.from(p.models),
+                })),
+                services: Array.from(contextData.services.values()).map(s => ({
+                    ...s,
+                    models: Array.from(s.models),
+                    avgResponseTime: s.usageCount > 0 ? s.totalResponseTime / s.usageCount : 0,
+                    errorRate: s.usageCount > 0 ? (s.errorCount / s.usageCount) * 100 : 0,
+                })),
+                summary: {
+                    uniqueTemplates: contextData.templates.size,
+                    uniqueWorkflows: contextData.workflows.size,
+                    uniqueProjects: contextData.projects.size,
+                    uniqueServices: contextData.services.size,
+                },
+            };
+
+            // Remove totalResponseTime as it's not needed in the response
+            result.services.forEach(service => {
+                delete (service as any).totalResponseTime;
+            });
+
+            contextData.totalContextItems = 
+                contextData.templates.size + 
+                contextData.workflows.size + 
+                contextData.projects.size + 
+                contextData.services.size;
+
+            loggingService.info('Contextual data extracted', {
+                component: 'UsageService',
+                operation: 'getContextualData',
+                inputRecords: usageRecords.length,
+                contextItems: contextData.totalContextItems,
+                breakdown: result.summary,
+            });
+
+            return result;
+        } catch (error) {
+            loggingService.error('Error extracting contextual data:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -683,370 +897,8 @@ Identify any anomalies in cost or token usage patterns. Return a JSON object wit
     }
 
     /**
-     * Get real-time usage summary for dashboard
+     * CLI-specific analytics method
      */
-    static async getRealTimeUsageSummary(userId: string, projectId?: string) {
-        try {
-            const match: any = { userId: new mongoose.Types.ObjectId(userId) };
-            if (projectId) {
-                match.projectId = new mongoose.Types.ObjectId(projectId);
-            }
-
-            const now = new Date();
-            const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-            const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-            // Use single aggregation with $facet for better performance
-            const aggregationResult = await Usage.aggregate([
-                {
-                    $facet: {
-                        currentPeriod: [
-                            { $match: { ...match, createdAt: { $gte: last24Hours } } },
-                            {
-                                $group: {
-                                    _id: null,
-                                    totalCost: { $sum: '$cost' },
-                                    totalTokens: { $sum: '$totalTokens' },
-                                    totalRequests: { $sum: 1 },
-                                    avgResponseTime: { $avg: '$responseTime' },
-                                    errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } },
-                                    successCount: { $sum: { $cond: ['$errorOccurred', 0, 1] } }
-                                }
-                            }
-                        ],
-                        previousPeriod: [
-                            { 
-                                $match: { 
-                                    ...match, 
-                                    createdAt: { 
-                                        $gte: new Date(last24Hours.getTime() - 24 * 60 * 60 * 1000),
-                                        $lt: last24Hours 
-                                    } 
-                                } 
-                            },
-                            {
-                                $group: {
-                                    _id: null,
-                                    totalCost: { $sum: '$cost' },
-                                    totalTokens: { $sum: '$totalTokens' },
-                                    totalRequests: { $sum: 1 },
-                                    avgResponseTime: { $avg: '$responseTime' }
-                                }
-                            }
-                        ],
-                        modelBreakdown: [
-                            { $match: { ...match, createdAt: { $gte: last7Days } } },
-                            {
-                                $group: {
-                                    _id: '$model',
-                                    totalCost: { $sum: '$cost' },
-                                    totalTokens: { $sum: '$totalTokens' },
-                                    requestCount: { $sum: 1 },
-                                    avgResponseTime: { $avg: '$responseTime' },
-                                    errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } }
-                                }
-                            },
-                            { $sort: { totalCost: -1 } },
-                            { $limit: 10 }
-                        ],
-                        serviceBreakdown: [
-                            { $match: { ...match, createdAt: { $gte: last7Days } } },
-                            {
-                                $group: {
-                                    _id: '$service',
-                                    totalCost: { $sum: '$cost' },
-                                    totalTokens: { $sum: '$totalTokens' },
-                                    requestCount: { $sum: 1 },
-                                    avgResponseTime: { $avg: '$responseTime' },
-                                    errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } }
-                                }
-                            },
-                            { $sort: { totalCost: -1 } }
-                        ],
-                        recentRequests: [
-                            { $match: match },
-                            { $sort: { createdAt: -1 } },
-                            { $limit: 50 },
-                            {
-                                $project: {
-                                    model: 1,
-                                    service: 1,
-                                    promptTokens: 1,
-                                    completionTokens: 1,
-                                    totalTokens: 1,
-                                    cost: 1,
-                                    responseTime: 1,
-                                    errorOccurred: 1,
-                                    createdAt: 1
-                                }
-                            }
-                        ]
-                    }
-                }
-            ]);
-
-            const [currentPeriod, previousPeriod, modelBreakdown, serviceBreakdown, recentRequests] = [
-                aggregationResult[0].currentPeriod,
-                aggregationResult[0].previousPeriod,
-                aggregationResult[0].modelBreakdown,
-                aggregationResult[0].serviceBreakdown,
-                aggregationResult[0].recentRequests
-            ];
-
-            const current = currentPeriod[0] || {
-                totalCost: 0, totalTokens: 0, totalRequests: 0, avgResponseTime: 0, errorCount: 0, successCount: 0
-            };
-            const previous = previousPeriod[0] || {
-                totalCost: 0, totalTokens: 0, totalRequests: 0, avgResponseTime: 0
-            };
-
-            // Calculate percentage changes
-            const costChange = previous.totalCost > 0 ? ((current.totalCost - previous.totalCost) / previous.totalCost) * 100 : 0;
-            const requestChange = previous.totalRequests > 0 ? ((current.totalRequests - previous.totalRequests) / previous.totalRequests) * 100 : 0;
-            const tokenChange = previous.totalTokens > 0 ? ((current.totalTokens - previous.totalTokens) / previous.totalTokens) * 100 : 0;
-
-            return {
-                currentPeriod: {
-                    ...current,
-                    avgResponseTime: Math.round(current.avgResponseTime || 0)
-                },
-                previousPeriod: {
-                    ...previous,
-                    avgResponseTime: Math.round(previous.avgResponseTime || 0)
-                },
-                changes: {
-                    cost: Math.round(costChange * 100) / 100,
-                    requests: Math.round(requestChange * 100) / 100,
-                    tokens: Math.round(tokenChange * 100) / 100
-                },
-                modelBreakdown,
-                serviceBreakdown,
-                recentRequests: recentRequests.map((req: any) => ({
-                    ...req,
-                    timestamp: req.createdAt,
-                    status: req.errorOccurred ? 'error' : 'success',
-                    statusCode: req.errorOccurred ? 500 : 200
-                }))
-            };
-        } catch (error) {
-            loggingService.error('Error getting real-time usage summary:', { error: error instanceof Error ? error.message : String(error) });
-            throw error;
-        }
-    }
-
-    // New method for real-time requests monitoring
-    static async getRealTimeRequests(userId: string, projectId?: string, limit: number = 100) {
-        try {
-            const match: any = { userId: new mongoose.Types.ObjectId(userId) };
-            if (projectId) {
-                match.projectId = new mongoose.Types.ObjectId(projectId);
-            }
-
-            const requests = await Usage.aggregate([
-                { $match: match },
-                {
-                    $lookup: {
-                        from: 'users',
-                        localField: 'userId',
-                        foreignField: '_id',
-                        as: 'user'
-                    }
-                },
-                {
-                    $addFields: {
-                        userName: {
-                            $ifNull: [
-                                { $arrayElemAt: ['$user.name', 0] },
-                                { $concat: ['user_', { $substr: [{ $toString: '$userId' }, -8, 8] }] }
-                            ]
-                        }
-                    }
-                },
-                {
-                    $project: {
-                        _id: 1,
-                        model: 1,
-                        service: 1,
-                        promptTokens: 1,
-                        completionTokens: 1,
-                        totalTokens: 1,
-                        cost: 1,
-                        responseTime: 1,
-                        errorOccurred: 1,
-                        errorMessage: 1,
-                        createdAt: 1,
-                        ipAddress: 1,
-                        userAgent: 1,
-                        metadata: 1,
-                        userName: 1
-                    }
-                },
-                { $sort: { createdAt: -1 } },
-                { $limit: limit }
-            ]);
-
-            return requests.map(req => ({
-                id: req._id,
-                timestamp: req.createdAt,
-                model: req.model,
-                service: req.service,
-                status: req.errorOccurred ? 'error' : 'success',
-                statusCode: req.errorOccurred ? 500 : 200,
-                latency: Math.round(req.responseTime),
-                totalTokens: req.totalTokens,
-                cost: req.cost,
-                user: req.userName,
-                errorMessage: req.errorMessage,
-                ipAddress: req.ipAddress,
-                userAgent: req.userAgent,
-                metadata: req.metadata
-            }));
-        } catch (error) {
-            loggingService.error('Error getting real-time requests:', { error: error instanceof Error ? error.message : String(error) });
-            throw error;
-        }
-    }
-
-    // New method for usage analytics with filters
-    static async getUsageAnalytics(userId: string, filters: {
-        timeRange?: '1h' | '24h' | '7d' | '30d';
-        status?: 'all' | 'success' | 'error';
-        model?: string;
-        service?: string;
-        projectId?: string;
-    } = {}) {
-        try {
-            const match: any = { userId: new mongoose.Types.ObjectId(userId) };
-            
-            // Time range filter
-            if (filters.timeRange) {
-                const now = new Date();
-                let startDate: Date;
-                switch (filters.timeRange) {
-                    case '1h':
-                        startDate = new Date(now.getTime() - 60 * 60 * 1000);
-                        break;
-                    case '24h':
-                        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-                        break;
-                    case '7d':
-                        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-                        break;
-                    case '30d':
-                        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-                        break;
-                    default:
-                        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-                }
-                match.createdAt = { $gte: startDate };
-            }
-
-            // Status filter
-            if (filters.status && filters.status !== 'all') {
-                match.errorOccurred = filters.status === 'error';
-            }
-
-            // Model filter
-            if (filters.model) {
-                match.model = filters.model;
-            }
-
-            // Service filter
-            if (filters.service) {
-                match.service = filters.service;
-            }
-
-            // Project filter
-            if (filters.projectId) {
-                match.projectId = new mongoose.Types.ObjectId(filters.projectId);
-            }
-
-            const [requests, stats] = await Promise.all([
-                Usage.aggregate([
-                    { $match: match },
-                    {
-                        $lookup: {
-                            from: 'users',
-                            localField: 'userId',
-                            foreignField: '_id',
-                            as: 'user'
-                        }
-                    },
-                    {
-                        $addFields: {
-                            userName: {
-                                $ifNull: [
-                                    { $arrayElemAt: ['$user.name', 0] },
-                                    { $concat: ['user_', { $substr: [{ $toString: '$userId' }, -8, 8] }] }
-                                ]
-                            }
-                        }
-                    },
-                    {
-                        $project: {
-                            _id: 1,
-                            model: 1,
-                            service: 1,
-                            promptTokens: 1,
-                            completionTokens: 1,
-                            totalTokens: 1,
-                            cost: 1,
-                            responseTime: 1,
-                            errorOccurred: 1,
-                            createdAt: 1,
-                            userName: 1
-                        }
-                    },
-                    { $sort: { createdAt: -1 } },
-                    { $limit: 1000 }
-                ]),
-                Usage.aggregate([
-                    { $match: match },
-                    {
-                        $group: {
-                            _id: null,
-                            totalCost: { $sum: '$cost' },
-                            totalTokens: { $sum: '$totalTokens' },
-                            totalRequests: { $sum: 1 },
-                            avgResponseTime: { $avg: '$responseTime' },
-                            errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } },
-                            successCount: { $sum: { $cond: ['$errorOccurred', 0, 1] } }
-                        }
-                    }
-                ])
-            ]);
-
-            const statsData = stats[0] || {
-                totalCost: 0, totalTokens: 0, totalRequests: 0, avgResponseTime: 0, errorCount: 0, successCount: 0
-            };
-
-            return {
-                requests: requests.map(req => ({
-                    id: req._id,
-                    timestamp: req.createdAt,
-                    model: req.model,
-                    service: req.service,
-                    status: req.errorOccurred ? 'error' : 'success',
-                    statusCode: req.errorOccurred ? 500 : 200,
-                    latency: Math.round(req.responseTime),
-                    totalTokens: req.totalTokens,
-                    cost: req.cost,
-                    user: req.userName
-                })),
-                stats: {
-                    ...statsData,
-                    avgResponseTime: Math.round(statsData.avgResponseTime || 0),
-                    successRate: statsData.totalRequests > 0 ? 
-                        ((statsData.successCount / statsData.totalRequests) * 100).toFixed(1) : '0.0'
-                }
-            };
-        } catch (error) {
-            loggingService.error('Error getting usage analytics:', { error: error instanceof Error ? error.message : String(error) });
-            throw error;
-        }
-    }
-
-    // CLI-specific analytics method
     static async getCLIAnalytics(userId: string, options: {
         days?: number;
         project?: string;
@@ -1387,7 +1239,7 @@ Identify any anomalies in cost or token usage patterns. Return a JSON object wit
     }
 
     /**
-     * Get usage by ID and verify ownership
+     * Get usage analytics for property breakdown
      */
     static async getPropertyAnalytics(userId: string, options: {
         startDate?: Date;
