@@ -41,6 +41,58 @@ const mapToFullModelId = (shortName?: string): string | undefined => {
     
     return modelMap[shortName] || shortName;
 };
+
+/**
+ * Build requestTracking for an optimization API request (same shape as Usage.requestTracking).
+ * Used so the dashboard can show "Network Details" for each optimization run.
+ */
+function buildOptimizationRequestTracking(
+    req: AuthenticatedRequest,
+    totalRoundTripTimeMs: number,
+    requestSize: number,
+    responseSize: number
+): Record<string, unknown> {
+    const protocol = req.protocol ?? 'https';
+    const host = req.get('host') ?? '';
+    const fullUrl = `${protocol}://${host}${req.originalUrl ?? req.url ?? '/api/optimizations'}`;
+    const socket = req.socket as { remoteAddress?: string; localAddress?: string; localPort?: number } | undefined;
+    return {
+        clientInfo: {
+            ip: req.ip ?? socket?.remoteAddress ?? 'unknown',
+            userAgent: req.get('user-agent') ?? 'unknown',
+            forwardedIPs: (req.get('x-forwarded-for') ?? '').split(',').map((s: string) => s.trim()).filter(Boolean),
+        },
+        headers: {
+            request: {
+                'content-type': req.get('content-type') ?? 'application/json',
+                'accept': req.get('accept') ?? '*/*',
+            },
+            response: { 'content-type': 'application/json' },
+        },
+        networking: {
+            serverEndpoint: req.originalUrl ?? req.url ?? '/api/optimizations',
+            serverFullUrl: fullUrl,
+            clientOrigin: req.get('origin') ?? req.get('referer') ?? 'Dashboard',
+            serverIP: socket?.localAddress ?? '0.0.0.0',
+            serverPort: socket?.localPort ?? 0,
+            routePattern: '/api/optimizations',
+            protocol,
+            secure: protocol === 'https',
+        },
+        payload: {
+            requestSize,
+            responseSize,
+            contentType: 'application/json',
+        },
+        performance: {
+            totalRoundTripTime: totalRoundTripTimeMs,
+            serverProcessingTime: totalRoundTripTimeMs,
+            networkTime: 0,
+            dataTransferEfficiency: totalRoundTripTimeMs > 0 ? (requestSize + responseSize) / (totalRoundTripTimeMs / 1000) : 0,
+        },
+    };
+}
+
 import { Optimization } from '../models';
 
 
@@ -188,12 +240,41 @@ export class OptimizationController {
                 });
             }
 
+            // Attach request/network details for Optimization Details modal (same pattern as Usage).
+            const totalRoundTripTimeMs = Date.now() - startTime;
+            let requestTracking: Record<string, unknown> | undefined;
+            try {
+                const requestBodyStr = JSON.stringify(req.body ?? {});
+                const responsePayload = {
+                    id: optimization._id,
+                    userQuery: optimization.userQuery,
+                    generatedAnswer: optimization.generatedAnswer,
+                    improvementPercentage: optimization.improvementPercentage,
+                    costSaved: optimization.costSaved,
+                    tokensSaved: optimization.tokensSaved,
+                };
+                const responseBodyStr = JSON.stringify(responsePayload);
+                requestTracking = buildOptimizationRequestTracking(
+                    req,
+                    totalRoundTripTimeMs,
+                    Buffer.byteLength(requestBodyStr, 'utf8'),
+                    Buffer.byteLength(responseBodyStr, 'utf8')
+                ) as Record<string, unknown>;
+                await Optimization.findByIdAndUpdate(optimization._id, { requestTracking });
+            } catch (err) {
+                loggingService.warn('Failed to attach requestTracking to optimization', {
+                    optimizationId: optimization._id,
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            }
+
             ControllerHelper.logRequestSuccess('createOptimization', req, startTime, {
                 optimizationId: optimization._id,
                 improvementPercentage: optimization.improvementPercentage,
                 costSaved: optimization.costSaved,
                 tokensSaved: optimization.tokensSaved,
-                promptCompilationApplied: !!promptCompilationMetadata
+                promptCompilationApplied: !!promptCompilationMetadata,
+                hasRequestTracking: !!requestTracking,
             });
 
             ControllerHelper.logBusinessEvent(
@@ -218,6 +299,7 @@ export class OptimizationController {
                 message: 'Optimization created successfully',
                 data: {
                     id: optimization._id,
+                    _id: optimization._id,
                     userQuery: optimization.userQuery,
                     generatedAnswer: optimization.generatedAnswer,
                     improvementPercentage: optimization.improvementPercentage,
@@ -225,7 +307,8 @@ export class OptimizationController {
                     tokensSaved: optimization.tokensSaved,
                     suggestions: optimization.suggestions,
                     metadata: optimization.metadata,
-                    
+                    requestTracking: requestTracking ?? undefined,
+
                     // 🚀 CORTEX METADATA in response
                     cortexEnabled: optimization.metadata?.cortexEnabled || false,
                     cortexProcessingTime: optimization.metadata?.cortexProcessingTime,
@@ -410,6 +493,58 @@ export class OptimizationController {
             });
         } catch (error: any) {
             ControllerHelper.handleError('getOptimization', error, req, res, startTime);
+            next(error);
+        }
+    }
+
+    /**
+     * Get network/request details for an optimization (same shape as Usage network-details).
+     * Used for lazy load when opening Optimization Details modal from list/card.
+     */
+    static async getOptimizationNetworkDetails(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        const { id } = req.params;
+        ControllerHelper.logRequestStart('getOptimizationNetworkDetails', req);
+
+        try {
+            ServiceHelper.validateObjectId(id, 'Optimization ID');
+
+            const optimization = await Optimization.findOne({
+                _id: id,
+                userId,
+            }).select('requestTracking metadata').lean();
+
+            if (!optimization) {
+                res.status(404).json({
+                    success: false,
+                    message: 'Optimization not found',
+                });
+                return;
+            }
+
+            const requestTracking = (optimization as any).requestTracking;
+            const networkDetails = {
+                requestTracking,
+                performance: requestTracking?.performance
+                    ? { responseTime: requestTracking.performance.serverProcessingTime ?? requestTracking.performance.totalRoundTripTime, networkMetrics: requestTracking.performance }
+                    : undefined,
+                clientInfo: requestTracking?.clientInfo,
+            };
+
+            ControllerHelper.logRequestSuccess('getOptimizationNetworkDetails', req, startTime, {
+                optimizationId: id,
+                hasRequestTracking: !!requestTracking,
+            });
+
+            res.json({
+                success: true,
+                data: networkDetails,
+                metadata: { optimizationId: id, generatedAt: new Date().toISOString() },
+            });
+        } catch (error: any) {
+            ControllerHelper.handleError('getOptimizationNetworkDetails', error, req, res, startTime);
             next(error);
         }
     }

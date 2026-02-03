@@ -149,6 +149,30 @@ export interface ITelemetry extends Document {
     attributes?: Record<string, any>;
   }>;
   
+  // NEW: Comprehensive networking metadata
+  networkingMetadata?: {
+    clientEndpoint: string;
+    serverEndpoint: string;
+    dataTransferred: {
+      requestBytes: number;
+      responseBytes: number;
+      compressionRatio?: number;
+    };
+    connectionDetails: {
+      protocol: string;
+      cipher?: string;
+      keepAlive: boolean;
+      connectionReused: boolean;
+    };
+    performanceBreakdown: {
+      dnsLookupTime?: number;
+      tcpConnectTime?: number;
+      tlsHandshakeTime?: number;
+      requestUploadTime?: number;
+      responseDownloadTime?: number;
+    };
+  };
+  
   // Links to other spans
   links?: Array<{
     trace_id: string;
@@ -322,6 +346,38 @@ const TelemetrySchema = new Schema<ITelemetry>({
     timestamp: Date,
     attributes: Schema.Types.Mixed
   }],
+  
+  // NEW: Comprehensive networking metadata schema
+  networkingMetadata: {
+    clientEndpoint: String,
+    serverEndpoint: String,
+    dataTransferred: {
+      requestBytes: {
+        type: Number,
+        min: 0,
+        default: 0
+      },
+      responseBytes: {
+        type: Number,
+        min: 0,
+        default: 0
+      },
+      compressionRatio: Number
+    },
+    connectionDetails: {
+      protocol: String,
+      cipher: String,
+      keepAlive: Boolean,
+      connectionReused: Boolean
+    },
+    performanceBreakdown: {
+      dnsLookupTime: Number,
+      tcpConnectTime: Number,
+      tlsHandshakeTime: Number,
+      requestUploadTime: Number,
+      responseDownloadTime: Number
+    }
+  },
   
   // Links
   links: [{

@@ -384,6 +384,83 @@ export class NotificationService {
             });
         }
     }
+    
+    /**
+     * Send performance alert notification (disabled - can be re-enabled later)
+     */
+    static async sendPerformanceAlert(_alertData: {
+        title: string;
+        message: string;
+        severity: string;
+        metrics: any;
+        timestamp: Date;
+    }): Promise<void> {
+        // Performance alert sending disabled - no emails or notifications sent (can be re-enabled later)
+        await Promise.resolve();
+    }
+
+    /**
+     * Send optimization alert to user
+     */
+    static async sendOptimizationAlert(
+        userId: string, 
+        suggestions: { id: string; title: string; description: string; impact: { estimatedSavings: number }; priority: string }[]
+    ): Promise<void> {
+        try {
+            const user = await User.findById(userId).lean();
+            if (!user) {
+                loggingService.error('User not found for optimization alert', { userId });
+                return;
+            }
+
+            // Check if user has optimization alerts enabled
+            if (!user.preferences?.emailAlerts) {
+                loggingService.debug('Email alerts disabled for user', { userId });
+                return;
+            }
+
+            const totalSavings = suggestions.reduce((sum, s) => sum + s.impact.estimatedSavings, 0);
+            
+            const alert: Partial<IAlert> = {
+                userId: new mongoose.Types.ObjectId(userId),
+                title: 'Critical Cost Optimization Opportunities Found',
+                message: `We've identified ${suggestions.length} optimization opportunities that could save you $${totalSavings.toFixed(2)}.`,
+                severity: 'high',
+                type: 'optimization',
+                data: {
+                    suggestions: suggestions.map(s => ({
+                        id: s.id,
+                        title: s.title,
+                        description: s.description,
+                        estimatedSavings: s.impact.estimatedSavings,
+                        priority: s.priority
+                    })),
+                    totalSuggestions: suggestions.length,
+                    totalPotentialSavings: totalSavings
+                },
+                createdAt: new Date()
+            };
+
+            // Create and save the alert
+            const savedAlert = await Alert.create(alert);
+
+            // Send through all configured channels
+            await this.sendAlert(savedAlert as IAlert);
+            
+            loggingService.info('Optimization alert sent', {
+                userId,
+                suggestionsCount: suggestions.length,
+                potentialSavings: totalSavings,
+                alertId: savedAlert._id
+            });
+        } catch (error: any) {
+            loggingService.error('Error sending optimization alert', {
+                error: error.message,
+                userId,
+                suggestionsCount: suggestions.length
+            });
+        }
+    }
 
     /**
      * Retry failed deliveries for an alert

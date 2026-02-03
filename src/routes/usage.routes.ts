@@ -14,6 +14,9 @@ router.post('/track', optionalAuth, validate(trackUsageSchema), asyncHandler(Usa
 // Track usage from SDK - supports API key authentication
 router.post('/track-sdk', optionalAuth, asyncHandler(UsageController.trackUsageFromSDK));
 
+// NEW: Track comprehensive usage data from SDK with client-side data
+router.post('/track-comprehensive', optionalAuth, asyncHandler(UsageController.trackComprehensiveUsage));
+
 // Get usage data - read-only, supports API key
 router.get('/', optionalAuth, validateQuery(paginationSchema), asyncHandler(UsageController.getUsage));
 
@@ -22,6 +25,14 @@ router.get('/project/:projectId', optionalAuth, validateQuery(paginationSchema),
 
 // Get usage statistics - read-only, supports API key
 router.get('/stats', optionalAuth, asyncHandler(UsageController.getUsageStats));
+
+// NEW: Enhanced usage endpoints with comprehensive tracking data
+router.get('/performance-metrics', optionalAuth, asyncHandler(UsageController.getPerformanceMetrics));
+router.get('/optimization-opportunities', optionalAuth, asyncHandler(UsageController.getOptimizationOpportunities));
+
+// NEW: Cost optimization engine endpoints
+router.post('/analyze-optimization', authenticate, asyncHandler(UsageController.analyzeOptimization));
+router.get('/optimization-report', authenticate, asyncHandler(UsageController.getOptimizationReport));
 
 // Routes that require full authentication (write operations beyond usage tracking)
 // Bulk upload usage data
@@ -57,5 +68,9 @@ router.get('/stream', authenticate, UsageController.streamUsageUpdates);
 
 // Get single usage record by ID - requires authentication (MUST be last GET route to avoid conflicts)
 router.get('/:usageId', authenticate, asyncHandler(UsageController.getUsageById));
+
+// NEW: Detailed request/response data endpoints
+router.get('/:usageId/network-details', authenticate, asyncHandler(UsageController.getNetworkDetails));
+router.get('/:usageId/optimization-suggestions', authenticate, asyncHandler(UsageController.getOptimizationSuggestions));
 
 export default router;

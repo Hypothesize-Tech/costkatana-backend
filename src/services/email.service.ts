@@ -827,6 +827,108 @@ export class EmailService {
     });
   }
 
+  /**
+   * Send performance alert notification
+   */
+  static async sendPerformanceAlertNotification(user: IUser, alert: IAlert): Promise<void> {
+    const year = this.getCurrentYear();
+    const severityColors = {
+      low: '#3498db',
+      medium: '#f39c12',
+      high: '#e74c3c',
+      critical: '#c0392b',
+    };
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: ${severityColors[alert.severity]}; color: white; padding: 20px; text-align: center; }
+            .content { padding: 20px; background-color: #f9f9f9; }
+            .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 20px 0; }
+            .metric-card { background-color: white; padding: 15px; border-radius: 4px; text-align: center; }
+            .metric-value { font-size: 24px; font-weight: bold; color: ${severityColors[alert.severity]}; }
+            .metric-label { font-size: 12px; color: #666; }
+            .alert-details { background-color: white; padding: 15px; border-radius: 4px; margin: 20px 0; }
+            .button { display: inline-block; padding: 12px 24px; background-color: #4a90e2; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+            .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>⚠️ Performance Alert</h1>
+              <p style="margin: 0; opacity: 0.9;">${alert.title}</p>
+            </div>
+            <div class="content">
+              <h2>Hi ${user.name},</h2>
+              <div class="alert-details">
+                <p><strong>Alert:</strong> ${alert.message}</p>
+                <p><strong>Severity:</strong> <span style="color: ${severityColors[alert.severity]}; font-weight: bold; text-transform: uppercase;">${alert.severity}</span></p>
+                <p><strong>Time:</strong> ${alert.createdAt.toLocaleString()}</p>
+              </div>
+              
+              ${alert.metadata?.metrics ? `
+                <h3>Performance Metrics</h3>
+                <div class="metrics-grid">
+                  ${alert.metadata.metrics.errorRate ? `
+                    <div class="metric-card">
+                      <div class="metric-value">${alert.metadata.metrics.errorRate}%</div>
+                      <div class="metric-label">Error Rate</div>
+                    </div>
+                  ` : ''}
+                  ${alert.metadata.metrics.responseTime ? `
+                    <div class="metric-card">
+                      <div class="metric-value">${alert.metadata.metrics.responseTime}ms</div>
+                      <div class="metric-label">Response Time</div>
+                    </div>
+                  ` : ''}
+                  ${alert.metadata.metrics.requestRate ? `
+                    <div class="metric-card">
+                      <div class="metric-value">${alert.metadata.metrics.requestRate}</div>
+                      <div class="metric-label">Requests/min</div>
+                    </div>
+                  ` : ''}
+                  ${alert.metadata.metrics.threshold ? `
+                    <div class="metric-card">
+                      <div class="metric-value">${alert.metadata.metrics.threshold}</div>
+                      <div class="metric-label">Threshold</div>
+                    </div>
+                  ` : ''}
+                </div>
+              ` : ''}
+              
+              <p>This performance alert was triggered by our monitoring system. Please review your application's performance and take appropriate action if needed.</p>
+              
+              <a href="https://app.costkatana.com/dashboard/performance" class="button">View Performance Dashboard</a>
+              
+              <p style="margin-top: 30px; color: #666; font-size: 14px;">
+                <strong>What should you do?</strong><br>
+                1. Check your application logs for errors<br>
+                2. Review recent deployments or changes<br>
+                3. Monitor the performance dashboard<br>
+                4. Consider scaling resources if needed
+              </p>
+            </div>
+            <div class="footer">
+              <p>© ${year} Cost Katana. All rights reserved.</p>
+              <p>You're receiving this because performance alerts are enabled in your account settings.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    await this.sendEmail({
+      to: user.email,
+      subject: `[${alert.severity.toUpperCase()}] Performance Alert: ${alert.title}`,
+      html,
+    });
+  }
+
   private static stripHtml(html: string): string {
     return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
   }

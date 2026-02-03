@@ -485,7 +485,129 @@ export class UsageController {
                 res.status(500).json({
                     success: false,
                     error: 'Failed to track usage',
-                    message: error.message || 'Internal server error'
+                    message: (error as Error).message || 'Internal server error'
+                });
+            }
+        }
+    }
+
+    /**
+     * Track comprehensive usage data with client-side networking details
+     */
+    static async trackComprehensiveUsage(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        try {
+            // Get userId from JWT token or request
+            let userId = getUserIdFromToken(req);
+            if (!userId) {
+                userId = req.user?.id || req.user?._id || req.userId;
+            }
+            if (!userId) {
+                loggingService.error('No user ID found in comprehensive tracking request', {
+                    component: 'UsageController',
+                    operation: 'trackComprehensiveUsage',
+                    headers: req.headers
+                });
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required'
+                });
+                return;
+            }
+
+            ControllerHelper.logRequestStart('trackComprehensiveUsage', req);
+
+            const { comprehensiveTrackingService } = await import('../services/comprehensive-tracking.service');
+            const { getComprehensiveTrackingData } = await import('../middleware/comprehensive-tracking.middleware');
+
+            // Get server-side tracking data from middleware
+            const serverData = getComprehensiveTrackingData(req);
+            if (!serverData) {
+                loggingService.warn('No server-side tracking data available', {
+                    component: 'UsageController',
+                    operation: 'trackComprehensiveUsage',
+                    userId
+                });
+            }
+
+            // Extract client-side data and usage metadata from request body.
+            // Support both shapes: { clientSideData, usageMetadata } or flat { userId, model, promptTokens, ... }
+            const clientData = req.body.clientSideData;
+            const rawMetadata = req.body.usageMetadata ?? req.body;
+            const usageMetadata = rawMetadata && typeof rawMetadata === 'object'
+                ? (() => {
+                    const { clientSideData: _omit, ...rest } = rawMetadata;
+                    return rest;
+                })()
+                : undefined;
+
+            let usage;
+            
+            if (clientData && serverData) {
+                // Process comprehensive tracking with both client and server data
+                usage = await comprehensiveTrackingService.processComprehensiveTracking(
+                    clientData,
+                    serverData,
+                    { ...usageMetadata, userId }
+                );
+            } else if (serverData) {
+                // Process server-side only tracking
+                usage = await comprehensiveTrackingService.processServerSideTracking(
+                    serverData,
+                    { ...usageMetadata, userId }
+                );
+            } else {
+                // Fallback to regular usage tracking
+                const { UsageService } = await import('../services/usage.service');
+                usage = await UsageService.trackUsage({
+                    userId,
+                    ...usageMetadata,
+                });
+            }
+
+            if (!usage) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to create usage record'
+                });
+                return;
+            }
+
+            const duration = Date.now() - startTime;
+
+            ControllerHelper.logRequestSuccess('trackComprehensiveUsage', req, startTime, {
+                usageId: usage._id,
+                hasClientData: !!clientData,
+                hasServerData: !!serverData,
+                cost: usage.cost,
+                totalTokens: usage.totalTokens
+            });
+
+            res.status(201).json({
+                success: true,
+                message: 'Comprehensive usage tracked successfully',
+                data: {
+                    id: usage._id,
+                    cost: usage.cost,
+                    totalTokens: usage.totalTokens,
+                    responseTime: usage.responseTime,
+                    optimizationOpportunities: usage.optimizationOpportunities,
+                    performanceMetrics: usage.requestTracking?.performance
+                },
+                metadata: {
+                    duration,
+                    trackingType: clientData ? 'comprehensive' : 'server_only'
+                }
+            });
+            
+        } catch (error) {
+            ControllerHelper.handleError('trackComprehensiveUsage', error as Error, req, res, startTime);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to track comprehensive usage',
+                    message: (error as Error).message || 'Internal server error'
                 });
             }
         }
@@ -1362,6 +1484,458 @@ export class UsageController {
     private static recordDbFailure(): void {
         this.dbFailureCount++;
         this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Get performance metrics with comprehensive tracking data
+     */
+    static async getPerformanceMetrics(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        try {
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getPerformanceMetrics', req);
+
+            const { performanceMonitoringService } = await import('../services/performance-monitoring.service');
+            
+            // Get current and historical performance metrics filtered by user
+            const currentMetrics = await performanceMonitoringService.getCurrentMetrics(userId);
+            
+            const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(Date.now() - 24 * 60 * 60 * 1000); // Last 24 hours
+            const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
+            const interval = req.query.interval as 'minute' | 'hour' | 'day' || 'hour';
+            
+            const historicalMetrics = await performanceMonitoringService.getHistoricalMetrics(startDate, endDate, interval, userId);
+            
+            // Get recent alerts (system-wide, but we could filter by user in the future)
+            const recentAlerts = await performanceMonitoringService.getRecentAlerts(10);
+
+            ControllerHelper.logRequestSuccess('getPerformanceMetrics', req, startTime, {
+                userId,
+                currentMetricsAvailable: !!currentMetrics,
+                historicalDataPoints: historicalMetrics.length,
+                recentAlertsCount: recentAlerts.length
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    current: currentMetrics,
+                    historical: historicalMetrics,
+                    alerts: recentAlerts
+                },
+                metadata: {
+                    userId,
+                    timeRange: {
+                        start: startDate.toISOString(),
+                        end: endDate.toISOString(),
+                        interval
+                    },
+                    generatedAt: new Date().toISOString()
+                }
+            });
+            
+        } catch (error) {
+            ControllerHelper.handleError('getPerformanceMetrics', error as Error, req, res, startTime);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to get performance metrics',
+                    message: (error as Error).message || 'Internal server error'
+                });
+            }
+        }
+    }
+
+    /**
+     * Get optimization opportunities across usage data
+     */
+    static async getOptimizationOpportunities(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        try {
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getOptimizationOpportunities', req);
+
+            const { Usage } = await import('../models/Usage');
+            
+            const limit = parseInt(req.query.limit as string) || 50;
+            const startDate = req.query.startDate ? new Date(req.query.startDate as string) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // Last 7 days
+            const endDate = req.query.endDate ? new Date(req.query.endDate as string) : new Date();
+
+            // Query usage data with optimization opportunities
+            const usageWithOpportunities = await Usage.find({
+                userId,
+                createdAt: { $gte: startDate, $lte: endDate },
+                'optimizationOpportunities.costOptimization.potentialSavings': { $gt: 0 }
+            })
+            .sort({ 'optimizationOpportunities.costOptimization.potentialSavings': -1 })
+            .limit(limit)
+            .lean();
+
+            // Calculate aggregated optimization statistics
+            const totalPotentialSavings = usageWithOpportunities.reduce((sum, usage) => 
+                sum + (usage.optimizationOpportunities?.costOptimization?.potentialSavings || 0), 0
+            );
+
+            const opportunityTypes = usageWithOpportunities.reduce((counts, usage) => {
+                const reasonCode = usage.optimizationOpportunities?.costOptimization?.reasonCode;
+                if (reasonCode) {
+                    counts[reasonCode] = (counts[reasonCode] || 0) + 1;
+                }
+                return counts;
+            }, {} as Record<string, number>);
+
+            const performanceIssues = usageWithOpportunities.filter(usage => 
+                usage.optimizationOpportunities?.performanceOptimization?.currentPerformanceScore && 
+                usage.optimizationOpportunities.performanceOptimization.currentPerformanceScore < 60
+            );
+
+            ControllerHelper.logRequestSuccess('getOptimizationOpportunities', req, startTime, {
+                opportunitiesFound: usageWithOpportunities.length,
+                totalPotentialSavings,
+                performanceIssuesCount: performanceIssues.length
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    opportunities: usageWithOpportunities,
+                    summary: {
+                        totalOpportunities: usageWithOpportunities.length,
+                        totalPotentialSavings,
+                        avgSavingsPerOpportunity: usageWithOpportunities.length > 0 ? 
+                            totalPotentialSavings / usageWithOpportunities.length : 0,
+                        opportunityTypes,
+                        performanceIssuesCount: performanceIssues.length
+                    }
+                },
+                metadata: {
+                    timeRange: {
+                        start: startDate.toISOString(),
+                        end: endDate.toISOString()
+                    },
+                    limit,
+                    generatedAt: new Date().toISOString()
+                }
+            });
+            
+        } catch (error) {
+            ControllerHelper.handleError('getOptimizationOpportunities', error as Error, req, res, startTime);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to get optimization opportunities',
+                    message: (error as Error).message || 'Internal server error'
+                });
+            }
+        }
+    }
+
+    /**
+     * Get detailed network information for a specific usage record
+     */
+    static async getNetworkDetails(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        try {
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+
+            const userId = req.userId!;
+            const { usageId } = req.params;
+            
+            ControllerHelper.logRequestStart('getNetworkDetails', req);
+
+            const { Usage } = await import('../models/Usage');
+            
+            const usage = await Usage.findOne({ _id: usageId, userId }).lean();
+            
+            if (!usage) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Usage record not found'
+                });
+                return;
+            }
+
+            // Extract detailed network information
+            const networkDetails = {
+                requestTracking: usage.requestTracking,
+                telemetry: {
+                    traceId: usage.traceId,
+                    traceName: usage.traceName,
+                    traceStep: usage.traceStep,
+                    traceSequence: usage.traceSequence
+                },
+                performance: {
+                    responseTime: usage.responseTime,
+                    networkMetrics: usage.requestTracking?.performance
+                },
+                geography: usage.requestTracking?.clientInfo?.geoLocation,
+                clientInfo: usage.requestTracking?.clientInfo
+            };
+
+            ControllerHelper.logRequestSuccess('getNetworkDetails', req, startTime, {
+                usageId,
+                hasRequestTracking: !!usage.requestTracking,
+                hasPerformanceData: !!usage.requestTracking?.performance
+            });
+
+            res.json({
+                success: true,
+                data: networkDetails,
+                metadata: {
+                    usageId,
+                    generatedAt: new Date().toISOString()
+                }
+            });
+            
+        } catch (error) {
+            ControllerHelper.handleError('getNetworkDetails', error as Error, req, res, startTime);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to get network details',
+                    message: (error as Error).message || 'Internal server error'
+                });
+            }
+        }
+    }
+
+    /**
+     * Get optimization suggestions for a specific usage record
+     */
+    static async getOptimizationSuggestions(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        try {
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+
+            const userId = req.userId!;
+            const { usageId } = req.params;
+            
+            ControllerHelper.logRequestStart('getOptimizationSuggestions', req);
+
+            const { Usage } = await import('../models/Usage');
+            
+            const usage = await Usage.findOne({ _id: usageId, userId }).lean();
+            
+            if (!usage) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Usage record not found'
+                });
+                return;
+            }
+
+            // Extract optimization data and generate additional suggestions
+            const suggestions = {
+                existing: usage.optimizationOpportunities,
+                generated: await this.generateAdditionalSuggestions(usage),
+                context: {
+                    model: usage.model,
+                    service: usage.service,
+                    cost: usage.cost,
+                    tokens: usage.totalTokens,
+                    responseTime: usage.responseTime
+                }
+            };
+
+            ControllerHelper.logRequestSuccess('getOptimizationSuggestions', req, startTime, {
+                usageId,
+                hasExistingOpportunities: !!usage.optimizationOpportunities,
+                generatedSuggestionCount: suggestions.generated.length
+            });
+
+            res.json({
+                success: true,
+                data: suggestions,
+                metadata: {
+                    usageId,
+                    generatedAt: new Date().toISOString()
+                }
+            });
+            
+        } catch (error) {
+            ControllerHelper.handleError('getOptimizationSuggestions', error as Error, req, res, startTime);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to get optimization suggestions',
+                    message: (error as Error).message || 'Internal server error'
+                });
+            }
+        }
+    }
+
+    /**
+     * Generate additional optimization suggestions based on usage context
+     */
+    private static async generateAdditionalSuggestions(usage: any): Promise<any[]> {
+        const suggestions = [];
+
+        // Cost optimization suggestions
+        if (usage.cost > 0.01) {
+            suggestions.push({
+                type: 'cost',
+                priority: 'medium',
+                title: 'Consider Model Alternatives',
+                description: `Current model ${usage.model} may be over-specified for this use case`,
+                potentialSavings: usage.cost * 0.25,
+                implementation: 'immediate'
+            });
+        }
+
+        // Performance optimization suggestions
+        if (usage.responseTime > 5000) {
+            suggestions.push({
+                type: 'performance',
+                priority: 'high',
+                title: 'Optimize Request Performance',
+                description: 'Response time is above optimal threshold',
+                estimatedImprovement: '40-60% faster responses',
+                implementation: 'short_term'
+            });
+        }
+
+        // Token usage optimization
+        if (usage.promptTokens > 2000) {
+            suggestions.push({
+                type: 'efficiency',
+                priority: 'medium',
+                title: 'Prompt Optimization',
+                description: 'Large prompts detected - consider using prompt compression',
+                potentialSavings: usage.cost * 0.15,
+                implementation: 'immediate'
+            });
+        }
+
+        return suggestions;
+    }
+
+    /**
+     * Analyze optimization opportunities for user
+     */
+    static async analyzeOptimization(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        try {
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+
+            const userId = req.userId!;
+            const { projectId, startDate, endDate } = req.body;
+            
+            ControllerHelper.logRequestStart('analyzeOptimization', req);
+
+            const { costOptimizationEngine } = await import('../services/cost-optimization-engine.service');
+            
+            // Parse timeframe if provided
+            let timeframe: { startDate: Date; endDate: Date } | undefined;
+            if (startDate && endDate) {
+                timeframe = {
+                    startDate: new Date(startDate),
+                    endDate: new Date(endDate)
+                };
+            }
+            
+            const report = await costOptimizationEngine.analyzeAndOptimize(userId, projectId, timeframe);
+            
+            ControllerHelper.logRequestSuccess('analyzeOptimization', req, startTime, {
+                userId,
+                projectId,
+                suggestionsCount: report.suggestions.length,
+                potentialSavings: report.summary.totalPotentialSavings
+            });
+
+            res.json({
+                success: true,
+                data: report,
+                metadata: {
+                    userId,
+                    projectId,
+                    generatedAt: new Date().toISOString()
+                }
+            });
+            
+        } catch (error) {
+            ControllerHelper.handleError('analyzeOptimization', error as Error, req, res, startTime);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to analyze optimization opportunities',
+                    message: (error as Error).message || 'Internal server error'
+                });
+            }
+        }
+    }
+
+    /**
+     * Get cached optimization report for user
+     */
+    static async getOptimizationReport(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        
+        try {
+            if (!ControllerHelper.requireAuth(req, res)) {
+                return;
+            }
+
+            const userId = req.userId!;
+            const { projectId } = req.query;
+            
+            ControllerHelper.logRequestStart('getOptimizationReport', req);
+
+            const { costOptimizationEngine } = await import('../services/cost-optimization-engine.service');
+            
+            // For now, always generate a fresh report
+            // In the future, we might cache reports and serve them here
+            const report = await costOptimizationEngine.analyzeAndOptimize(
+                userId, 
+                projectId as string | undefined
+            );
+            
+            ControllerHelper.logRequestSuccess('getOptimizationReport', req, startTime, {
+                userId,
+                projectId,
+                suggestionsCount: report.suggestions.length,
+                potentialSavings: report.summary.totalPotentialSavings
+            });
+
+            res.json({
+                success: true,
+                data: report,
+                metadata: {
+                    userId,
+                    projectId,
+                    generatedAt: new Date().toISOString(),
+                    cacheStatus: 'fresh' // Would be 'cached' if served from cache
+                }
+            });
+            
+        } catch (error) {
+            ControllerHelper.handleError('getOptimizationReport', error as Error, req, res, startTime);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to get optimization report',
+                    message: (error as Error).message || 'Internal server error'
+                });
+            }
+        }
     }
 
     /**
