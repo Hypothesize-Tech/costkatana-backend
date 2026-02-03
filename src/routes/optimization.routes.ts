@@ -46,6 +46,9 @@ router.get('/history/:promptHash', asyncHandler(OptimizationController.getOptimi
 // Analyze optimization opportunities
 router.get('/opportunities', asyncHandler(OptimizationController.analyzeOpportunities));
 
+// Get optimization network details (lazy load; must be before /:id)
+router.get('/:id/network-details', asyncHandler(OptimizationController.getOptimizationNetworkDetails));
+
 // Get single optimization
 router.get('/:id', asyncHandler(OptimizationController.getOptimization));
 

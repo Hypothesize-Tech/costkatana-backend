@@ -151,6 +151,16 @@ app.use(trackUserSessionActivity);
 // Trace interceptor middleware
 app.use(traceInterceptor);
 
+// Comprehensive tracking middleware - capture complete request/response data
+import { comprehensiveTrackingMiddleware, extractComprehensiveTrackingData } from './middleware/comprehensive-tracking.middleware';
+app.use(comprehensiveTrackingMiddleware({
+    enableBodyCapture: true,
+    maxBodySize: 50 * 1024 * 1024, // 50MB
+    sanitizeData: true,
+    skipHealthChecks: true
+}));
+app.use(extractComprehensiveTrackingData());
+
 // Sentry context middleware - capture user and request context
 app.use(sentryContextMiddleware);
 
@@ -815,6 +825,15 @@ export const startServer = async () => {
                 databaseStatus: process.env.MONGODB_URI ? 'Connected' : 'Not configured'
             });
 
+            // Start scheduler service for automated tasks
+            try {
+                const { schedulerService } = require('./services/scheduler.service');
+                schedulerService.start();
+                loggingService.info('Scheduler service started successfully');
+            } catch (error) {
+                loggingService.error('Failed to start scheduler service', error as Error);
+            }
+
             loggingService.info('=== SERVER STARTUP COMPLETED ===', {
                 component: 'Server',
                 operation: 'startServer',
@@ -904,6 +923,15 @@ process.on('SIGTERM', async () => {
         healthService.shutdown();
         await faissVectorService.shutdown();
 
+        // Shutdown scheduler service
+        try {
+            const { schedulerService } = await import('./services/scheduler.service');
+            schedulerService.stop();
+            loggingService.info('Scheduler service stopped successfully');
+        } catch (error) {
+            loggingService.error('Error stopping scheduler service', error as Error);
+        }
+
         // Cleanup services
         await multiAgentFlowService.cleanup();
         await webhookDeliveryService.shutdown();
@@ -943,6 +971,15 @@ process.on('SIGINT', async () => {
         // Shutdown FAISS services
         healthService.shutdown();
         await faissVectorService.shutdown();
+
+        // Shutdown scheduler service
+        try {
+            const { schedulerService } = await import('./services/scheduler.service');
+            schedulerService.stop();
+            loggingService.info('Scheduler service stopped successfully');
+        } catch (error) {
+            loggingService.error('Error stopping scheduler service', error as Error);
+        }
 
         // Cleanup services
         await multiAgentFlowService.cleanup();

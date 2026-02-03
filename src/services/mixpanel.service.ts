@@ -48,6 +48,23 @@ interface PageViewData {
     sessionId?: string;
 }
 
+interface ComprehensiveUsageData {
+    service: string;
+    model: string;
+    cost: number;
+    tokens: number;
+    responseTime: number;
+    networkTime: number;
+    serverProcessingTime: number;
+    dataTransferEfficiency: number;
+    potentialSavings: number;
+    performanceScore: number;
+    clientPlatform: string;
+    sdkVersion: string;
+    country?: string;
+    region?: string;
+}
+
 interface FeatureUsageData {
     userId: string;
     feature: string;
@@ -230,6 +247,35 @@ export class MixpanelService {
             page_category: this.getPageCategory(data.page),
             referrer_category: this.getReferrerCategory(data.referrer)
         }, data.userId);
+    }
+
+    /**
+     * Track comprehensive usage with enhanced analytics
+     */
+    public trackComprehensiveUsage(userId: string, data: ComprehensiveUsageData): void {
+        this.track('Comprehensive API Usage', {
+            ...data,
+            event_type: 'comprehensive_usage',
+            
+            // Performance categorization
+            performance_category: this.categorizePerformance(data.performanceScore),
+            network_efficiency_category: this.categorizeNetworkEfficiency(data.dataTransferEfficiency),
+            cost_category: this.categorizeCost(data.cost),
+            
+            // Optimization potential
+            has_optimization_opportunity: data.potentialSavings > 0,
+            optimization_category: this.categorizeOptimizationPotential(data.potentialSavings, data.cost),
+            
+            // Technology stack
+            client_type: this.categorizeClientPlatform(data.clientPlatform),
+            geographic_region: data.region,
+            
+            // Performance metrics rounded for better grouping
+            response_time_bucket: this.categorizeResponseTime(data.responseTime),
+            network_time_bucket: this.categorizeResponseTime(data.networkTime),
+            
+            timestamp: new Date().toISOString()
+        }, userId);
     }
 
     /**
@@ -592,6 +638,83 @@ export class MixpanelService {
         if (page.includes('/profile')) return 'profile';
         if (page.includes('/api-keys')) return 'api_keys';
         if (page.includes('/usage')) return 'usage';
+        return 'other';
+    }
+    
+    /**
+     * Helper methods for comprehensive usage tracking
+     */
+    private categorizePerformance(score: number): string {
+        if (score >= 90) return 'excellent';
+        if (score >= 70) return 'good';
+        if (score >= 50) return 'fair';
+        if (score >= 30) return 'poor';
+        return 'very_poor';
+    }
+    
+    private categorizeNetworkEfficiency(efficiency: number): string {
+        if (efficiency >= 1000000) return 'high'; // > 1MB/s
+        if (efficiency >= 100000) return 'medium'; // > 100KB/s
+        if (efficiency >= 10000) return 'low'; // > 10KB/s
+        return 'very_low';
+    }
+    
+    private categorizeCost(cost: number): string {
+        if (cost >= 1.0) return 'high';
+        if (cost >= 0.1) return 'medium';
+        if (cost >= 0.01) return 'low';
+        return 'minimal';
+    }
+    
+    private categorizeOptimizationPotential(savings: number, totalCost: number): string {
+        const savingsRatio = totalCost > 0 ? savings / totalCost : 0;
+        if (savingsRatio >= 0.5) return 'high_potential';
+        if (savingsRatio >= 0.2) return 'medium_potential';
+        if (savingsRatio >= 0.05) return 'low_potential';
+        return 'minimal_potential';
+    }
+    
+    private categorizeClientPlatform(platform: string): string {
+        if (platform.includes('Node.js')) return 'server';
+        if (platform.includes('Browser')) return 'browser';
+        if (platform.includes('React Native')) return 'mobile';
+        return 'other';
+    }
+    
+    /**
+     * Track alerts
+     */
+    public trackAlert(data: {
+        alertType: string;
+        severity: string;
+        threshold: number;
+        currentValue: number;
+        userId?: string;
+        projectId?: string;
+    }): void {
+        this.track('Performance Alert', {
+            ...data,
+            event_type: 'performance_alert',
+            alert_category: this.categorizeAlertType(data.alertType),
+            severity_level: data.severity,
+            threshold_exceeded_ratio: data.currentValue / data.threshold,
+            timestamp: new Date().toISOString()
+        }, data.userId || 'system');
+    }
+
+    private categorizeResponseTime(timeMs: number): string {
+        if (timeMs < 500) return 'fast';
+        if (timeMs < 1000) return 'medium';
+        if (timeMs < 3000) return 'slow';
+        if (timeMs < 10000) return 'very_slow';
+        return 'extremely_slow';
+    }
+    
+    private categorizeAlertType(alertType: string): string {
+        if (alertType.includes('performance')) return 'performance';
+        if (alertType.includes('cost')) return 'cost';
+        if (alertType.includes('error')) return 'error';
+        if (alertType.includes('optimization')) return 'optimization';
         return 'other';
     }
 

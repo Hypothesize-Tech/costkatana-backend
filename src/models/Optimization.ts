@@ -84,6 +84,48 @@ export interface IOptimization {
     tags: string[];
     createdAt: Date;
     updatedAt: Date;
+    /** Request/network details for the optimization API call (same shape as Usage.requestTracking). */
+    requestTracking?: {
+        clientInfo: {
+            ip: string;
+            port?: number;
+            forwardedIPs: string[];
+            userAgent: string;
+            geoLocation?: { country: string; region: string; city: string };
+            sdkVersion?: string;
+            environment?: string;
+        };
+        headers: { request: Record<string, string>; response: Record<string, string> };
+        networking: {
+            serverEndpoint: string;
+            serverFullUrl?: string;
+            clientOrigin?: string;
+            serverIP: string;
+            serverPort: number;
+            routePattern: string;
+            protocol: string;
+            secure: boolean;
+            dnsLookupTime?: number;
+            tcpConnectTime?: number;
+            tlsHandshakeTime?: number;
+        };
+        payload: {
+            requestBody?: any;
+            responseBody?: any;
+            requestSize: number;
+            responseSize: number;
+            contentType: string;
+            encoding?: string;
+            compressionRatio?: number;
+        };
+        performance: {
+            clientSideTime?: number;
+            networkTime: number;
+            serverProcessingTime: number;
+            totalRoundTripTime: number;
+            dataTransferEfficiency: number;
+        };
+    };
 }
 
 const optimizationSchema = new Schema<IOptimization>({
@@ -238,6 +280,10 @@ const optimizationSchema = new Schema<IOptimization>({
         type: String,
         trim: true,
     }],
+    requestTracking: {
+        type: Schema.Types.Mixed,
+        default: undefined,
+    },
 }, {
     timestamps: true,
 });

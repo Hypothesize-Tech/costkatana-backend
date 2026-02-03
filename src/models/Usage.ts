@@ -85,6 +85,84 @@ export interface IUsage {
     // Email fields for user and customer identification
     userEmail?: string;
     customerEmail?: string;
+    
+    // NEW: Comprehensive Request/Response Tracking (extends existing fields)
+    requestTracking?: {
+        clientInfo: {
+            ip: string;
+            port?: number;
+            forwardedIPs: string[];
+            userAgent: string;
+            geoLocation?: {
+                country: string;
+                region: string;
+                city: string;
+            };
+            sdkVersion?: string;
+            environment?: string;
+        };
+        
+        headers: {
+            request: Record<string, string>;
+            response: Record<string, string>;
+        };
+        
+        networking: {
+            serverEndpoint: string;
+            serverFullUrl?: string;
+            clientOrigin?: string;
+            serverIP: string;
+            serverPort: number;
+            routePattern: string;
+            protocol: string;
+            secure: boolean;
+            dnsLookupTime?: number;
+            tcpConnectTime?: number;
+            tlsHandshakeTime?: number;
+        };
+        
+        payload: {
+            requestBody?: any; // Sanitized/truncated as needed
+            responseBody?: any; // Sanitized/truncated as needed
+            requestSize: number;
+            responseSize: number;
+            contentType: string;
+            encoding?: string;
+            compressionRatio?: number;
+        };
+        
+        performance: {
+            clientSideTime?: number; // Time on client before sending
+            networkTime: number; // Time spent in network transit
+            serverProcessingTime: number; // Time spent processing on server
+            totalRoundTripTime: number;
+            dataTransferEfficiency: number; // Bytes per second
+        };
+    };
+    
+    // NEW: Optimization Opportunities (linked to existing cost field)
+    optimizationOpportunities?: {
+        costOptimization: {
+            potentialSavings: number;
+            recommendedModel?: string;
+            reasonCode: 'model_downgrade' | 'prompt_optimization' | 'caching' | 'batch_processing';
+            confidence: number;
+            estimatedImpact: string;
+        };
+        
+        performanceOptimization: {
+            currentPerformanceScore: number; // 0-100
+            bottleneckIdentified: 'network' | 'processing' | 'payload_size' | 'model_complexity';
+            recommendation: string;
+            estimatedImprovement: string;
+        };
+        
+        dataEfficiency: {
+            compressionRecommendation?: boolean;
+            payloadOptimization?: string;
+            headerOptimization?: string;
+        };
+    };
 }
 
 const usageSchema = new Schema<IUsage>({
@@ -258,9 +336,136 @@ const usageSchema = new Schema<IUsage>({
         context: {
             type: String,
             enum: ['chat', 'optimization', 'visual-compliance', 'agent_trace', 'api']
+    },
+    templateVersion: Number
+},
+// NEW: Comprehensive Request/Response Tracking Schema
+requestTracking: {
+    clientInfo: {
+        ip: String,
+        port: Number,
+        forwardedIPs: [String],
+        userAgent: String,
+        geoLocation: {
+            country: String,
+            region: String,
+            city: String
         },
-        templateVersion: Number
+        sdkVersion: String,
+        environment: String
+    },
+    
+    headers: {
+        request: {
+            type: Schema.Types.Mixed,
+            default: {}
+        },
+        response: {
+            type: Schema.Types.Mixed,
+            default: {}
+        }
+    },
+    
+    networking: {
+        serverEndpoint: String,
+        serverFullUrl: String,
+        clientOrigin: String,
+        serverIP: String,
+        serverPort: Number,
+        routePattern: String,
+        protocol: String,
+        secure: Boolean,
+        dnsLookupTime: Number,
+        tcpConnectTime: Number,
+        tlsHandshakeTime: Number
+    },
+    
+    payload: {
+        requestBody: Schema.Types.Mixed,
+        responseBody: Schema.Types.Mixed,
+        requestSize: {
+            type: Number,
+            min: 0,
+            default: 0
+        },
+        responseSize: {
+            type: Number,
+            min: 0,
+            default: 0
+        },
+        contentType: String,
+        encoding: String,
+        compressionRatio: Number
+    },
+    
+    performance: {
+        clientSideTime: Number,
+        networkTime: {
+            type: Number,
+            min: 0,
+            default: 0
+        },
+        serverProcessingTime: {
+            type: Number,
+            min: 0,
+            default: 0
+        },
+        totalRoundTripTime: {
+            type: Number,
+            min: 0,
+            default: 0
+        },
+        dataTransferEfficiency: {
+            type: Number,
+            min: 0,
+            default: 0
+        }
     }
+},
+
+// NEW: Optimization Opportunities Schema
+optimizationOpportunities: {
+    costOptimization: {
+        potentialSavings: {
+            type: Number,
+            min: 0,
+            default: 0
+        },
+        recommendedModel: String,
+        reasonCode: {
+            type: String,
+            enum: ['model_downgrade', 'prompt_optimization', 'caching', 'batch_processing']
+        },
+        confidence: {
+            type: Number,
+            min: 0,
+            max: 1,
+            default: 0
+        },
+        estimatedImpact: String
+    },
+    
+    performanceOptimization: {
+        currentPerformanceScore: {
+            type: Number,
+            min: 0,
+            max: 100,
+            default: 0
+        },
+        bottleneckIdentified: {
+            type: String,
+            enum: ['network', 'processing', 'payload_size', 'model_complexity']
+        },
+        recommendation: String,
+        estimatedImprovement: String
+    },
+    
+    dataEfficiency: {
+        compressionRecommendation: Boolean,
+        payloadOptimization: String,
+        headerOptimization: String
+    }
+}
 }, {
     timestamps: true,
 });
@@ -294,6 +499,14 @@ usageSchema.index({ automationConnectionId: 1, createdAt: -1 });
 usageSchema.index({ userId: 1, automationPlatform: 1, createdAt: -1 });
 usageSchema.index({ traceId: 1, automationPlatform: 1, createdAt: -1 });
 
+// 9. Comprehensive tracking indexes
+usageSchema.index({ 'requestTracking.clientInfo.ip': 1, createdAt: -1 });
+usageSchema.index({ 'requestTracking.networking.serverEndpoint': 1, createdAt: -1 });
+usageSchema.index({ 'requestTracking.performance.serverProcessingTime': -1 });
+usageSchema.index({ 'requestTracking.performance.totalRoundTripTime': -1 });
+usageSchema.index({ 'optimizationOpportunities.costOptimization.potentialSavings': -1 });
+usageSchema.index({ 'optimizationOpportunities.performanceOptimization.currentPerformanceScore': 1 });
+
 // Virtual for cost per token
 usageSchema.virtual('costPerToken').get(function () {
     return this.totalTokens > 0 ? this.cost / this.totalTokens : 0;
@@ -320,6 +533,51 @@ usageSchema.statics.getUserSummary = async function (userId: string, startDate?:
                 avgCost: { $avg: '$cost' },
                 avgTokens: { $avg: '$totalTokens' },
                 avgResponseTime: { $avg: '$responseTime' },
+            }
+        }
+    ]);
+};
+
+// Static method to get enhanced usage summary with comprehensive tracking
+usageSchema.statics.getEnhancedUserSummary = async function (userId: string, startDate?: Date, endDate?: Date) {
+    const match: any = { userId: new mongoose.Types.ObjectId(userId) };
+
+    if (startDate || endDate) {
+        match.createdAt = {};
+        if (startDate) match.createdAt.$gte = startDate;
+        if (endDate) match.createdAt.$lte = endDate;
+    }
+
+    return this.aggregate([
+        { $match: match },
+        {
+            $group: {
+                _id: null,
+                totalCost: { $sum: '$cost' },
+                totalTokens: { $sum: '$totalTokens' },
+                totalCalls: { $sum: 1 },
+                avgCost: { $avg: '$cost' },
+                avgTokens: { $avg: '$totalTokens' },
+                avgResponseTime: { $avg: '$responseTime' },
+                
+                // NEW: Network performance metrics
+                avgNetworkTime: { $avg: '$requestTracking.performance.networkTime' },
+                avgServerProcessingTime: { $avg: '$requestTracking.performance.serverProcessingTime' },
+                avgTotalRoundTripTime: { $avg: '$requestTracking.performance.totalRoundTripTime' },
+                
+                // NEW: Data transfer metrics
+                totalRequestSize: { $sum: '$requestTracking.payload.requestSize' },
+                totalResponseSize: { $sum: '$requestTracking.payload.responseSize' },
+                avgDataTransferEfficiency: { $avg: '$requestTracking.performance.dataTransferEfficiency' },
+                
+                // NEW: Optimization metrics
+                totalPotentialSavings: { $sum: '$optimizationOpportunities.costOptimization.potentialSavings' },
+                avgPerformanceScore: { $avg: '$optimizationOpportunities.performanceOptimization.currentPerformanceScore' },
+                optimizationOpportunityCount: {
+                    $sum: {
+                        $cond: [{ $gt: ['$optimizationOpportunities.costOptimization.potentialSavings', 0] }, 1, 0]
+                    }
+                }
             }
         }
     ]);

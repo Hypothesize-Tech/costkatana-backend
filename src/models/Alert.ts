@@ -3,7 +3,7 @@ import mongoose, { Schema } from 'mongoose';
 export interface IAlert {
     _id?: any;
     userId: mongoose.Types.ObjectId;
-    type: 'cost_threshold' | 'usage_spike' | 'optimization_available' | 'weekly_summary' | 'monthly_summary' | 'error_rate' | 'cost' | 'optimization' | 'anomaly' | 'system' | 'agent_trace_budget' | 'agent_trace_spike' | 'agent_trace_inefficiency' | 'agent_trace_failure';
+    type: 'cost_threshold' | 'usage_spike' | 'optimization_available' | 'weekly_summary' | 'monthly_summary' | 'error_rate' | 'cost' | 'optimization' | 'anomaly' | 'system' | 'performance' | 'agent_trace_budget' | 'agent_trace_spike' | 'agent_trace_inefficiency' | 'agent_trace_failure';
     title: string;
     message: string;
     severity: 'low' | 'medium' | 'high' | 'critical';

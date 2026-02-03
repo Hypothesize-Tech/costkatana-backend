@@ -17,7 +17,8 @@
     "otel:restart": "bash scripts/otel-restart.sh",
     "telemetry:verify": "node scripts/verify-telemetry.js",
     "telemetry:validate": "ts-node -e \"import('./src/observability/telemetryValidator').then(m => m.validateTelemetryConfig())\"",
-    "telemetry:test": "ts-node -e \"import('./src/observability/telemetryValidator').then(m => m.generateTestTelemetry())\""
+    "telemetry:test": "ts-node -e \"import('./src/observability/telemetryValidator').then(m => m.generateTestTelemetry())\"",
+    "track-and-optimize": "ts-node -r tsconfig-paths/register scripts/track-usage-and-optimization.ts"
   },
   "keywords": [
     "ai-cost-optimization",
