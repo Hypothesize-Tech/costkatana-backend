@@ -119,6 +119,45 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         isLatest: true,
         notes: 'Claude Opus 4.5 via AWS Bedrock - premium model combining maximum intelligence with practical performance. Reliable knowledge cutoff: May 2025. Training data cutoff: Aug 2025. Max output: 64K tokens'
     },
+    {
+        modelId: 'claude-opus-4-6-v1',
+        modelName: 'Claude Opus 4.6',
+        provider: 'Anthropic',
+        inputPrice: 5.00,
+        outputPrice: 25.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 1_000_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'agents', 'coding', 'computer-use', 'tool-use', 'extended-thinking', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Next-gen flagship for agents, coding, enterprise. Max 1M context (beta). Verify pricing on Bedrock.'
+    },
+    {
+        modelId: 'claude-opus-4-6',
+        modelName: 'Claude Opus 4.6 (Alias)',
+        provider: 'Anthropic',
+        inputPrice: 5.00,
+        outputPrice: 25.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 1_000_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'agents', 'coding', 'computer-use', 'tool-use', 'extended-thinking', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Alias for claude-opus-4-6-v1'
+    },
+    {
+        modelId: 'anthropic.claude-opus-4-6-v1',
+        modelName: 'Claude Opus 4.6 (Bedrock)',
+        provider: 'AWS Bedrock',
+        inputPrice: 5.00,
+        outputPrice: 25.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 1_000_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'agents', 'coding', 'computer-use', 'tool-use', 'extended-thinking', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Claude Opus 4.6 on AWS Bedrock - next-gen flagship. Max 1M context (beta). Verify pricing on Bedrock.'
+    },
 
     // === Claude 4 Series (Legacy) ===
     {
