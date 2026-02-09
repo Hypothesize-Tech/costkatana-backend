@@ -340,6 +340,30 @@ export class ResponseHandlingService {
                 res.setHeader('CostKatana-Moderation-Categories', moderationResult.violationCategories.join(','));
             }
         }
+
+        // 🚀 Add prompt caching headers if caching was applied
+        if (context.promptCaching?.enabled) {
+            const cacheData = context.promptCaching;
+
+            // Core prompt caching headers
+            res.setHeader('CostKatana-Prompt-Caching-Enabled', 'true');
+            res.setHeader('CostKatana-Prompt-Caching-Type', cacheData.type || 'automatic');
+            res.setHeader('CostKatana-Prompt-Caching-Estimated-Savings', cacheData.estimatedSavings?.toFixed(6) || '0.000000');
+
+            // Add provider-specific cache headers
+            if (cacheData.cacheHeaders) {
+                Object.entries(cacheData.cacheHeaders as Record<string, string>).forEach(([key, value]) => {
+                    res.setHeader(key, value);
+                });
+            }
+
+            loggingService.debug('Prompt caching headers added to response', {
+                requestId: context.requestId,
+                cacheType: cacheData.type,
+                estimatedSavings: cacheData.estimatedSavings,
+                headerCount: cacheData.cacheHeaders ? Object.keys(cacheData.cacheHeaders).length : 0
+            });
+        }
     }
 
     /**

@@ -407,7 +407,8 @@ Respond in JSON format:
       'global.anthropic.claude-haiku-4-5-20251001-v1:0': { input: 0.00025, output: 0.00125 },
       'anthropic.claude-3-5-sonnet-20240620-v1:0': { input: 0.003, output: 0.015 },
       
-      // Claude 4 models
+      // Claude 4.6 and Claude 4 models
+      'anthropic.claude-opus-4-6-v1': { input: 0.005, output: 0.025 }, // Opus 4.6 - verify on Bedrock
       'anthropic.claude-opus-4-1-20250805-v1:0': { input: 0.015, output: 0.075 }, // Premium pricing
       
       // AWS Native models

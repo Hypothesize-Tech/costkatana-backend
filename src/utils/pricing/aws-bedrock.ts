@@ -370,6 +370,19 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         notes: 'Claude Opus 4.5 on AWS Bedrock Global Inference Profile - Input: $5/1M, Output: $25/1M. Batch: $2.5/$12.5 per 1M. Cache (5m write): $6.25/1M, Cache (1h write): $10/1M, Cache read: $0.5/1M. Routes to best available region'
     },
     {
+        modelId: 'anthropic.claude-opus-4-6-v1',
+        modelName: 'Claude Opus 4.6',
+        provider: 'AWS Bedrock',
+        inputPrice: 5.0,
+        outputPrice: 25.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 1_000_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'agents', 'coding', 'computer-use', 'tool-use', 'extended-thinking', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Claude Opus 4.6 on AWS Bedrock - next-gen flagship. Max 1M context (beta). Verify pricing on Bedrock.'
+    },
+    {
         modelId: 'anthropic.claude-opus-4-1-20250805-v1:0',
         modelName: 'Claude Opus 4.1',
         provider: 'AWS Bedrock',
@@ -379,7 +392,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
-        isLatest: true,
+        isLatest: false,
         notes: 'Claude Opus 4.1 on AWS Bedrock (Geo/In-region) - Input: $15/1M, Output: $75/1M. Cache (5m write): $18.75/1M, Cache read: $1.5/1M. Batch not available'
     },
     {

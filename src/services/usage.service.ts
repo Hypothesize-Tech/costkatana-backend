@@ -25,6 +25,34 @@ interface TrackUsageData {
     workflowName?: string;
     workflowStep?: string;
     workflowSequence?: number;
+    promptCaching?: {
+        enabled: boolean;
+        type: 'automatic' | 'explicit' | 'none';
+        provider: 'anthropic' | 'openai' | 'google' | 'auto';
+        model: string;
+        cacheCreationTokens: number;
+        cacheReadTokens: number;
+        regularTokens: number;
+        totalTokens: number;
+        cacheHits: number;
+        cacheMisses: number;
+        hitRate: number;
+        savingsFromCaching: number;
+        estimatedSavings: number;
+        cacheKey?: string;
+        cacheTTL: number;
+        breakpointsUsed: number;
+        prefixRatio: number;
+        cacheLookupTime: number;
+        cacheProcessingTime: number;
+        anthropicBreakpoints?: Array<{
+            position: number;
+            tokenCount: number;
+            contentType: string;
+        }>;
+        openaiPrefixLength?: number;
+        geminiCacheName?: string;
+    };
 }
 
 interface UsageFilters {
@@ -116,6 +144,55 @@ export class UsageService {
                     context: data.templateUsage.context,
                     templateVersion: data.templateUsage.templateVersion
                 };
+            }
+
+            // 🚀 Add prompt caching tracking if promptCaching data is provided
+            if (data.promptCaching) {
+                usageData.promptCaching = {
+                    enabled: data.promptCaching.enabled || false,
+                    type: data.promptCaching.type || 'none',
+                    provider: data.promptCaching.provider,
+                    model: data.promptCaching.model || data.model,
+
+                    // Token usage breakdown
+                    cacheCreationTokens: data.promptCaching.cacheCreationTokens || 0,
+                    cacheReadTokens: data.promptCaching.cacheReadTokens || 0,
+                    regularTokens: data.promptCaching.regularTokens || 0,
+                    totalTokens: data.promptCaching.totalTokens || data.totalTokens,
+
+                    // Performance metrics
+                    cacheHits: data.promptCaching.cacheHits || 0,
+                    cacheMisses: data.promptCaching.cacheMisses || 0,
+                    hitRate: data.promptCaching.hitRate || 0,
+
+                    // Cost savings
+                    savingsFromCaching: data.promptCaching.savingsFromCaching || 0,
+                    estimatedSavings: data.promptCaching.estimatedSavings || 0,
+
+                    // Cache metadata
+                    cacheKey: data.promptCaching.cacheKey,
+                    cacheTTL: data.promptCaching.cacheTTL || 300,
+                    breakpointsUsed: data.promptCaching.breakpointsUsed || 0,
+                    prefixRatio: data.promptCaching.prefixRatio || 0,
+
+                    // Timing
+                    cacheLookupTime: data.promptCaching.cacheLookupTime || 0,
+                    cacheProcessingTime: data.promptCaching.cacheProcessingTime || 0,
+
+                    // Provider-specific metadata
+                    anthropicBreakpoints: data.promptCaching.anthropicBreakpoints,
+                    openaiPrefixLength: data.promptCaching.openaiPrefixLength,
+                    geminiCacheName: data.promptCaching.geminiCacheName
+                };
+
+                loggingService.debug('Prompt caching metrics added to usage tracking', {
+                    userId: data.userId,
+                    provider: data.promptCaching.provider,
+                    type: data.promptCaching.type,
+                    estimatedSavings: data.promptCaching.estimatedSavings,
+                    cacheCreationTokens: data.promptCaching.cacheCreationTokens,
+                    cacheReadTokens: data.promptCaching.cacheReadTokens
+                });
             }
 
             // Only add projectId if it exists and is not empty

@@ -9,6 +9,15 @@ export enum PricingUnit {
     PER_1K_CHARACTERS = 'PER_1K_CHARACTERS'
 }
 
+export interface CachePricing {
+    cacheReadPrice: number;     // Price per 1M cached tokens for reading
+    cacheWritePrice?: number;   // Price per 1M cached tokens for writing (if different)
+    storagePrice?: number;      // Price per 1M tokens per hour for storage (Gemini)
+    supportsCaching: boolean;
+    minTokens: number;          // Minimum tokens required for caching
+    cacheType: 'automatic' | 'explicit' | 'none';
+}
+
 export interface ModelPricing {
     modelId: string;
     modelName: string;
@@ -21,4 +30,5 @@ export interface ModelPricing {
     category?: string;
     isLatest?: boolean;
     notes?: string;
+    cachePricing?: CachePricing; // 🚀 NEW: Structured cache pricing
 }

@@ -51,6 +51,14 @@ Server starts at `http://localhost:8000` ✅
 
 ---
 
+## 📚 Documentation
+
+- **[Prompt Caching Guide](docs/PROMPT_CACHING.md)** - Complete guide to true KV-pair caching
+- **[API Documentation](API_DOCUMENTATION.md)** - Full API reference
+- **[Cost Performance Tradeoffs](docs/COST_PERFORMANCE_TRADEOFFS.md)** - Architecture decisions
+
+---
+
 ## 📖 What Makes This Special
 
 ### 🧠 AI Intelligence Engine
@@ -71,6 +79,15 @@ Server starts at `http://localhost:8000` ✅
 | **Multi-Provider Support** | OpenAI, Gemini, Claude, Bedrock |
 | **Smart Routing** | Auto-selects optimal provider |
 
+### ⚡ True Prompt Caching
+
+| Feature | Description |
+|---------|-------------|
+| **KV-Pair Caching** | Cache LLM internal computations, not just responses |
+| **30-70% Cost Savings** | Automatic optimization for repeated static content |
+| **Multi-Provider Support** | Anthropic, OpenAI, Google Gemini implementations |
+| **Smart Structure Optimization** | Automatically reorder prompts for maximum cache hits |
+
 ### 📊 Real-Time Analytics
 
 | Feature | Description |
@@ -78,6 +95,7 @@ Server starts at `http://localhost:8000` ✅
 | **Live Dashboards** | Usage monitoring with AI insights |
 | **Cost Reports** | AI-generated savings opportunities |
 | **Efficiency Scoring** | AI-calculated scores with improvements |
+| **Cache Performance** | Real-time prompt caching metrics and savings |
 
 ---
 
@@ -173,6 +191,23 @@ GET  /api/onboarding/verify/:token         # Verify & complete
 POST /api/usage/track                  # Track usage with AI analysis
 GET  /api/projects                     # Projects with AI insights
 GET  /api/analytics/intelligent        # AI-powered analytics
+```
+
+### Prompt Caching
+
+```http
+# Automatic prompt caching (enabled by default for supported providers)
+POST /v1/chat/completions               # Claude, GPT, Gemini with KV caching
+POST /v1/completions                   # OpenAI completions with caching
+
+# Headers for prompt caching control
+CostKatana-Prompt-Caching: true        # Enable prompt caching
+CostKatana-Prompt-Caching: false       # Disable prompt caching
+
+# Response headers with cache metrics
+CostKatana-Prompt-Caching-Enabled: true
+CostKatana-Prompt-Caching-Type: explicit
+CostKatana-Prompt-Caching-Estimated-Savings: 0.0027
 ```
 
 ### Telemetry & Observability

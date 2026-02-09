@@ -163,6 +163,19 @@ const modelPricingData: ModelPricing[] = [
 
   // === Anthropic Models ===
   {
+    model: 'claude-opus-4-6-v1',
+    provider: 'anthropic',
+    inputCostPer1K: 0.005,
+    outputCostPer1K: 0.025,
+    maxTokens: 1000000,
+    capabilities: ['text-generation', 'vision', 'multimodal', 'reasoning', 'agents', 'coding', 'computer-use', 'tool-use', 'extended-thinking', 'multilingual'],
+    inputPrice: 0.005,
+    outputPrice: 0.025,
+    contextWindow: 1000000,
+    category: 'premium',
+    features: ['text-generation', 'vision', 'multimodal', 'reasoning', 'agents', 'coding', 'computer-use', 'tool-use', 'extended-thinking', 'multilingual']
+  },
+  {
     model: 'claude-opus-4-1-20250805',
     provider: 'anthropic',
     inputCostPer1K: 0.015,
@@ -345,6 +358,19 @@ const modelPricingData: ModelPricing[] = [
     contextWindow: 128000,
     category: 'fast',
     features: ['text-generation', 'fast', 'efficient']
+  },
+  {
+    model: 'anthropic.claude-opus-4-6-v1',
+    provider: 'aws',
+    inputCostPer1K: 0.005,
+    outputCostPer1K: 0.025,
+    maxTokens: 1000000,
+    capabilities: ['text-generation', 'vision', 'multimodal', 'reasoning', 'agents', 'coding', 'computer-use', 'tool-use', 'extended-thinking', 'multilingual'],
+    inputPrice: 0.005,
+    outputPrice: 0.025,
+    contextWindow: 1000000,
+    category: 'premium',
+    features: ['text-generation', 'vision', 'multimodal', 'reasoning', 'agents', 'coding', 'computer-use', 'tool-use', 'extended-thinking', 'multilingual']
   },
   {
     model: 'anthropic.claude-opus-4-1-20250805-v1:0',

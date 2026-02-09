@@ -495,6 +495,7 @@ export class ExperimentationService extends BaseService {
             'claude-3-opus': 'anthropic.claude-3-5-sonnet-20240620-v1:0', // Upgraded to 3.5 Sonnet
             'claude-3-sonnet': 'anthropic.claude-3-5-sonnet-20240620-v1:0', // Upgraded to 3.5  
             'claude-3-haiku': 'global.anthropic.claude-haiku-4-5-20251001-v1:0', // Upgraded to 3.5
+            'claude-opus-4-6': 'anthropic.claude-opus-4-6-v1', // Claude Opus 4.6 - next-gen flagship
             'claude-4': 'anthropic.claude-opus-4-1-20250805-v1:0', // Claude 4 support
             
             // Amazon models (most reliable access)
