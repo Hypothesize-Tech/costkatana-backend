@@ -53,7 +53,14 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     capabilities: ['text', 'vision', 'reasoning', 'coding', 'multimodal'],
     category: 'multimodal',
     isLatest: true,
-    notes: 'Our state-of-the-art thinking model, capable of reasoning over complex problems in code, math, and STEM, as well as analyzing large datasets, codebases, and documents using long context. Best for multimodal understanding, coding (web development), and complex prompts. Input (text, image, video, audio): $1.25/1M tokens (<=200K), $2.50/1M tokens (>200K). Text output: $10.00/1M tokens (<=200K), $15.00/1M tokens (>200K). Cached: $0.125/1M tokens (<=200K), $0.250/1M tokens (>200K). Batch API: $0.625/$5.00 (<=200K), $1.25/$7.50 (>200K)'
+    notes: 'Our state-of-the-art thinking model, capable of reasoning over complex problems in code, math, and STEM, as well as analyzing large datasets, codebases, and documents using long context. Best for multimodal understanding, coding (web development), and complex prompts. Input (text, image, video, audio): $1.25/1M tokens (<=200K), $2.50/1M tokens (>200K). Text output: $10.00/1M tokens (<=200K), $15.00/1M tokens (>200K). Cached: $0.125/1M tokens (<=200K), $0.250/1M tokens (>200K). Batch API: $0.625/$5.00 (<=200K), $1.25/$7.50 (>200K)',
+    cachePricing: {
+        cacheReadPrice: 0.125, // $0.125 per 1M cached tokens (<=200K), $0.250 (>200K)
+        storagePrice: 1.00, // $1.00 per 1M tokens per hour storage
+        supportsCaching: true,
+        minTokens: 32768, // 32K minimum
+        cacheType: 'explicit'
+    }
   },
   {
     modelId: 'gemini-2.5-pro-computer-use-preview',
@@ -79,7 +86,14 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     capabilities: ['text', 'vision', 'audio', 'fast', 'multimodal', 'image-generation'],
     category: 'multimodal',
     isLatest: true,
-    notes: 'Our best model in terms of price-performance, offering well-rounded capabilities. Best for large scale processing, low-latency, high volume tasks that require thinking, and agentic use cases. Support for Live API included for some endpoints. See the model\'s thinking process as part of the response. Input (text, image, video): $0.30/1M tokens. Audio input: $1.00/1M tokens. Text output: $2.50/1M tokens. Image output: $30/1M tokens (1024x1024 image = 1290 tokens). Cached: $0.030/1M tokens. Batch API: $0.15/$1.25 (text/image/video), $0.50/$1.25 (audio)'
+    notes: 'Our best model in terms of price-performance, offering well-rounded capabilities. Best for large scale processing, low-latency, high volume tasks that require thinking, and agentic use cases. Support for Live API included for some endpoints. See the model\'s thinking process as part of the response. Input (text, image, video): $0.30/1M tokens. Audio input: $1.00/1M tokens. Text output: $2.50/1M tokens. Image output: $30/1M tokens (1024x1024 image = 1290 tokens). Cached: $0.030/1M tokens. Batch API: $0.15/$1.25 (text/image/video), $0.50/$1.25 (audio)',
+    cachePricing: {
+        cacheReadPrice: 0.03, // $0.03 per 1M cached tokens
+        storagePrice: 1.00, // $1.00 per 1M tokens per hour storage
+        supportsCaching: true,
+        minTokens: 32768, // 32K minimum
+        cacheType: 'explicit'
+    }
   },
   {
     modelId: 'gemini-2.5-flash-lite-preview',

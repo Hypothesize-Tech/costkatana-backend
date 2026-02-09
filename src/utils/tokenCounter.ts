@@ -1,4 +1,7 @@
 import { AIProvider } from '../types/aiCostTracker.types';
+
+// Re-export for convenience
+export { AIProvider };
 import { MODEL_PRICING, ModelPricing } from './pricing';
 import { loggingService } from '../services/logging.service';
 

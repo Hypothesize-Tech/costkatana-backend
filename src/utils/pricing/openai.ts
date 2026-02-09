@@ -268,7 +268,13 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'vision', 'multimodal', 'analysis'],
     category: 'multimodal',
     isLatest: true,
-    notes: 'Latest GPT-4o model with multimodal capabilities. Standard: $2.50/$10.00 per 1M tokens. Batch: $1.25/$5.00. Priority: $4.25/$17.00. Cached input: $1.25 (standard), $2.125 (priority). Fine-tuning: $25.00 training, $3.75/$1.875/$15.00 (standard), $2.225/$0.90/$12.50 (batch)'
+    notes: 'Latest GPT-4o model with multimodal capabilities. Standard: $2.50/$10.00 per 1M tokens. Batch: $1.25/$5.00. Priority: $4.25/$17.00. Cached input: $1.25 (standard), $2.125 (priority). Fine-tuning: $25.00 training, $3.75/$1.875/$15.00 (standard), $2.225/$0.90/$12.50 (batch)',
+    cachePricing: {
+        cacheReadPrice: 1.25, // $1.25 per 1M cached tokens (50% discount)
+        supportsCaching: true,
+        minTokens: 1024,
+        cacheType: 'automatic'
+    }
   },
   {
     modelId: 'gpt-4o-2024-05-13',
@@ -320,7 +326,13 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'vision', 'multimodal', 'efficient'],
     category: 'multimodal',
     isLatest: true,
-    notes: 'Efficient GPT-4o variant with multimodal capabilities. Standard: $0.15/$0.60 per 1M tokens. Batch: $0.075/$0.30. Priority: $0.25/$1.00. Cached input: $0.075 (standard), $0.125 (priority). Fine-tuning: $3.00 training, $0.30/$0.15/$1.20 (standard), $0.15/$0.075/$0.60 (batch)'
+    notes: 'Efficient GPT-4o variant with multimodal capabilities. Standard: $0.15/$0.60 per 1M tokens. Batch: $0.075/$0.30. Priority: $0.25/$1.00. Cached input: $0.075 (standard), $0.125 (priority). Fine-tuning: $3.00 training, $0.30/$0.15/$1.20 (standard), $0.15/$0.075/$0.60 (batch)',
+    cachePricing: {
+        cacheReadPrice: 0.075, // $0.075 per 1M cached tokens (50% discount)
+        supportsCaching: true,
+        minTokens: 1024,
+        cacheType: 'automatic'
+    }
   },
   {
     modelId: 'gpt-4o-mini-audio-preview',
@@ -439,7 +451,13 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'reasoning', 'analysis', 'advanced'],
     category: 'reasoning',
     isLatest: false,
-    notes: 'Previous full o-series reasoning model. Standard: $15.00/$60.00 per 1M tokens. Batch: $7.50/$30.00. Cached input: $7.50 (standard)'
+    notes: 'Previous full o-series reasoning model. Standard: $15.00/$60.00 per 1M tokens. Batch: $7.50/$30.00. Cached input: $7.50 (standard)',
+    cachePricing: {
+        cacheReadPrice: 7.50, // $7.50 per 1M cached tokens (50% discount)
+        supportsCaching: true,
+        minTokens: 1024,
+        cacheType: 'automatic'
+    }
   },
   {
     modelId: 'o3-mini',
@@ -465,7 +483,13 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'reasoning', 'efficient'],
     category: 'reasoning',
     isLatest: false,
-    notes: 'Deprecated - A small model alternative to o1. Standard: $1.10/$4.40 per 1M tokens. Batch: $0.55/$2.20. Cached input: $0.55 (standard)'
+    notes: 'Deprecated - A small model alternative to o1. Standard: $1.10/$4.40 per 1M tokens. Batch: $0.55/$2.20. Cached input: $0.55 (standard)',
+    cachePricing: {
+        cacheReadPrice: 0.55, // $0.55 per 1M cached tokens (50% discount)
+        supportsCaching: true,
+        minTokens: 1024,
+        cacheType: 'automatic'
+    }
   },
 
   // === Video Generation Models ===

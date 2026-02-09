@@ -5,15 +5,20 @@ import { FailoverService } from '../services/failover.service';
 import { redisService } from '../services/redis.service';
 import { BudgetService } from '../services/budget.service';
 import { ControllerHelper } from '@utils/controllerHelper';
-import { 
-    GatewayCacheService, 
-    BudgetEnforcementService, 
-    GatewayFirewallService, 
+import {
+    GatewayCacheService,
+    BudgetEnforcementService,
+    GatewayFirewallService,
     GatewayRetryService,
     RequestProcessingService,
     ResponseHandlingService,
     GatewayAnalyticsService
 } from '../services/gateway';
+import { promptCachingService } from '../services/promptCaching.service';
+import { contextEngineeringService } from '../services/contextEngineering.service';
+import { AnthropicPromptCaching } from '../services/providers/anthropic/promptCaching';
+import { OpenAIPromptCaching } from '../services/providers/openai/promptCaching';
+import { GoogleGeminiPromptCaching } from '../services/providers/google/promptCaching';
 
 // Circuit breaker for provider endpoints
 const circuitBreakers = new Map<string, { failures: number; lastFailure: number; state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' }>();
@@ -144,7 +149,10 @@ export class GatewayController {
             } else {
                 // Handle single provider request (existing logic)
                 let proxyRequest = await RequestProcessingService.prepareProxyRequest(req);
-                
+
+                // 🚀 PROMPT CACHING: Optimize request for KV-pair caching
+                proxyRequest = await this.applyPromptCaching(req, proxyRequest);
+
                 // Apply lazy summarization using request processing service
                 proxyRequest = await RequestProcessingService.applyLazySummarization(req, proxyRequest);
                 
@@ -537,6 +545,290 @@ export class GatewayController {
     // ============================================================================
     // OPTIMIZATION UTILITY METHODS
     // ============================================================================
+
+    /**
+     * 🚀 PROMPT CACHING: Apply true KV-pair caching optimizations to requests
+     * This implements true prompt caching (not output caching) by optimizing
+     * message structure for provider-specific KV-pair caching
+     */
+    private static async applyPromptCaching(
+        req: Request,
+        proxyRequest: any
+    ): Promise<any> {
+        const context = req.gatewayContext!;
+        const startTime = Date.now();
+
+        try {
+            // Check if prompt caching is enabled
+            const promptCachingEnabled = req.headers['costkatana-prompt-caching'] === 'true' ||
+                                       context.cortexEnabled === true; // Enable for Cortex requests
+
+            if (!promptCachingEnabled) {
+                loggingService.debug('Prompt caching disabled for request', {
+                    requestId: context.requestId,
+                    userId: context.userId
+                });
+                return proxyRequest;
+            }
+
+            // Detect provider and model
+            const provider = this.detectProvider(proxyRequest.url, context.provider);
+            const model = this.extractModelFromRequest(proxyRequest.data);
+
+            if (!provider || !model) {
+                loggingService.debug('Unable to detect provider/model for prompt caching', {
+                    url: proxyRequest.url,
+                    provider: context.provider,
+                    requestId: context.requestId
+                });
+                return proxyRequest;
+            }
+
+            // Check if provider supports prompt caching
+            if (!promptCachingService.isProviderSupported(provider, model)) {
+                loggingService.debug('Provider/model does not support prompt caching', {
+                    provider,
+                    model,
+                    requestId: context.requestId
+                });
+                return proxyRequest;
+            }
+
+            // Extract and optimize messages
+            const messages = this.extractMessagesFromRequest(proxyRequest.data);
+            if (!messages || messages.length === 0) {
+                loggingService.debug('No messages found for prompt caching', {
+                    requestId: context.requestId
+                });
+                return proxyRequest;
+            }
+
+            // Apply context engineering optimizations
+            const optimized = contextEngineeringService.optimizeForCaching(
+                messages,
+                provider,
+                model,
+                context.userId
+            );
+
+            if (!optimized.cacheAnalysis.isCacheable) {
+                loggingService.debug('Messages not suitable for prompt caching', {
+                    provider,
+                    model,
+                    reason: 'Not cacheable',
+                    requestId: context.requestId
+                });
+
+                // Still apply structure optimization even if not cacheable
+                const reorderedMessages = contextEngineeringService.reorderForCaching(messages);
+                const updatedRequest = this.updateRequestWithMessages(proxyRequest, reorderedMessages);
+
+                return updatedRequest;
+            }
+
+            // Apply provider-specific caching transformations
+            let finalMessages = optimized.messages;
+            let cacheHeaders: Record<string, string> = {};
+
+            switch (provider.toLowerCase()) {
+                case 'anthropic':
+                    if (AnthropicPromptCaching.isModelSupported(model)) {
+                        const result = AnthropicPromptCaching.processMessages(
+                            this.convertToAnthropicFormat(finalMessages),
+                            optimized.cacheConfig
+                        );
+                        finalMessages = this.convertFromAnthropicFormat(result.processedMessages);
+                        cacheHeaders = AnthropicPromptCaching.generateCacheHeaders(
+                            result.breakpoints,
+                            result.metrics.regularTokens! + (result.metrics.cacheCreationTokens || 0),
+                            result.metrics.cacheCreationTokens || 0
+                        );
+                    }
+                    break;
+
+                case 'openai':
+                    if (OpenAIPromptCaching.isModelSupported(model)) {
+                        const openaiMessages = this.convertToOpenAIFormat(finalMessages);
+                        finalMessages = this.convertFromOpenAIFormat(
+                            OpenAIPromptCaching.optimizeMessageOrder(openaiMessages)
+                        );
+                        const analysis = OpenAIPromptCaching.analyzeMessages(
+                            this.convertToOpenAIFormat(finalMessages),
+                            optimized.cacheConfig
+                        );
+                        cacheHeaders = OpenAIPromptCaching.generateCacheHeaders(analysis);
+                    }
+                    break;
+
+                case 'google':
+                    if (GoogleGeminiPromptCaching.isModelSupported(model)) {
+                        const geminiMessages = GoogleGeminiPromptCaching.convertToGeminiFormat(finalMessages);
+                        const analysis = GoogleGeminiPromptCaching.analyzeMessages(geminiMessages, optimized.cacheConfig);
+                        // Keep structure as-is for Gemini (API handles caching)
+                        cacheHeaders = GoogleGeminiPromptCaching.generateCacheHeaders(analysis);
+                    }
+                    break;
+            }
+
+            // Update request with optimized messages
+            const updatedRequest = this.updateRequestWithMessages(proxyRequest, finalMessages);
+
+            // Store cache metadata in context for response headers
+            context.promptCaching = {
+                enabled: true,
+                type: optimized.cacheAnalysis.cacheType,
+                estimatedSavings: optimized.cacheAnalysis.estimatedSavings,
+                cacheHeaders
+            };
+
+            const processingTime = Date.now() - startTime;
+
+            loggingService.info('Prompt caching applied to request', {
+                provider,
+                model,
+                cacheType: optimized.cacheAnalysis.cacheType,
+                estimatedSavings: optimized.cacheAnalysis.estimatedSavings.toFixed(6),
+                processingTimeMs: processingTime,
+                requestId: context.requestId,
+                userId: context.userId
+            });
+
+            return updatedRequest;
+
+        } catch (error) {
+            const processingTime = Date.now() - startTime;
+
+            loggingService.error('Error applying prompt caching', {
+                error: error instanceof Error ? error.message : String(error),
+                provider: context.provider,
+                processingTimeMs: processingTime,
+                requestId: context.requestId
+            });
+
+            // Return original request on error
+            return proxyRequest;
+        }
+    }
+
+    /**
+     * Detect provider from URL or context
+     */
+    private static detectProvider(url: string, contextProvider?: string): string | null {
+        if (contextProvider) return contextProvider;
+
+        if (url.includes('anthropic')) return 'anthropic';
+        if (url.includes('openai')) return 'openai';
+        if (url.includes('googleapis') || url.includes('generativelanguage')) return 'google';
+        if (url.includes('bedrock')) return 'anthropic'; // Assume Claude via Bedrock
+
+        return null;
+    }
+
+    /**
+     * Extract model from request data
+     */
+    private static extractModelFromRequest(data: any): string | null {
+        return data?.model || data?.modelId || null;
+    }
+
+    /**
+     * Extract messages from various request formats
+     */
+    private static extractMessagesFromRequest(data: any): any[] | null {
+        // OpenAI format
+        if (data?.messages && Array.isArray(data.messages)) {
+            return data.messages.map((msg: any) => ({
+                role: msg.role,
+                content: msg.content
+            }));
+        }
+
+        // Anthropic format
+        if (data?.messages && Array.isArray(data.messages)) {
+            return data.messages;
+        }
+
+        // Generic format
+        if (data?.prompt) {
+            return [{
+                role: 'user',
+                content: data.prompt
+            }];
+        }
+
+        if (data?.input) {
+            return [{
+                role: 'user',
+                content: data.input
+            }];
+        }
+
+        return null;
+    }
+
+    /**
+     * Update request with optimized messages
+     */
+    private static updateRequestWithMessages(proxyRequest: any, messages: any[]): any {
+        const updatedRequest = { ...proxyRequest };
+        const data = { ...proxyRequest.data };
+
+        // Update based on format
+        if (data.messages && Array.isArray(data.messages)) {
+            data.messages = messages;
+        } else if (data.prompt) {
+            // Convert back to single prompt if needed
+            data.prompt = messages.map(m => m.content).join('\n');
+        } else if (data.input) {
+            data.input = messages.map(m => m.content).join('\n');
+        }
+
+        updatedRequest.data = data;
+        return updatedRequest;
+    }
+
+    /**
+     * Convert internal message format to Anthropic format
+     */
+    private static convertToAnthropicFormat(messages: any[]): any[] {
+        return messages.map(msg => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: Array.isArray(msg.content) ? msg.content : [{
+                type: 'text',
+                text: msg.content
+            }]
+        }));
+    }
+
+    /**
+     * Convert from Anthropic format back to internal format
+     */
+    private static convertFromAnthropicFormat(anthropicMessages: any[]): any[] {
+        return anthropicMessages.map(msg => ({
+            role: msg.role,
+            content: msg.content
+        }));
+    }
+
+    /**
+     * Convert internal message format to OpenAI format
+     */
+    private static convertToOpenAIFormat(messages: any[]): any[] {
+        return messages.map(msg => ({
+            role: msg.role,
+            content: msg.content
+        }));
+    }
+
+    /**
+     * Convert from OpenAI format back to internal format
+     */
+    private static convertFromOpenAIFormat(openaiMessages: any[]): any[] {
+        return openaiMessages.map(msg => ({
+            role: msg.role,
+            content: msg.content
+        }));
+    }
 
     /**
      * Background operation queue for non-critical tasks

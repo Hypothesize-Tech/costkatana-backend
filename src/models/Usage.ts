@@ -163,6 +163,48 @@ export interface IUsage {
             headerOptimization?: string;
         };
     };
+
+    // 🚀 NEW: Prompt Caching Metrics (true KV-pair caching)
+    promptCaching?: {
+        enabled: boolean;
+        type: 'automatic' | 'explicit' | 'none';
+        provider: 'anthropic' | 'openai' | 'google' | 'auto';
+        model: string;
+
+        // Token usage breakdown
+        cacheCreationTokens: number;    // Tokens used to create cache
+        cacheReadTokens: number;         // Tokens read from cache
+        regularTokens: number;           // Tokens processed normally
+        totalTokens: number;             // Total tokens for this request
+
+        // Performance metrics
+        cacheHits: number;               // Number of cache hits
+        cacheMisses: number;             // Number of cache misses
+        hitRate: number;                 // Cache hit rate (0-1)
+
+        // Cost savings
+        savingsFromCaching: number;      // Actual USD saved from caching
+        estimatedSavings: number;        // Estimated USD that could be saved
+
+        // Cache metadata
+        cacheKey?: string;               // Cache key used
+        cacheTTL: number;                // Cache TTL in seconds
+        breakpointsUsed: number;         // Number of cache breakpoints
+        prefixRatio: number;             // Ratio of prompt that was cached (0-1)
+
+        // Timing
+        cacheLookupTime: number;         // Time spent looking up cache (ms)
+        cacheProcessingTime: number;     // Time spent processing cache (ms)
+
+        // Provider-specific metadata
+        anthropicBreakpoints?: Array<{
+            position: number;
+            tokenCount: number;
+            contentType: string;
+        }>;
+        openaiPrefixLength?: number;
+        geminiCacheName?: string;
+    };
 }
 
 const usageSchema = new Schema<IUsage>({
@@ -465,6 +507,117 @@ optimizationOpportunities: {
         payloadOptimization: String,
         headerOptimization: String
     }
+},
+
+// 🚀 Prompt Caching Schema (true KV-pair caching)
+promptCaching: {
+    enabled: {
+        type: Boolean,
+        default: false
+    },
+    type: {
+        type: String,
+        enum: ['automatic', 'explicit', 'none'],
+        default: 'none'
+    },
+    provider: {
+        type: String,
+        enum: ['anthropic', 'openai', 'google', 'auto'],
+        required: false
+    },
+    model: String,
+
+    // Token usage breakdown
+    cacheCreationTokens: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    cacheReadTokens: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    regularTokens: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    totalTokens: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+
+    // Performance metrics
+    cacheHits: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    cacheMisses: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    hitRate: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 1
+    },
+
+    // Cost savings
+    savingsFromCaching: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    estimatedSavings: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+
+    // Cache metadata
+    cacheKey: String,
+    cacheTTL: {
+        type: Number,
+        default: 300,
+        min: 0
+    },
+    breakpointsUsed: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    prefixRatio: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 1
+    },
+
+    // Timing
+    cacheLookupTime: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    cacheProcessingTime: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+
+    // Provider-specific metadata
+    anthropicBreakpoints: [{
+        position: Number,
+        tokenCount: Number,
+        contentType: String
+    }],
+    openaiPrefixLength: Number,
+    geminiCacheName: String
 }
 }, {
     timestamps: true,

@@ -91,6 +91,14 @@ declare global {
                 agentIdentityId?: string;
                 agentToken?: string;
                 agentType?: string;
+
+                // 🚀 Prompt Caching Context
+                promptCaching?: {
+                    enabled: boolean;
+                    type: 'automatic' | 'explicit' | 'none';
+                    estimatedSavings: number;
+                    cacheHeaders: Record<string, string>;
+                };
             };
         }
     }

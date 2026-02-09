@@ -11,6 +11,7 @@ import { generateOptimizationSuggestions } from '../utils/optimizationUtils';
 import mongoose from 'mongoose';
 import { ActivityService } from './activity.service';
 import { BaseService } from '../shared/BaseService';
+import { promptCachingService } from './promptCaching.service';
 
 // 🚀 NEW CORTEX IMPORTS - ADVANCED STREAMING
 import { CortexCoreService } from './cortexCore.service';
@@ -1821,14 +1822,20 @@ REPLY FORMAT (JSON only):
                 service: request.service,
                 model: request.model,
                 category,
-                suggestions: optimizationResult?.suggestions.map((suggestion, index) => ({
-                    type: suggestion.type,
-                    description: suggestion.explanation,
-                    impact: suggestion.estimatedSavings > 30 ? 'high' : suggestion.estimatedSavings > 15 ? 'medium' : 'low',
-                    implemented: index === 0,
-                    // Attach optimizedEstimate to suggestion object
-                    optimizedEstimate: optimizedEstimate
-                })) || [],
+                suggestions: [
+                    // Include existing suggestions
+                    ...(optimizationResult?.suggestions.map((suggestion, index) => ({
+                        type: suggestion.type,
+                        description: suggestion.explanation,
+                        impact: suggestion.estimatedSavings > 30 ? 'high' : suggestion.estimatedSavings > 15 ? 'medium' : 'low',
+                        implemented: index === 0,
+                        // Attach optimizedEstimate to suggestion object
+                        optimizedEstimate: optimizedEstimate
+                    })) || []),
+
+                    // 🚀 Add prompt caching suggestions
+                    ...(await this.generatePromptCachingSuggestions(request))
+                ],
                 metadata,
                 cortexImpactMetrics: cortexResult ? convertToCortexMetrics(
                     unifiedCalc,
@@ -2482,6 +2489,226 @@ REPLY FORMAT (JSON only):
         } catch (error: any) {
             loggingService.error('Get optimization templates error:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to get optimization templates');
+        }
+    }
+
+    /**
+     * 🚀 PROMPT CACHING: Detect opportunities for prompt caching optimization
+     */
+    static async detectPromptCachingOpportunities(
+        userId: string,
+        recentUsage: any[] = []
+    ): Promise<Array<{
+        type: 'enable_prompt_caching';
+        description: string;
+        estimatedSavings: number;
+        confidence: number;
+        implementation: {
+            provider: string;
+            method: string;
+            tokenThreshold: number;
+            structure: string;
+            model: string;
+        };
+    }>> {
+        try {
+            const opportunities: Array<{
+                type: 'enable_prompt_caching';
+                description: string;
+                estimatedSavings: number;
+                confidence: number;
+                implementation: {
+                    provider: string;
+                    method: string;
+                    tokenThreshold: number;
+                    structure: string;
+                    model: string;
+                };
+            }> = [];
+
+            // Get user's recent usage if not provided
+            if (recentUsage.length === 0) {
+                recentUsage = await Usage.find({
+                    userId: new mongoose.Types.ObjectId(userId),
+                    createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } // Last 30 days
+                })
+                .limit(100)
+                .sort({ createdAt: -1 })
+                .select('model service prompt promptTokens completionTokens cost metadata')
+                .lean();
+            }
+
+            // Group by provider and model
+            const usageByProvider = new Map<string, any[]>();
+            for (const usage of recentUsage) {
+                const provider = usage.service || 'openai';
+                if (!usageByProvider.has(provider)) {
+                    usageByProvider.set(provider, []);
+                }
+                usageByProvider.get(provider)!.push(usage);
+            }
+
+            // Analyze each provider
+            for (const [provider, usages] of usageByProvider) {
+                if (!promptCachingService.isProviderSupported(provider)) {
+                    continue;
+                }
+
+                // Check for repeated content patterns
+                const repeatedContentScore = this.calculateRepeatedContentScore(usages);
+                const averageTokens = usages.reduce((sum, u) => sum + (u.promptTokens || 0), 0) / usages.length;
+                const totalCost = usages.reduce((sum, u) => sum + (u.cost || 0), 0);
+
+                // Only recommend if there's significant repeated content and token volume
+                if (repeatedContentScore > 0.3 && averageTokens > 500) {
+                    const estimatedSavings = totalCost * repeatedContentScore * 0.7; // Estimate 70% savings on repeated content
+
+                    opportunities.push({
+                        type: 'enable_prompt_caching',
+                        description: `Enable prompt caching for ${provider} - detected ${Math.round(repeatedContentScore * 100)}% repeated content patterns`,
+                        estimatedSavings,
+                        confidence: Math.min(repeatedContentScore * 2, 0.9), // Scale confidence with repeated content
+                        implementation: {
+                            provider,
+                            method: provider === 'anthropic' ? 'Add cache_control breakpoints' :
+                                   provider === 'openai' ? 'Automatic prefix matching' :
+                                   'Explicit context caching',
+                            tokenThreshold: 1024,
+                            structure: 'Move system prompts and static content first',
+                            model: usages[0]?.model || 'default'
+                        }
+                    });
+                }
+
+                // Check for models that support caching but aren't being used
+                const supportedModels = promptCachingService.getProviderSupport(provider)?.supportedModels || [];
+                const usedModels = [...new Set(usages.map(u => u.model))];
+
+                for (const supportedModel of supportedModels) {
+                    if (!usedModels.includes(supportedModel) && usages.some(u => u.model === supportedModel.replace(/-/g, ''))) {
+                        // Found a model that supports caching but might be using a variant
+                        opportunities.push({
+                            type: 'enable_prompt_caching',
+                            description: `Switch to ${supportedModel} which supports prompt caching`,
+                            estimatedSavings: totalCost * 0.3, // Estimate 30% savings
+                            confidence: 0.7,
+                            implementation: {
+                                provider,
+                                method: 'Model switch to enable caching',
+                                tokenThreshold: 1024,
+                                structure: 'Move system prompts and static content first',
+                                model: supportedModel
+                            }
+                        });
+                    }
+                }
+            }
+
+            loggingService.debug('Prompt caching opportunities detected', {
+                userId,
+                opportunitiesFound: opportunities.length,
+                providersAnalyzed: usageByProvider.size
+            });
+
+            return opportunities;
+
+        } catch (error: any) {
+            loggingService.error('Error detecting prompt caching opportunities', {
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
+            return [];
+        }
+    }
+
+    /**
+     * Calculate repeated content score based on prompt similarity
+     */
+    private static calculateRepeatedContentScore(usages: any[]): number {
+        if (usages.length < 2) return 0;
+
+        let similarPairs = 0;
+        let totalComparisons = 0;
+
+        // Simple similarity check based on prompt length and common substrings
+        for (let i = 0; i < usages.length; i++) {
+            for (let j = i + 1; j < usages.length; j++) {
+                totalComparisons++;
+                const prompt1 = usages[i].prompt || '';
+                const prompt2 = usages[j].prompt || '';
+
+                // Calculate simple similarity score
+                const similarity = this.calculateSimpleSimilarity(prompt1, prompt2);
+                if (similarity > 0.5) { // 50% similarity threshold
+                    similarPairs++;
+                }
+            }
+        }
+
+        return totalComparisons > 0 ? similarPairs / totalComparisons : 0;
+    }
+
+    /**
+     * Calculate simple similarity between two prompts
+     */
+    private static calculateSimpleSimilarity(prompt1: string, prompt2: string): number {
+        if (!prompt1 || !prompt2) return 0;
+
+        const words1 = new Set(prompt1.toLowerCase().split(/\s+/));
+        const words2 = new Set(prompt2.toLowerCase().split(/\s+/));
+
+        const intersection = new Set([...words1].filter(x => words2.has(x)));
+        const union = new Set([...words1, ...words2]);
+
+        return intersection.size / union.size;
+    }
+
+    /**
+     * Generate prompt caching suggestions for the optimization
+     */
+    private static async generatePromptCachingSuggestions(request: OptimizationRequest): Promise<any[]> {
+        try {
+            // Get recent usage for this user to analyze caching opportunities
+            const recentUsage = await Usage.find({
+                userId: new mongoose.Types.ObjectId(request.userId),
+                service: request.service,
+                createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } // Last 7 days
+            })
+            .limit(50)
+            .sort({ createdAt: -1 })
+            .select('model service prompt promptTokens completionTokens cost')
+            .lean();
+
+            const cachingOpportunities = await this.detectPromptCachingOpportunities(request.userId, recentUsage);
+
+            // Filter opportunities relevant to current request
+            const relevantOpportunities = cachingOpportunities.filter(opp =>
+                opp.implementation.provider.toLowerCase() === request.service.toLowerCase() ||
+                opp.implementation.model === request.model
+            );
+
+            return relevantOpportunities.map(opp => ({
+                type: opp.type,
+                description: opp.description,
+                impact: opp.estimatedSavings > 30 ? 'high' : opp.estimatedSavings > 15 ? 'medium' : 'low',
+                implemented: false,
+                promptCachingDetails: {
+                    provider: opp.implementation.provider,
+                    method: opp.implementation.method,
+                    tokenThreshold: opp.implementation.tokenThreshold,
+                    structure: opp.implementation.structure,
+                    model: opp.implementation.model,
+                    confidence: opp.confidence
+                }
+            }));
+
+        } catch (error: any) {
+            loggingService.error('Error generating prompt caching suggestions', {
+                error: error instanceof Error ? error.message : String(error),
+                userId: request.userId,
+                service: request.service
+            });
+            return [];
         }
     }
 
