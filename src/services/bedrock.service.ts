@@ -64,6 +64,7 @@ export class BedrockService {
         // Claude 4.6, 4.5, Opus 4, and newer models should use Converse API for better support
         const converseModels = [
             'claude-opus-4-6',
+            'claude-sonnet-4-6',
             'claude-sonnet-4-5',
             'claude-opus-4-5',
             'claude-haiku-4-5',
@@ -198,6 +199,8 @@ export class BedrockService {
         // Reference: https://docs.anthropic.com/en/docs/about-claude/models
         if (modelId.includes('claude-opus-4-6')) {
             return 65536; // Claude Opus 4.6 - 1M context (beta), use 64K output for safety
+        } else if (modelId.includes('claude-sonnet-4-6')) {
+            return 65536; // Claude Sonnet 4.6 - 64K output, 1M context (beta)
         } else if (modelId.includes('claude-sonnet-4-5') || modelId.includes('claude-opus-4-5')) {
             return 32768; // Claude Sonnet 4.5 / Opus 4.5 - supports up to 64K, using 32K for safety
         } else if (modelId.includes('claude-opus-4')) {
@@ -234,8 +237,9 @@ export class BedrockService {
             // Legacy Claude 3 models removed - use Claude 3.5+ only
             'anthropic.claude-3-haiku-20240307-v1:0': `${regionPrefix}.anthropic.claude-3-haiku-20240307-v1:0`,
             
-            // Claude Opus 4.6 and Claude 4
+            // Claude Opus 4.6, Sonnet 4.6, and Claude 4
             'anthropic.claude-opus-4-6-v1': `${regionPrefix}.anthropic.claude-opus-4-6-v1`,
+            'anthropic.claude-sonnet-4-6-v1:0': `${regionPrefix}.anthropic.claude-sonnet-4-6-v1:0`,
             'anthropic.claude-opus-4-1-20250805-v1:0': `${regionPrefix}.anthropic.claude-opus-4-1-20250805-v1:0`,
             
             // Add Nova Pro

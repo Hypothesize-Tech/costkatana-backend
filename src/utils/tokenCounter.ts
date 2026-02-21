@@ -166,12 +166,16 @@ function estimateAnthropicTokens(text: string, model?: string): number {
             let multiplier = 1.1; // Default multiplier
             
             if (model) {
-                // Claude 4.5 generation (latest)
-                if (model.includes('claude-opus-4.5')) {
+                // Claude 4.6 generation (latest)
+                if (model.includes('claude-sonnet-4.6') || model.includes('claude-sonnet-4-6')) {
+                    multiplier = 1.09; // Sonnet 4.6 - optimized for agents, coding, computer use
+                }
+                // Claude 4.5 generation
+                else if (model.includes('claude-opus-4.5') || model.includes('claude-opus-4-5')) {
                     multiplier = 1.12; // Opus 4.5 - frontier intelligence, slightly more tokens for deep reasoning
-                } else if (model.includes('claude-sonnet-4.5')) {
+                } else if (model.includes('claude-sonnet-4.5') || model.includes('claude-sonnet-4-5')) {
                     multiplier = 1.09; // Sonnet 4.5 - optimized for agents and coding
-                } else if (model.includes('claude-haiku-4.5')) {
+                } else if (model.includes('claude-haiku-4.5') || model.includes('claude-haiku-4-5')) {
                     multiplier = 1.02; // Haiku 4.5 - most efficient, cost-effective
                 }
                 // Claude 4 generation

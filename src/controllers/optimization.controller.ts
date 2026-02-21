@@ -25,6 +25,7 @@ const mapToFullModelId = (shortName?: string): string | undefined => {
         
         // Claude 4.6 and Claude 4 models
         'claude-opus-4-6': 'anthropic.claude-opus-4-6-v1',
+        'claude-sonnet-4-6': 'anthropic.claude-sonnet-4-6-v1:0',
         'claude-4': 'anthropic.claude-opus-4-1-20250805-v1:0',
         'claude-opus-4': 'anthropic.claude-opus-4-1-20250805-v1:0',
         
@@ -37,6 +38,7 @@ const mapToFullModelId = (shortName?: string): string | undefined => {
         'global.anthropic.claude-haiku-4-5-20251001-v1:0': 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         'anthropic.claude-3-5-sonnet-20240620-v1:0': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
         'anthropic.claude-opus-4-6-v1': 'anthropic.claude-opus-4-6-v1',
+        'anthropic.claude-sonnet-4-6-v1:0': 'anthropic.claude-sonnet-4-6-v1:0',
         'anthropic.claude-opus-4-1-20250805-v1:0': 'anthropic.claude-opus-4-1-20250805-v1:0',
         'amazon.nova-pro-v1:0': 'amazon.nova-pro-v1:0'
     };

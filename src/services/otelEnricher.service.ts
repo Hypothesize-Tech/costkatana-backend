@@ -409,6 +409,7 @@ Respond in JSON format:
       
       // Claude 4.6 and Claude 4 models
       'anthropic.claude-opus-4-6-v1': { input: 0.005, output: 0.025 }, // Opus 4.6 - verify on Bedrock
+      'anthropic.claude-sonnet-4-6-v1:0': { input: 0.003, output: 0.015 }, // Sonnet 4.6 - same as 4.5
       'anthropic.claude-opus-4-1-20250805-v1:0': { input: 0.015, output: 0.075 }, // Premium pricing
       
       // AWS Native models

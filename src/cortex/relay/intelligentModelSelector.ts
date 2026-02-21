@@ -22,6 +22,7 @@ export class IntelligentModelSelector {
   // Priority order for core reasoning (most powerful first)
   private readonly reasoningModelPriority = [
     'anthropic.claude-opus-4-6-v1',               // Claude Opus 4.6 - Next-gen flagship
+    'anthropic.claude-sonnet-4-6-v1:0',            // Claude Sonnet 4.6 - Latest Sonnet
     'anthropic.claude-opus-4-1-20250805-v1:0',     // Claude Opus 4.1 - Most powerful
     'anthropic.claude-opus-4-20250514-v1:0',       // Claude Opus 4
     'anthropic.claude-3-opus-20240229-v1:0',       // Claude 3 Opus
