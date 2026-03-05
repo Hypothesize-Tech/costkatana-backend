@@ -3,6 +3,7 @@ import { IWebhookDelivery, WebhookDelivery } from '../models/WebhookDelivery';
 import { User } from '../models/User';
 import { Project } from '../models/Project';
 import { loggingService } from './logging.service';
+import { CacheService } from './cache.service';
 import { encryptData, decryptData } from '../utils/encryption';
 import { 
     WebhookEventData, 
@@ -549,9 +550,32 @@ export class WebhookService extends BaseService {
                     break;
                     
                 case 'oauth2':
-                    // OAuth2 would require fetching a token first
-                    // This is a placeholder - implement OAuth2 flow as needed
-                    loggingService.warn('OAuth2 authentication not yet implemented for webhooks');
+                    if (creds.oauth2?.clientId && creds.oauth2?.clientSecret && creds.oauth2?.tokenUrl) {
+                        try {
+                            const accessToken = await this.getOAuth2Token({
+                                clientId: creds.oauth2.clientId,
+                                clientSecret: creds.oauth2.clientSecret,
+                                tokenUrl: creds.oauth2.tokenUrl,
+                                scope: creds.oauth2.scope
+                            });
+                            if (accessToken) {
+                                headers['Authorization'] = `Bearer ${accessToken}`;
+                            }
+                        } catch (oauthError) {
+                            loggingService.error('Failed to obtain OAuth2 token for webhook', {
+                                webhookId: webhook._id,
+                                error: oauthError instanceof Error ? oauthError.message : String(oauthError)
+                            });
+                            // Continue without OAuth2 auth rather than failing the webhook
+                        }
+                    } else {
+                        loggingService.warn('OAuth2 credentials incomplete for webhook', {
+                            webhookId: webhook._id,
+                            hasClientId: !!creds.oauth2?.clientId,
+                            hasClientSecret: !!creds.oauth2?.clientSecret,
+                            hasTokenUrl: !!creds.oauth2?.tokenUrl
+                        });
+                    }
                     break;
             }
         }
@@ -1069,6 +1093,72 @@ export class WebhookService extends BaseService {
         };
 
         return JSON.stringify(discordPayload);
+    }
+
+    /**
+     * Get OAuth2 access token for webhook authentication
+     */
+    private async getOAuth2Token(oauth2Config: {
+        clientId: string;
+        clientSecret: string;
+        tokenUrl: string;
+        scope?: string;
+    }): Promise<string | null> {
+        try {
+            const cacheService = CacheService.getInstance();
+            const tokenCacheKey = `oauth2_token:${oauth2Config.clientId}:${oauth2Config.tokenUrl}`;
+
+            // Check cache first
+            const cachedToken = await cacheService.get(tokenCacheKey) as { token: string; expiresAt: number } | null;
+            if (cachedToken && cachedToken.expiresAt > Date.now()) {
+                return cachedToken.token;
+            }
+
+            // Fetch new token
+            const tokenResponse = await fetch(oauth2Config.tokenUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Authorization': `Basic ${Buffer.from(`${oauth2Config.clientId}:${oauth2Config.clientSecret}`).toString('base64')}`
+                },
+                body: new URLSearchParams({
+                    grant_type: 'client_credentials',
+                    scope: oauth2Config.scope || ''
+                }).toString()
+            });
+
+            if (!tokenResponse.ok) {
+                throw new Error(`OAuth2 token request failed: ${tokenResponse.status} ${tokenResponse.statusText}`);
+            }
+
+            const tokenData = await tokenResponse.json() as { access_token?: string; expires_in?: number };
+
+            if (!tokenData.access_token) {
+                throw new Error('OAuth2 response missing access_token');
+            }
+
+            // Cache the token (with some buffer before expiry)
+            const expiresAt = Date.now() + ((tokenData.expires_in || 3600) - 300) * 1000; // 5 min buffer
+            await cacheService.set(tokenCacheKey, {
+                token: tokenData.access_token,
+                expiresAt
+            }, Math.floor((expiresAt - Date.now()) / 1000));
+
+            loggingService.info('Obtained OAuth2 access token for webhook', {
+                clientId: oauth2Config.clientId,
+                tokenUrl: oauth2Config.tokenUrl,
+                expiresIn: tokenData.expires_in
+            });
+
+            return tokenData.access_token;
+        } catch (error) {
+            loggingService.error('Failed to obtain OAuth2 token', {
+                clientId: oauth2Config.clientId,
+                tokenUrl: oauth2Config.tokenUrl,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return null;
+        }
     }
 
     /**

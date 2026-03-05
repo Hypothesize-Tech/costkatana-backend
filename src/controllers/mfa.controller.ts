@@ -6,7 +6,7 @@ import { User } from '../models/User';
 import { loggingService } from '../services/logging.service';
 import { config } from '../config';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
+
 
 // Validation schemas
 const setupTOTPSchema = z.object({

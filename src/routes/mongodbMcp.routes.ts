@@ -33,7 +33,7 @@ router.use(authenticate);
  * @access  Private
  */
 router.post(
-    '/mongodb',
+    '/',
     validateMCPRequest,
     mcpResponseTimer,
     mongodbMcpMiddleware,
@@ -45,7 +45,7 @@ router.post(
  * @desc    List available MongoDB MCP tools
  * @access  Private
  */
-router.get('/mongodb/tools', listMongoDBMCPTools);
+router.get('/tools', listMongoDBMCPTools);
 
 // ==================== Connection Management Endpoints ====================
 
@@ -54,35 +54,35 @@ router.get('/mongodb/tools', listMongoDBMCPTools);
  * @desc    Get user's MongoDB connections
  * @access  Private
  */
-router.get('/mongodb/connections', getUserMongoDBConnections);
+router.get('/connections', getUserMongoDBConnections);
 
 /**
  * @route   GET /api/mcp/mongodb/connections/:connectionId
  * @desc    Get a single MongoDB connection
  * @access  Private
  */
-router.get('/mongodb/connections/:connectionId', getMongoDBConnection);
+router.get('/connections/:connectionId', getMongoDBConnection);
 
 /**
  * @route   POST /api/mcp/mongodb/connections
  * @desc    Create new MongoDB connection
  * @access  Private
  */
-router.post('/mongodb/connections', createMongoDBConnection);
+router.post('/connections', createMongoDBConnection);
 
 /**
  * @route   PUT /api/mcp/mongodb/connections/:connectionId
  * @desc    Update MongoDB connection
  * @access  Private
  */
-router.put('/mongodb/connections/:connectionId', updateMongoDBConnection);
+router.put('/connections/:connectionId', updateMongoDBConnection);
 
 /**
  * @route   DELETE /api/mcp/mongodb/connections/:connectionId
  * @desc    Delete MongoDB connection
  * @access  Private
  */
-router.delete('/mongodb/connections/:connectionId', deleteMongoDBConnection);
+router.delete('/connections/:connectionId', deleteMongoDBConnection);
 
 /**
  * @route   POST /api/mcp/mongodb/connections/:connectionId/validate
@@ -90,7 +90,7 @@ router.delete('/mongodb/connections/:connectionId', deleteMongoDBConnection);
  * @access  Private
  */
 router.post(
-    '/mongodb/connections/:connectionId/validate',
+    '/connections/:connectionId/validate',
     validateMongoDBConnectionAccess,
     validateMongoDBConnectionEndpoint
 );

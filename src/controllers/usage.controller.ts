@@ -274,7 +274,7 @@ export class UsageController {
             const data: any = validationResult.data;
             
             // DEBUG: Check workflow fields after validation
-            console.log('🔍 WORKFLOW DEBUG - After validation:', {
+            loggingService.info('🔍 WORKFLOW DEBUG - After validation:', {
                 workflowId: data.workflowId,
                 workflowName: data.workflowName,
                 workflowStep: data.workflowStep,
@@ -287,7 +287,7 @@ export class UsageController {
             // If projectId is not found at top level, check in metadata (legacy support)
             if (!projectId && data.metadata && typeof data.metadata === 'object' && data.metadata.projectId) {
                 projectId = data.metadata.projectId;
-                console.log('Found projectId in metadata (legacy approach):', projectId);
+                loggingService.info('Found projectId in metadata (legacy approach):', projectId);
             }
 
             // Extract error details if present
@@ -359,7 +359,7 @@ export class UsageController {
             }
             
             // DEBUG: Check workflow fields in usageData before service call
-            console.log('🔍 WORKFLOW DEBUG - Before service call:', {
+            loggingService.info('🔍 WORKFLOW DEBUG - Before service call:', {
                 workflowId: usageData.workflowId,
                 workflowName: usageData.workflowName,
                 workflowStep: usageData.workflowStep,
@@ -368,7 +368,7 @@ export class UsageController {
 
             // DEBUG: Log error information if present
             if (hasError) {
-                console.log('🚨 ERROR TRACKING - Client integration error detected:', {
+                loggingService.info('🚨 ERROR TRACKING - Client integration error detected:', {
                     httpStatusCode: usageData.httpStatusCode,
                     errorType: usageData.errorType,
                     errorMessage: usageData.errorMessage,
@@ -385,7 +385,7 @@ export class UsageController {
             if (!usage) {
                 throw new Error('Usage creation returned null');
             }
-            console.log('Usage tracked successfully:', usage._id);
+            loggingService.info('Usage tracked successfully:', usage._id);
 
             // Handle session replay if user has enabled it (non-blocking)
             if (req.user?.preferences?.enableSessionReplay) {
@@ -1901,8 +1901,6 @@ export class UsageController {
 
             const { costOptimizationEngine } = await import('../services/cost-optimization-engine.service');
             
-            // For now, always generate a fresh report
-            // In the future, we might cache reports and serve them here
             const report = await costOptimizationEngine.analyzeAndOptimize(
                 userId, 
                 projectId as string | undefined

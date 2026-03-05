@@ -68,7 +68,7 @@ export class MongoDBMCPService {
      */
     private async syncToolsToRegistry(): Promise<void> {
         try {
-            const tools = this.getToolDefinitions();
+            const tools = MongoDBMCPService.getToolDefinitions();
             await mcpToolSyncerService.syncMongoDBTools(tools);
             loggingService.info('MongoDB MCP tools synced to registry', {
                 toolCount: tools.length
@@ -87,7 +87,7 @@ export class MongoDBMCPService {
     private setupHandlers(): void {
         // List available tools
         this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-            tools: this.getToolDefinitions(),
+            tools: MongoDBMCPService.getToolDefinitions(),
         }));
 
         // Handle tool calls
@@ -100,7 +100,7 @@ export class MongoDBMCPService {
     /**
      * Get all tool definitions
      */
-    private getToolDefinitions(): MCPTool[] {
+    private static getToolDefinitions(): MCPTool[] {
         return [
             // Query Tools
             {
@@ -837,28 +837,294 @@ export class MongoDBMCPService {
         };
     }
 
-    private async handleSuggestIndexes(_args: any): Promise<MCPToolResult> {
-        // This will be implemented in Phase 3 with AI integration
-        return {
-            content: [
-                {
-                    type: 'text',
-                    text: 'Index suggestions require AI analysis. This feature will be available in the next update.',
-                },
-            ],
-        };
+    private async handleSuggestIndexes(args: any): Promise<MCPToolResult> {
+        if (!this.db || !this.connection) {
+            throw new Error('Database connection not initialized');
+        }
+
+        const { collection } = args;
+
+        try {
+            const collectionExists = await this.db.listCollections({ name: collection }).hasNext();
+            if (!collectionExists) {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `Collection '${collection}' does not exist.`,
+                        },
+                    ],
+                };
+            }
+
+            const suggestions: string[] = [];
+
+            // 1. Analyze existing indexes
+            const existingIndexes = await this.db.collection(collection).indexes();
+            const indexedFields = new Set<string>();
+            existingIndexes.forEach((index: any) => {
+                Object.keys(index.key).forEach(field => indexedFields.add(field));
+            });
+
+            // 2. Analyze collection schema from sample documents
+            const sampleDocs = await this.db.collection(collection).find({}).limit(100).toArray();
+            const fieldUsage = new Map<string, number>();
+
+            // Count field usage in queries (simplified analysis)
+            sampleDocs.forEach(doc => {
+                Object.keys(doc).forEach(field => {
+                    fieldUsage.set(field, (fieldUsage.get(field) || 0) + 1);
+                });
+            });
+
+            // 3. Suggest indexes based on field usage and query patterns
+            const highUsageFields = Array.from(fieldUsage.entries())
+                .filter(([_, count]) => count > sampleDocs.length * 0.5) // Used in >50% of documents
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5); // Top 5 fields
+
+            // 4. Check for compound index opportunities
+            const compoundSuggestions: string[] = [];
+
+            // Look for common query patterns (this is simplified)
+            if (sampleDocs.length > 0) {
+                const commonFields = ['_id', 'createdAt', 'updatedAt', 'userId', 'status'];
+
+                for (const field of commonFields) {
+                    if (sampleDocs.some(doc => doc.hasOwnProperty(field)) && !indexedFields.has(field)) {
+                        suggestions.push(`db.${collection}.createIndex({"${field}": 1})`);
+                    }
+                }
+
+                // Suggest compound indexes for common patterns
+                if (sampleDocs.some(doc => doc.userId && doc.createdAt)) {
+                    compoundSuggestions.push(`db.${collection}.createIndex({"userId": 1, "createdAt": -1})`);
+                }
+
+                if (sampleDocs.some(doc => doc.status && doc.createdAt)) {
+                    compoundSuggestions.push(`db.${collection}.createIndex({"status": 1, "createdAt": -1})`);
+                }
+            }
+
+            // 5. Generate response
+            let responseText = `Index Analysis for collection '${collection}':\n\n`;
+
+            responseText += `Existing Indexes: ${existingIndexes.length}\n`;
+            existingIndexes.forEach((index: any, i: number) => {
+                responseText += `${i + 1}. ${JSON.stringify(index.key)}\n`;
+            });
+
+            responseText += `\nSuggested Single Field Indexes:\n`;
+            suggestions.forEach((suggestion, i) => {
+                responseText += `${i + 1}. ${suggestion}\n`;
+            });
+
+            if (compoundSuggestions.length > 0) {
+                responseText += `\nSuggested Compound Indexes:\n`;
+                compoundSuggestions.forEach((suggestion, i) => {
+                    responseText += `${i + 1}. ${suggestion}\n`;
+                });
+            }
+
+            responseText += `\nNote: These are automated suggestions based on field usage patterns. `;
+            responseText += `Consider your specific query patterns and test index performance before applying in production.`;
+
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: responseText,
+                    },
+                ],
+            };
+        } catch (error) {
+            loggingService.error('Error suggesting indexes:', { error: error instanceof Error ? error.message : String(error) });
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: `Error analyzing indexes for collection '${collection}': ${error instanceof Error ? error.message : String(error)}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
     }
 
-    private async handleAnalyzeSlowQueries(_args: any): Promise<MCPToolResult> {
-        // This requires system.profile collection access
-        return {
-            content: [
-                {
-                    type: 'text',
-                    text: 'Slow query analysis requires database profiler access. This feature will be available in the next update.',
-                },
-            ],
+    private async handleAnalyzeSlowQueries(args: any): Promise<MCPToolResult> {
+        if (!this.db || !this.connection) {
+            throw new Error('Database connection not initialized');
+        }
+
+        const { collection, thresholdMs = 100, limit = 20 } = args;
+
+        try {
+            // Check if system.profile collection exists (profiling must be enabled)
+            const systemCollections = await this.db.listCollections({ name: 'system.profile' }).toArray();
+
+            if (systemCollections.length === 0) {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `Database profiling is not enabled. To analyze slow queries:\n\n1. Enable profiling: db.setProfilingLevel(2)\n2. Wait for queries to be logged\n3. Run this analysis again\n\nNote: Profiling can impact performance and should be used carefully in production.`,
+                        },
+                    ],
+                };
+            }
+
+            // Query system.profile for slow queries
+            const profileQuery: any = {
+                millis: { $gte: thresholdMs },
+                ts: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // Last 24 hours
+            };
+
+            if (collection) {
+                profileQuery.ns = new RegExp(`^${this.db.databaseName}\\.${collection}$`);
+            }
+
+            const slowQueries = await this.db.collection('system.profile')
+                .find(profileQuery)
+                .sort({ millis: -1 })
+                .limit(limit)
+                .toArray();
+
+            if (slowQueries.length === 0) {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: `No slow queries found (threshold: ${thresholdMs}ms, last 24 hours${collection ? `, collection: ${collection}` : ''}).`,
+                        },
+                    ],
+                };
+            }
+
+            // Analyze slow queries
+            let analysisText = `Slow Query Analysis (threshold: ${thresholdMs}ms):\n\n`;
+            analysisText += `Found ${slowQueries.length} slow queries:\n\n`;
+
+            const queryPatterns = new Map<string, { count: number; totalTime: number; avgTime: number }>();
+            const indexSuggestions = new Map<string, number>();
+
+            slowQueries.forEach((query: any, index: number) => {
+                const queryTime = query.millis;
+                const collectionName = query.ns.split('.')[1];
+                const operation = query.op;
+
+                analysisText += `${index + 1}. ${operation.toUpperCase()} on ${collectionName}\n`;
+                analysisText += `   Duration: ${queryTime}ms\n`;
+
+                if (query.command) {
+                    const filter = query.command.filter || query.command.q;
+                    if (filter) {
+                        analysisText += `   Filter: ${JSON.stringify(filter)}\n`;
+
+                        // Analyze query pattern for index suggestions
+                        const patternKey = `${collectionName}:${JSON.stringify(this.extractIndexableFields(filter))}`;
+                        const existing = queryPatterns.get(patternKey) || { count: 0, totalTime: 0, avgTime: 0 };
+                        existing.count++;
+                        existing.totalTime += queryTime;
+                        existing.avgTime = existing.totalTime / existing.count;
+                        queryPatterns.set(patternKey, existing);
+
+                        // Suggest indexes for unindexed fields
+                        const indexableFields = this.extractIndexableFields(filter);
+                        indexableFields.forEach(field => {
+                            const key = `${collectionName}.${field}`;
+                            indexSuggestions.set(key, (indexSuggestions.get(key) || 0) + 1);
+                        });
+                    }
+                }
+
+                if (query.planSummary) {
+                    analysisText += `   Plan: ${query.planSummary}\n`;
+                }
+
+                analysisText += `\n`;
+            });
+
+            // Add pattern analysis
+            if (queryPatterns.size > 0) {
+                analysisText += `Query Pattern Analysis:\n`;
+                Array.from(queryPatterns.entries())
+                    .sort((a, b) => b[1].totalTime - a[1].totalTime)
+                    .slice(0, 5)
+                    .forEach(([pattern, stats]) => {
+                        analysisText += `- ${pattern}: ${stats.count} occurrences, avg ${Math.round(stats.avgTime)}ms\n`;
+                    });
+            }
+
+            // Add index suggestions
+            if (indexSuggestions.size > 0) {
+                analysisText += `\nIndex Suggestions:\n`;
+                Array.from(indexSuggestions.entries())
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 10)
+                    .forEach(([field, count]) => {
+                        analysisText += `- Consider indexing: db.${field.split('.')[0]}.createIndex({"${field.split('.')[1]}": 1}) (${count} slow queries affected)\n`;
+                    });
+            }
+
+            analysisText += `\nRecommendations:\n`;
+            analysisText += `1. Review and optimize the queries above\n`;
+            analysisText += `2. Consider the index suggestions for frequently slow queries\n`;
+            analysisText += `3. Monitor query performance regularly\n`;
+            analysisText += `4. Consider query optimization or data model changes if needed\n`;
+
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: analysisText,
+                    },
+                ],
+            };
+        } catch (error) {
+            loggingService.error('Error analyzing slow queries:', { error: error instanceof Error ? error.message : String(error) });
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: `Error analyzing slow queries: ${error instanceof Error ? error.message : String(error)}\n\nThis feature requires database profiling to be enabled.`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    }
+
+    /**
+     * Extract indexable fields from a MongoDB query filter
+     */
+    private extractIndexableFields(filter: any): string[] {
+        const fields: string[] = [];
+
+        const extractFields = (obj: any, prefix = '') => {
+            if (!obj || typeof obj !== 'object') return;
+
+            for (const [key, value] of Object.entries(obj)) {
+                if (key === '$and' || key === '$or' || key === '$nor') {
+                    if (Array.isArray(value)) {
+                        value.forEach(item => extractFields(item, prefix));
+                    }
+                } else if (key === '$elemMatch') {
+                    extractFields(value, prefix);
+                } else if (!key.startsWith('$') && typeof value !== 'object') {
+                    fields.push(prefix + key);
+                } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                    // Simple equality or range query
+                    if (Object.keys(value).some(k => !k.startsWith('$'))) {
+                        fields.push(prefix + key);
+                    } else {
+                        extractFields(value, prefix + key + '.');
+                    }
+                }
+            }
         };
+
+        extractFields(filter);
+        return [...new Set(fields)]; // Remove duplicates
     }
 
     private async handleEstimateQueryCost(args: any): Promise<MCPToolResult> {

@@ -1,6 +1,7 @@
 import { Tool } from "@langchain/core/tools";
 import { getModelPricing } from "../data/modelPricing";
 import { loggingService } from '../services/logging.service';
+import { AIRouterService } from '../services/aiRouter.service';
 
 interface ModelOperation {
     operation: 'recommend' | 'compare' | 'test' | 'configure' | 'validate';
@@ -166,26 +167,112 @@ export class ModelSelectorTool extends Tool {
                 return "Model testing requires test configuration.";
             }
 
-            // Simulate model testing (in real implementation, this would make actual API calls)
-            const testResults = {
-                provider: operation.testConfig.provider || 'anthropic',
-                model: operation.testConfig.model || 'claude-3-haiku',
-                connectivity: 'success',
-                responseTime: Math.floor(Math.random() * 2000) + 500, // Simulated
-                tokenUsage: {
-                    prompt: operation.testConfig.expectedTokens || 100,
-                    completion: Math.floor((operation.testConfig.expectedTokens || 100) * 0.8)
-                },
-                cost: 0.0025, // Simulated
-                qualityScore: Math.floor(Math.random() * 30) + 70, // 70-100
-                sampleResponse: "Test response generated successfully. The model is working correctly and responding within expected parameters."
+            const config = operation.testConfig;
+            const model = config.model;
+            if (!model) {
+                return "Model testing requires testConfig.model.";
+            }
+
+            const prompts = (config.samplePrompts && config.samplePrompts.length > 0)
+                ? config.samplePrompts.slice(0, 5)
+                : [
+                    "Say hello in one sentence.",
+                    "What is 2+2? Reply with one number.",
+                    "List one best practice for API design."
+                ];
+
+            const maxTokens = config.expectedTokens ?? 500;
+            const testResults: Array<{
+                prompt: string;
+                responseTime: number;
+                inputTokens: number;
+                outputTokens: number;
+                totalTokens: number;
+                cost: number;
+                success: boolean;
+                error?: string;
+                qualityScore?: number;
+            }> = [];
+
+            for (const prompt of prompts) {
+                const start = Date.now();
+                try {
+                    const response = await AIRouterService.invokeModel(
+                        prompt,
+                        model,
+                        undefined,
+                        { maxTokens }
+                    );
+                    const responseTime = Date.now() - start;
+                    const inputTokens = Math.ceil(prompt.length / 4);
+                    const outputTokens = Math.ceil(response.length / 4);
+                    const totalTokens = inputTokens + outputTokens;
+
+                    const pricing = this.getModelInfo(model);
+                    let cost = 0;
+                    if (pricing && pricing.length > 0) {
+                        const p = pricing[0];
+                        cost = (inputTokens * (p.inputPrice ?? 0) + outputTokens * (p.outputPrice ?? 0)) / 1_000_000;
+                    }
+
+                    const qualityScore = response.length > 0
+                        ? Math.min(100, 50 + Math.min(50, Math.floor(response.length / 20)))
+                        : 0;
+
+                    testResults.push({
+                        prompt: prompt.substring(0, 80) + (prompt.length > 80 ? '...' : ''),
+                        responseTime,
+                        inputTokens,
+                        outputTokens,
+                        totalTokens,
+                        cost,
+                        success: true,
+                        qualityScore
+                    });
+                } catch (err) {
+                    const responseTime = Date.now() - start;
+                    testResults.push({
+                        prompt: prompt.substring(0, 80) + (prompt.length > 80 ? '...' : ''),
+                        responseTime,
+                        inputTokens: Math.ceil(prompt.length / 4),
+                        outputTokens: 0,
+                        totalTokens: Math.ceil(prompt.length / 4),
+                        cost: 0,
+                        success: false,
+                        error: err instanceof Error ? err.message : String(err)
+                    });
+                }
+            }
+
+            const successful = testResults.filter(r => r.success);
+            const avgResponseTime = successful.length > 0
+                ? successful.reduce((s, r) => s + r.responseTime, 0) / successful.length
+                : 0;
+            const totalCost = testResults.reduce((s, r) => s + r.cost, 0);
+            const avgQuality = successful.length > 0
+                ? successful.reduce((s, r) => s + (r.qualityScore ?? 0), 0) / successful.length
+                : 0;
+
+            const summary = {
+                responseTime: avgResponseTime,
+                cost: totalCost,
+                qualityScore: avgQuality,
+                totalRequests: testResults.length,
+                successCount: successful.length,
+                failureCount: testResults.length - successful.length
             };
 
-            const analysis = this.analyzeTestResults(testResults, operation.testConfig);
+            const analysis = this.analyzeTestResults(summary, config);
 
             return JSON.stringify({
-                success: true,
+                success: successful.length > 0,
+                operation: 'test',
                 testResults,
+                summary: {
+                    ...summary,
+                    model,
+                    provider: config.provider ?? 'auto'
+                },
                 analysis,
                 recommendations: analysis.recommendations,
                 nextSteps: [
@@ -195,7 +282,6 @@ export class ModelSelectorTool extends Tool {
                     "Configure fallback models if needed"
                 ]
             }, null, 2);
-
         } catch (error) {
             return `Failed to test model: ${error instanceof Error ? error.message : 'Unknown error'}`;
         }
@@ -248,10 +334,14 @@ export class ModelSelectorTool extends Tool {
                 return "Model validation requires a model name.";
             }
 
+            const pricing = this.getModelInfo(model);
+            const modelExists = !!pricing && pricing.length > 0;
+            const pricingAvailable = modelExists;
+
             const validation = {
-                modelExists: true, // Would check actual availability
-                pricingAvailable: true,
-                apiAccess: true, // Would test API connectivity
+                modelExists,
+                pricingAvailable,
+                apiAccess: true, // Requires runtime API health check; set true when keys are configured
                 regionSupport: true,
                 features: {
                     streaming: true,
@@ -261,7 +351,7 @@ export class ModelSelectorTool extends Tool {
                 },
                 limits: {
                     rateLimit: '1000 requests/minute',
-                    contextWindow: this.getModelInfo(model)?.[0]?.contextWindow || 4096,
+                    contextWindow: pricing?.[0]?.contextWindow || 4096,
                     maxTokens: 4096
                 }
             };
@@ -270,8 +360,8 @@ export class ModelSelectorTool extends Tool {
                 success: true,
                 model,
                 validation,
-                status: 'ready',
-                warnings: validation.apiAccess ? [] : ['API access not available in current region'],
+                status: modelExists ? 'ready' : 'unknown_model',
+                warnings: !validation.apiAccess ? ['API access not verified in current region'] : (!modelExists ? ['Model not in pricing catalog'] : []),
                 recommendations: [
                     'Test with small requests before full deployment',
                     'Set up monitoring and alerting',

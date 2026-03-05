@@ -7,6 +7,7 @@ import { loggingService } from './logging.service';
 import { EmailService } from './email.service';
 import { ActivityService } from './activity.service';
 import mongoose from 'mongoose';
+import * as XLSX from 'xlsx';
 
 interface CreateProjectDto {
     name: string;
@@ -1010,8 +1011,79 @@ export class ProjectService {
                 .join('\n');
         }
 
-        // Excel format would require additional libraries
-        throw new Error('Excel export not yet implemented');
+        // Excel export implementation
+        const workbook = XLSX.utils.book_new();
+
+        // Project Summary Sheet
+        const projectSummary = [
+            ['Project Information'],
+            ['Name', project.name],
+            ['Budget', project.budget?.amount || 0],
+            ['Current Spending', project.spending?.current ?? 0],
+            ['Remaining Budget', (project.budget?.amount || 0) - (project.spending?.current ?? 0)],
+            ['Created', project.createdAt.toISOString()],
+            [''],
+            ['Usage Statistics'],
+            ['Total Records', usageData.length],
+            ['Date Range', options.startDate ? options.startDate.toISOString() : 'All time', options.endDate ? options.endDate.toISOString() : 'Present'],
+        ];
+
+        const projectSheet = XLSX.utils.aoa_to_sheet(projectSummary);
+        XLSX.utils.book_append_sheet(workbook, projectSheet, 'Project Summary');
+
+        // Usage Data Sheet
+        const usageHeaders = [
+            'Date',
+            'User Name',
+            'User Email',
+            'Service',
+            'Model',
+            'Prompt Tokens',
+            'Completion Tokens',
+            'Total Tokens',
+            'Cost (USD)',
+            'Latency (ms)',
+            'Department',
+            'Team',
+            'Client',
+            'Tags',
+            'Request ID',
+        ];
+
+        const usageRows = usageData.map((u: any) => [
+            u.createdAt.toISOString(),
+            u.userId?.name || '',
+            u.userId?.email || '',
+            u.service || '',
+            u.model || '',
+            u.promptTokens || 0,
+            u.completionTokens || 0,
+            u.totalTokens || 0,
+            u.cost || 0,
+            u.latency || 0,
+            u.costAllocation?.department || '',
+            u.costAllocation?.team || '',
+            u.costAllocation?.client || '',
+            (u.tags && Array.isArray(u.tags) ? u.tags.join(', ') : ''),
+            u.requestId || '',
+        ]);
+
+        const usageSheet = XLSX.utils.aoa_to_sheet([usageHeaders, ...usageRows]);
+        XLSX.utils.book_append_sheet(workbook, usageSheet, 'Usage Data');
+
+        // Cost Analysis Sheet
+        const costAnalysis = this.generateCostAnalysisSheet(usageData);
+        const costSheet = XLSX.utils.aoa_to_sheet(costAnalysis);
+        XLSX.utils.book_append_sheet(workbook, costSheet, 'Cost Analysis');
+
+        // Generate buffer
+        const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+        return {
+            buffer,
+            filename: `${project.name.replace(/[^a-zA-Z0-9]/g, '_')}_export_${new Date().toISOString().split('T')[0]}.xlsx`,
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        };
     }
 
     /**
@@ -1120,5 +1192,121 @@ export class ProjectService {
             this.objectIdCache.set(id, new mongoose.Types.ObjectId(id));
         }
         return this.objectIdCache.get(id)!;
+    }
+
+    /**
+     * Generate cost analysis sheet data
+     */
+    private static generateCostAnalysisSheet(usageData: any[]): any[][] {
+        const analysis = [
+            ['Cost Analysis'],
+            [''],
+            ['Summary Statistics'],
+            ['Total Usage Records', usageData.length],
+            ['Total Cost (USD)', usageData.reduce((sum, u) => sum + (u.cost || 0), 0)],
+            ['Average Cost per Request', usageData.length > 0 ? usageData.reduce((sum, u) => sum + (u.cost || 0), 0) / usageData.length : 0],
+            ['Total Tokens Used', usageData.reduce((sum, u) => sum + (u.totalTokens || 0), 0)],
+            [''],
+            ['Cost by Service'],
+        ];
+
+        // Group by service
+        const serviceCosts = new Map<string, number>();
+        const serviceRequests = new Map<string, number>();
+
+        usageData.forEach((u) => {
+            const service = u.service || 'Unknown';
+            serviceCosts.set(service, (serviceCosts.get(service) || 0) + (u.cost || 0));
+            serviceRequests.set(service, (serviceRequests.get(service) || 0) + 1);
+        });
+
+        analysis.push(['Service', 'Total Cost', 'Request Count', 'Avg Cost per Request']);
+        Array.from(serviceCosts.entries()).forEach(([service, cost]) => {
+            const requests = serviceRequests.get(service) || 0;
+            analysis.push([
+                service,
+                cost.toFixed(4),
+                requests,
+                (cost / requests).toFixed(4),
+            ]);
+        });
+
+        analysis.push(['']);
+        analysis.push(['Cost by Model']);
+
+        // Group by model
+        const modelCosts = new Map<string, number>();
+        const modelRequests = new Map<string, number>();
+
+        usageData.forEach((u) => {
+            const model = u.model || 'Unknown';
+            modelCosts.set(model, (modelCosts.get(model) || 0) + (u.cost || 0));
+            modelRequests.set(model, (modelRequests.get(model) || 0) + 1);
+        });
+
+        analysis.push(['Model', 'Total Cost', 'Request Count', 'Avg Cost per Request']);
+        Array.from(modelCosts.entries()).forEach(([model, cost]) => {
+            const requests = modelRequests.get(model) || 0;
+            analysis.push([
+                model,
+                cost.toFixed(4),
+                requests,
+                (cost / requests).toFixed(4),
+            ]);
+        });
+
+        analysis.push(['']);
+        analysis.push(['Cost by User']);
+
+        // Group by user
+        const userCosts = new Map<string, number>();
+        const userRequests = new Map<string, number>();
+
+        usageData.forEach((u) => {
+            const userName = (u.userId as any)?.name || (u.userId as any)?.email || 'Unknown User';
+            userCosts.set(userName, (userCosts.get(userName) || 0) + (u.cost || 0));
+            userRequests.set(userName, (userRequests.get(userName) || 0) + 1);
+        });
+
+        analysis.push(['User', 'Total Cost', 'Request Count', 'Avg Cost per Request']);
+        Array.from(userCosts.entries())
+            .sort((a, b) => b[1] - a[1]) // Sort by cost descending
+            .forEach(([user, cost]) => {
+                const requests = userRequests.get(user) || 0;
+                analysis.push([
+                    user,
+                    cost.toFixed(4),
+                    requests,
+                    (cost / requests).toFixed(4),
+                ]);
+            });
+
+        analysis.push(['']);
+        analysis.push(['Daily Cost Breakdown']);
+
+        // Group by date
+        const dailyCosts = new Map<string, number>();
+        const dailyRequests = new Map<string, number>();
+
+        usageData.forEach((u) => {
+            const date = u.createdAt.toISOString().split('T')[0];
+            dailyCosts.set(date, (dailyCosts.get(date) || 0) + (u.cost || 0));
+            dailyRequests.set(date, (dailyRequests.get(date) || 0) + 1);
+        });
+
+        analysis.push(['Date', 'Total Cost', 'Request Count', 'Avg Cost per Request']);
+        Array.from(dailyCosts.entries())
+            .sort((a, b) => a[0].localeCompare(b[0])) // Sort by date ascending
+            .forEach(([date, cost]) => {
+                const requests = dailyRequests.get(date) || 0;
+                analysis.push([
+                    date,
+                    cost.toFixed(4),
+                    requests,
+                    (cost / requests).toFixed(4),
+                ]);
+            });
+
+        return analysis;
     }
 } 

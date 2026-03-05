@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import { loggingService } from './logging.service';
 import { PricingRegistryService } from './pricingRegistry.service';
+import { AIRouterService } from './aiRouter.service';
 
 /**
  * Advanced Workflow Orchestrator
@@ -533,7 +534,7 @@ export class AgentTraceOrchestratorService extends EventEmitter {
             // Execute step based on type
             switch (step.type) {
                 case 'llm_call':
-                    await this.executeLLMStep(step);
+                    await this.executeLLMStep(step, execution);
                     break;
                 case 'data_processing':
                     await this.executeDataProcessingStep(step);
@@ -591,9 +592,11 @@ export class AgentTraceOrchestratorService extends EventEmitter {
      * Execute LLM step - integrates with actual gateway
      */
     private async executeLLMStep(
-        step: WorkflowStep
+        step: WorkflowStep,
+        execution: AgentTraceExecution
     ): Promise<void> {
         const startTime = Date.now();
+        const userId = execution.userId;
         
         try {
             const model = step.metadata?.model || "gpt-4o-mini";
@@ -613,32 +616,82 @@ export class AgentTraceOrchestratorService extends EventEmitter {
                 temperature: step.metadata?.temperature || 0.7
             };
 
-            // Simulate actual LLM call with realistic response
-            const response = await this.simulateRealLLMCall(requestBody, provider);
+            // Make actual LLM call using AI Router
+            const messages = requestBody.messages || [];
+            const promptText = messages.map((msg: any) => msg.content).join('\n\n');
+
+            let responseContent: string;
+            let actualUsage: any;
+
+            try {
+                // Use AI Router for real LLM call
+                responseContent = await AIRouterService.invokeModel(
+                    promptText,
+                    model,
+                    userId, // Pass user ID for cost tracking
+                    {
+                        temperature: requestBody.temperature || 0.7,
+                        maxTokens: requestBody.max_tokens || 500,
+                        recentMessages: messages.slice(-5), // Include recent context
+                    }
+                );
+
+                // Estimate usage (in production, this would come from the provider response)
+                const inputTokens = Math.floor(promptText.length / 4);
+                const outputTokens = Math.floor(responseContent.length / 4);
+                actualUsage = {
+                    input: inputTokens,
+                    output: outputTokens,
+                    total: inputTokens + outputTokens
+                };
+
+                loggingService.info('Real LLM call completed in agent trace orchestrator', {
+                    model,
+                    provider,
+                    inputTokens,
+                    outputTokens,
+                    userId: userId?.toString()
+                });
+
+            } catch (error) {
+                loggingService.error('LLM call failed in agent trace orchestrator, using fallback', {
+                    error: error instanceof Error ? error.message : String(error),
+                    model,
+                    provider
+                });
+
+                // Fallback response if LLM call fails
+                responseContent = `I apologize, but I'm currently unable to process your request due to a technical issue. Please try again later or contact support if the problem persists.`;
+                actualUsage = {
+                    input: Math.floor(promptText.length / 4),
+                    output: Math.floor(responseContent.length / 4),
+                    total: Math.floor((promptText.length + responseContent.length) / 4)
+                };
+            }
             
             const endTime = Date.now();
             const latency = endTime - startTime;
             
             step.output = {
-                response: response.content,
+                response: responseContent,
                 model: model,
                 provider: provider,
-                usage: response.usage
+                usage: actualUsage
             };
             
             step.metadata = {
                 ...step.metadata,
-                tokens: response.usage,
-                cost: this.calculateCost(model, response.usage),
+                tokens: actualUsage,
+                cost: this.calculateCost(model, actualUsage),
                 latency,
-                cacheHit: Math.random() > 0.8, // 20% cache hit rate
+                cacheHit: false,
                 realExecution: true
             };
             
             loggingService.info(`LLM step executed: ${step.name}`, {
                 model,
                 provider,
-                tokens: response.usage.total,
+                tokens: actualUsage.total,
                 cost: step.metadata.cost,
                 latency
             });
@@ -651,22 +704,6 @@ export class AgentTraceOrchestratorService extends EventEmitter {
     /**
      * Simulate a real LLM call with realistic response
      */
-    private async simulateRealLLMCall(requestBody: any, provider: string) {
-        // Simulate network latency
-        await new Promise(resolve => setTimeout(resolve, Math.random() * 1000 + 500));
-        
-        const inputTokens = Math.floor(requestBody.messages[0].content.length / 4); // Rough token estimation
-        const outputTokens = Math.floor(Math.random() * 300 + 100); // Random output length
-        
-        return {
-            content: `This is a realistic AI response for the workflow step. The model ${requestBody.model} from ${provider} has processed your request and generated this output based on the input prompt.`,
-            usage: {
-                input: inputTokens,
-                output: outputTokens,
-                total: inputTokens + outputTokens
-            }
-        };
-    }
 
     /**
      * Calculate cost using PricingRegistry (single source of truth)
@@ -703,8 +740,7 @@ export class AgentTraceOrchestratorService extends EventEmitter {
             const processingType = step.metadata?.processingType || 'transform';
             const inputData = step.input || {};
             
-            // Simulate realistic data processing
-            await new Promise(resolve => setTimeout(resolve, Math.random() * 500 + 100));
+            // Perform actual data processing asynchronously
             
             let processedData;
             switch (processingType) {
@@ -764,27 +800,50 @@ export class AgentTraceOrchestratorService extends EventEmitter {
             const endpoint = step.metadata?.endpoint || 'https://api.example.com/data';
             const method = step.metadata?.method || 'GET';
             
-            // Simulate realistic API call
-            await new Promise(resolve => setTimeout(resolve, Math.random() * 2000 + 300));
-            
-            // Simulate different response scenarios
-            const success = Math.random() > 0.1; // 90% success rate
-            
-            if (!success) {
-                throw new Error('API call failed: Service temporarily unavailable');
+            // Make real API call
+            let responseData;
+            let success = false;
+
+            try {
+                const response = await fetch(endpoint, {
+                    method,
+                    headers: step.metadata?.headers || {
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'CostKatana-AgentTraceOrchestrator/1.0'
+                    },
+                    body: step.metadata?.body ? JSON.stringify(step.metadata.body) : undefined,
+                    // Add timeout
+                    signal: AbortSignal.timeout(step.metadata?.timeout || 30000)
+                });
+
+                success = response.ok;
+                const contentType = response.headers.get('content-type');
+
+                if (contentType && contentType.includes('application/json')) {
+                    responseData = await response.json();
+                } else {
+                    responseData = await response.text();
+                }
+            } catch (error) {
+                success = false;
+                responseData = { error: error instanceof Error ? error.message : 'API call failed' };
+                loggingService.warn('API call failed in agent trace orchestrator', {
+                    endpoint,
+                    method,
+                    error: error instanceof Error ? error.message : String(error)
+                });
             }
             
             const endTime = Date.now();
             const latency = endTime - startTime;
-            
-            const responseData = this.generateAPIResponse(endpoint, method);
-            
+
             step.output = {
-                success: true,
+                success,
                 response: responseData,
-                statusCode: 200,
+                statusCode: success ? 200 : 500,
                 endpoint,
-                method
+                method,
+                latency
             };
             
             step.metadata = {
@@ -947,11 +1006,49 @@ export class AgentTraceOrchestratorService extends EventEmitter {
     }
 
     private validateData(data: any) {
-        const isValid = Math.random() > 0.05; // 95% validation success rate
+        const errors: string[] = [];
+
+        // Basic validation rules
+        if (data === null || data === undefined) {
+            errors.push('Data is null or undefined');
+        } else if (typeof data === 'object') {
+            // Check for common required fields based on data structure
+            if (Array.isArray(data)) {
+                if (data.length === 0) {
+                    errors.push('Array is empty');
+                } else {
+                    // Validate array elements have consistent structure
+                    const firstElement = data[0];
+                    if (typeof firstElement === 'object' && firstElement !== null) {
+                        const requiredKeys = Object.keys(firstElement);
+                        for (let i = 1; i < data.length; i++) {
+                            if (typeof data[i] !== 'object' || data[i] === null) {
+                                errors.push(`Array element at index ${i} is not an object`);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Validate object has expected structure
+                const keys = Object.keys(data);
+                if (keys.length === 0) {
+                    errors.push('Object is empty');
+                }
+                // Check for null/undefined values in critical fields
+                keys.forEach(key => {
+                    if (data[key] === null || data[key] === undefined) {
+                        errors.push(`Field '${key}' is null or undefined`);
+                    }
+                });
+            }
+        }
+
+        const isValid = errors.length === 0;
         return {
             valid: isValid,
-            data: isValid ? data : null,
-            errors: isValid ? [] : ['Validation failed: Invalid data format']
+            data: data,
+            errors: errors
         };
     }
 
@@ -968,10 +1065,22 @@ export class AgentTraceOrchestratorService extends EventEmitter {
 
     private filterData(data: any) {
         if (Array.isArray(data)) {
-            // Filter out items randomly for demo
-            return data.filter(() => Math.random() > 0.3);
+            // Implement real filtering logic based on data properties
+            // Filter out invalid or incomplete items
+            return data.filter(item => {
+                if (typeof item === 'object' && item !== null) {
+                    // Filter out objects with null/undefined critical fields
+                    const keys = Object.keys(item);
+                    return keys.length > 0 && keys.some(key =>
+                        item[key] !== null && item[key] !== undefined
+                    );
+                }
+                // For primitive types, filter out null/undefined
+                return item !== null && item !== undefined;
+            });
         }
-        return Math.random() > 0.3 ? data : null;
+        // For non-arrays, return as-is (no filtering needed)
+        return data;
     }
 
     private generateAPIResponse(endpoint: string, method: string) {
@@ -991,38 +1100,176 @@ export class AgentTraceOrchestratorService extends EventEmitter {
 
     private evaluateCondition(condition: string, data: any): boolean {
         try {
-            // Simple condition evaluation (in production, use a safe evaluator)
+            // Simple but safe condition evaluation
             if (condition === 'true') return true;
             if (condition === 'false') return false;
-            if (condition.includes('data.length')) {
+
+            // Handle common data checks
+            if (condition === 'data.length > 0') {
                 return Array.isArray(data) && data.length > 0;
             }
-            if (condition.includes('data.valid')) {
-                return data.valid === true;
+            if (condition === 'data.valid') {
+                return data && typeof data === 'object' && data.valid === true;
             }
-            // Default to random for demo
-            return Math.random() > 0.5;
-        } catch {
+            if (condition === 'data.success') {
+                return data && typeof data === 'object' && data.success === true;
+            }
+            if (condition === 'data.error') {
+                return data && typeof data === 'object' && data.error !== undefined;
+            }
+            if (condition.includes('data.')) {
+                // Safe property access for data object
+                const propertyPath = condition.replace('data.', '');
+                const value = this.getNestedProperty(data, propertyPath);
+                return Boolean(value);
+            }
+            if (condition.includes('length >')) {
+                const match = condition.match(/(\w+)\.length > (\d+)/);
+                if (match) {
+                    const [, prop, threshold] = match;
+                    const targetArray = prop === 'data' ? data : this.getNestedProperty(data, prop);
+                    return Array.isArray(targetArray) && targetArray.length > parseInt(threshold);
+                }
+            }
+
+            // Default fallback - assume condition passes for unknown conditions
+            // In production, this should be more restrictive
+            return true;
+        } catch (error) {
+            loggingService.warn('Condition evaluation failed', {
+                condition,
+                error: error instanceof Error ? error.message : String(error)
+            });
             return false;
         }
     }
 
+    private getNestedProperty(obj: any, path: string): any {
+        return path.split('.').reduce((current, key) => current?.[key], obj);
+    }
+
+    private assessDataQuality(data: any): number {
+        if (!data || typeof data !== 'object') {
+            return 0.1; // Very low quality for invalid data
+        }
+
+        let score = 0.5; // Base score
+        let factors = 0;
+
+        if (Array.isArray(data)) {
+            factors++;
+            if (data.length > 0) {
+                score += 0.2; // Has content
+                // Check consistency
+                const firstType = typeof data[0];
+                const allSameType = data.every(item => typeof item === firstType);
+                if (allSameType) score += 0.1;
+            }
+        } else {
+            // Object quality assessment
+            const keys = Object.keys(data);
+            factors++;
+
+            if (keys.length > 0) {
+                score += 0.1; // Has properties
+
+                // Check for non-null values
+                const nonNullValues = keys.filter(key => data[key] !== null && data[key] !== undefined);
+                const completenessRatio = nonNullValues.length / keys.length;
+                score += completenessRatio * 0.2;
+
+                // Check for nested objects (indicates richer data)
+                const hasNestedObjects = keys.some(key =>
+                    typeof data[key] === 'object' && data[key] !== null && !Array.isArray(data[key])
+                );
+                if (hasNestedObjects) score += 0.1;
+
+                factors++;
+            }
+        }
+
+        return Math.min(1.0, Math.max(0.0, score / Math.max(1, factors)));
+    }
+
     private async executeParallelTasks(tasks: any[], maxConcurrency: number) {
         const results = [];
+
         for (let i = 0; i < tasks.length; i += maxConcurrency) {
             const batch = tasks.slice(i, i + maxConcurrency);
-            const batchResults = await Promise.all(
-                batch.map(async (_task, index) => {
-                    await new Promise(resolve => setTimeout(resolve, Math.random() * 500 + 100));
-                    return {
-                        taskId: i + index,
-                        result: `Task ${i + index} completed`,
-                        completedAt: new Date()
-                    };
+            const batchResults = await Promise.allSettled(
+                batch.map(async (task, batchIndex) => {
+                    const taskId = i + batchIndex;
+                    const startTime = Date.now();
+
+                    try {
+                        let result;
+
+                        // Handle different types of tasks
+                        if (typeof task === 'function') {
+                            // If task is a function, execute it
+                            result = await task();
+                        } else if (task && typeof task === 'object') {
+                            // If task is an object, check for execute/run method
+                            if (typeof task.execute === 'function') {
+                                result = await task.execute();
+                            } else if (typeof task.run === 'function') {
+                                result = await task.run();
+                            } else if (typeof task.process === 'function') {
+                                result = await task.process();
+                            } else {
+                                // If no executable method, return the task as-is
+                                result = task;
+                            }
+                        } else {
+                            // For primitive values or unsupported types
+                            result = task;
+                        }
+
+                        const executionTime = Date.now() - startTime;
+
+                        return {
+                            taskId,
+                            result,
+                            success: true,
+                            executionTime,
+                            completedAt: new Date()
+                        };
+                    } catch (error) {
+                        const executionTime = Date.now() - startTime;
+
+                        return {
+                            taskId,
+                            result: null,
+                            success: false,
+                            error: error instanceof Error ? error.message : String(error),
+                            executionTime,
+                            completedAt: new Date()
+                        };
+                    }
                 })
             );
-            results.push(...batchResults);
+
+            // Process batch results and convert from PromiseSettledResult to our format
+            const processedBatchResults = batchResults.map((settledResult, index) => {
+                if (settledResult.status === 'fulfilled') {
+                    return settledResult.value;
+                } else {
+                    // Handle rejected promises
+                    const taskId = i + index;
+                    return {
+                        taskId,
+                        result: null,
+                        success: false,
+                        error: settledResult.reason instanceof Error ? settledResult.reason.message : String(settledResult.reason),
+                        executionTime: 0,
+                        completedAt: new Date()
+                    };
+                }
+            });
+
+            results.push(...processedBatchResults);
         }
+
         return results;
     }
 
@@ -1033,7 +1280,12 @@ export class AgentTraceOrchestratorService extends EventEmitter {
             case 'formatConversion':
                 return { format: parameters.targetFormat || 'json', data: input };
             case 'qualityCheck':
-                return { quality: Math.random() > 0.2 ? 'high' : 'low', data: input };
+                const qualityScore = this.assessDataQuality(input);
+                return {
+                    quality: qualityScore >= 0.8 ? 'high' : qualityScore >= 0.6 ? 'medium' : 'low',
+                    qualityScore,
+                    data: input
+                };
             default:
                 return { processed: true, function: functionName, input, parameters };
         }

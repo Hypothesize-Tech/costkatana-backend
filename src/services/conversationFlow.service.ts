@@ -588,7 +588,7 @@ Answer with ONE WORD ONLY:`;
             isComplete: true,
             requiresMcpCall: true,
             mcpAction: template.mcpAction,
-            mcpData: this.prepareMcpData(state, template),
+            mcpData: this.prepareMcpData(state, template, _userId),
             thinking: {
                 title: `Executing ${template.name}`,
                 steps: [
@@ -640,10 +640,10 @@ Answer with ONE WORD ONLY:`;
     /**
      * Prepare data for MCP call
      */
-    private prepareMcpData(state: ConversationState, _template: TaskTemplate): any {
+    private prepareMcpData(state: ConversationState, _template: TaskTemplate, userId: string): any {
         const mcpData: any = {
             operation: this.getMcpOperation(state.taskType),
-            userId: 'placeholder_user_id', // This will be replaced with actual userId
+            userId: userId,
             ...state.collectedData
         };
 
@@ -787,6 +787,46 @@ Answer with ONE WORD ONLY:`;
             actualQuery = userQueryMatch[1].trim();
         }
 
+        // Direct Bedrock path: when user selected a model, use it directly for conversational responses
+        // This ensures the selected model is respected (matches Nest backend behavior)
+        const selectedModel = context?.selectedModel as string | undefined;
+        if (selectedModel && typeof selectedModel === 'string' && selectedModel.trim()) {
+            try {
+                const { BedrockService } = await import('@services/tracedBedrock.service');
+                const contextualPrompt = this.buildConversationalPrompt(
+                    actualQuery,
+                    (context?.previousMessages ?? []) as Array<{ role: string; content: string }>
+                );
+                const response = await BedrockService.invokeModel(
+                    contextualPrompt,
+                    selectedModel,
+                    {
+                        recentMessages: context?.previousMessages as Array<{ role: string; content: string }> | undefined,
+                        useSystemPrompt: true
+                    }
+                );
+                const responseText = typeof response === 'string' ? response : (response?.content?.[0]?.text ?? response?.trim?.() ?? '');
+                if (responseText && responseText.trim()) {
+                    loggingService.info('Conversational response from direct Bedrock', {
+                        model: selectedModel,
+                        promptLength: contextualPrompt.length,
+                        responseLength: responseText.length
+                    });
+                    return {
+                        response: responseText.trim(),
+                        isComplete: true,
+                        requiresMcpCall: false
+                    };
+                }
+            } catch (err) {
+                loggingService.warn('Direct Bedrock invocation failed, falling back to agent', {
+                    model: selectedModel,
+                    error: err instanceof Error ? err.message : String(err)
+                });
+                // Fall through to multi-LLM orchestration
+            }
+        }
+
         // For truly general queries, use multi-LLM orchestration for intelligent tool selection
         // This ensures Vercel queries are routed to Vercel tools, not CostKatana projects
         try {
@@ -848,6 +888,23 @@ Answer with ONE WORD ONLY:`;
                 requiresMcpCall: false
             };
         }
+    }
+
+    /**
+     * Build prompt from current query and conversation history for Bedrock invocation
+     */
+    private buildConversationalPrompt(
+        query: string,
+        previousMessages: Array<{ role: string; content: string }>
+    ): string {
+        if (!previousMessages?.length) {
+            return query;
+        }
+        const recent = previousMessages.slice(-6);
+        const lines = recent
+            .map((m) => `${m.role === 'user' ? 'Human' : 'Assistant'}: ${(m.content || '').trim()}`)
+            .concat([`Human: ${query}`, 'Assistant:']);
+        return lines.join('\n\n');
     }
 
     /**

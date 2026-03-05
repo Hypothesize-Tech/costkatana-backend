@@ -773,7 +773,7 @@ export class ModelRegistryService {
         let meetsRequirements = true;
 
         // Get estimated cost (will be provided by pricing registry in integration)
-        const estimatedCostPer1K = 0.001; // Placeholder
+        const estimatedCostPer1K = parseFloat(process.env.MODEL_REGISTRY_ESTIMATED_COST_PER_1K || '0.001');
 
         // Check required capabilities
         if (requirements.requiredCapabilities) {

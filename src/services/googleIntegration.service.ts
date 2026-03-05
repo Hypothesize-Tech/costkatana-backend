@@ -349,28 +349,65 @@ export class GoogleIntegrationService {
             ]);
 
 
-            // Use Gemini via AWS Bedrock or direct API
-            // For now, generate mock analysis based on data patterns
+            // Check if Gemini integration is enabled
+            const geminiEnabled = process.env.GEMINI_ENABLED === 'true' &&
+                                 (process.env.GOOGLE_AI_API_KEY || process.env.AWS_BEDROCK_ENABLED === 'true');
+
+            // Perform real Google AI analysis - no mock fallbacks in production
+            if (geminiEnabled) {
+                // Use real Gemini AI for analysis
+                const prompt = `Analyze the following AI usage cost data and provide insights and recommendations:
+
+Usage Data Summary:
+- Total Cost: $${usageData.reduce((sum, item) => sum + item.totalCost, 0).toFixed(2)}
+- Average Daily Cost: $${(usageData.reduce((sum, item) => sum + item.totalCost, 0) / Math.max(usageData.length, 1)).toFixed(2)}
+- Number of Models Used: ${new Set(usageData.map(d => d._id.model)).size}
+- Total Requests: ${usageData.reduce((sum, item) => sum + item.requests, 0).toLocaleString()}
+- Data Points: ${usageData.length}
+
+Raw Data: ${JSON.stringify(usageData.slice(0, 20), null, 2)}...
+
+Please provide:
+1. A comprehensive analysis of cost trends and patterns
+2. Key insights about usage patterns
+3. Specific recommendations for cost optimization
+4. Any anomalies or unusual patterns detected
+
+Format your response as JSON with keys: analysis, insights (array), recommendations (array)`;
+
+                // Call Gemini API for analysis
+                const geminiResponse = await this.callGeminiAPI(prompt);
+
+                return {
+                    analysis: geminiResponse.analysis,
+                    insights: geminiResponse.insights,
+                    recommendations: geminiResponse.recommendations
+                };
+            }
+
+            // Gemini not enabled - provide basic statistical analysis without AI
             const totalCost = usageData.reduce((sum, item) => sum + item.totalCost, 0);
             const avgDailyCost = totalCost / Math.max(usageData.length, 1);
 
-            const analysis = `Cost trend analysis shows total spend of $${totalCost.toFixed(2)} over ${usageData.length} data points, with an average daily cost of $${avgDailyCost.toFixed(2)}.`;
+            const analysis = `Cost trend analysis shows total spend of $${totalCost.toFixed(2)} over ${usageData.length} data points, with an average daily cost of $${avgDailyCost.toFixed(2)}. AI-powered analysis is not available.`;
 
             const insights = [
                 `Total AI spending: $${totalCost.toFixed(2)}`,
                 `Average daily cost: $${avgDailyCost.toFixed(2)}`,
                 `Number of models used: ${new Set(usageData.map(d => d._id.model)).size}`,
-                `Total requests: ${usageData.reduce((sum, item) => sum + item.requests, 0).toLocaleString()}`
+                `Total requests: ${usageData.reduce((sum, item) => sum + item.requests, 0).toLocaleString()}`,
+                `Note: Advanced AI analysis not available - enable Gemini integration for detailed insights`
             ];
 
             const recommendations = [
+                'Enable Google Gemini integration for AI-powered cost analysis',
                 'Consider using semantic caching to reduce repeated requests',
                 'Enable Cortex optimization for 40-75% cost savings',
                 'Review high-cost models for potential alternatives',
                 'Set up budget alerts to monitor spending thresholds'
             ];
 
-            loggingService.info('Analyzed cost trends with Gemini', {
+            loggingService.info('Performed basic cost trend analysis (Gemini not enabled)', {
                 userId,
                 dataPoints: usageData.length,
                 totalCost
@@ -606,6 +643,88 @@ export class GoogleIntegrationService {
         }
 
         return parts.join(', ');
+    }
+
+    /**
+     * Call Gemini API for cost analysis
+     */
+    private static async callGeminiAPI(prompt: string): Promise<{
+        analysis: string;
+        insights: string[];
+        recommendations: string[];
+    }> {
+        try {
+            const apiKey = process.env.GOOGLE_AI_API_KEY;
+            if (!apiKey) {
+                throw new Error('GOOGLE_AI_API_KEY not configured');
+            }
+
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [{
+                            text: prompt
+                        }]
+                    }],
+                    generationConfig: {
+                        temperature: 0.1, // Low temperature for consistent analysis
+                        topK: 40,
+                        topP: 0.95,
+                        maxOutputTokens: 2048,
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Gemini API error: ${response.status} ${response.statusText}`);
+            }
+
+            const data = await response.json() as {
+                candidates?: Array<{
+                    content?: { parts?: Array<{ text?: string }> };
+                }>;
+            };
+
+            if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
+                throw new Error('Invalid response format from Gemini API');
+            }
+
+            const firstPart = data.candidates[0].content?.parts?.[0];
+            const generatedText = firstPart?.text ?? '';
+            if (!generatedText) {
+                throw new Error('Invalid response format from Gemini API');
+            }
+
+            // Parse the JSON response from Gemini
+            try {
+                const parsedResponse = JSON.parse(generatedText.trim());
+                return {
+                    analysis: parsedResponse.analysis || 'Analysis completed',
+                    insights: Array.isArray(parsedResponse.insights) ? parsedResponse.insights : ['Analysis completed'],
+                    recommendations: Array.isArray(parsedResponse.recommendations) ? parsedResponse.recommendations : ['Review usage patterns']
+                };
+            } catch (parseError) {
+                // If JSON parsing fails, extract information from text
+                loggingService.warn('Failed to parse Gemini response as JSON, extracting manually', {
+                    error: parseError instanceof Error ? parseError.message : String(parseError)
+                });
+
+                return {
+                    analysis: generatedText,
+                    insights: ['AI analysis completed'],
+                    recommendations: ['Review AI usage patterns for optimization opportunities']
+                };
+            }
+        } catch (error) {
+            loggingService.error('Gemini API call failed', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+        }
     }
 }
 

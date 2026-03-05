@@ -1109,13 +1109,9 @@ function calculateLevenshteinDistance(str1: string, str2: string): number {
 export function generateCortexHash(frame: CortexFrame): string {
     const normalized = JSON.stringify(frame, Object.keys(frame).sort());
     
-    // Simple hash function (in production, use a proper hash like SHA-256)
-    let hash = 0;
-    for (let i = 0; i < normalized.length; i++) {
-        const char = normalized.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash; // Convert to 32-bit integer
-    }
+    // Use proper SHA-256 hash function for production security
+    const crypto = require('crypto');
+    const hash = crypto.createHash('sha256').update(normalized, 'utf8').digest('hex');
     
     return Math.abs(hash).toString(16);
 }

@@ -622,7 +622,32 @@ export class AgentTraceController {
                 
                 // Sort by total cost descending
                 topTraceTypes.sort((a, b) => b.totalCost - a.totalCost);
-                
+
+                // Calculate cost by step
+                const costByStepMap = new Map();
+                traceUsage.forEach((usage: any) => {
+                    const stepName = usage.metadata?.traceStep || usage.tool || 'Unknown Step';
+                    const cost = usage.cost || 0;
+
+                    if (!costByStepMap.has(stepName)) {
+                        costByStepMap.set(stepName, { totalCost: 0, count: 0 });
+                    }
+
+                    const stepData = costByStepMap.get(stepName);
+                    stepData.totalCost += cost;
+                    stepData.count += 1;
+                });
+
+                const costByStep = Array.from(costByStepMap.entries()).map(([stepName, data]) => ({
+                    stepName,
+                    totalCost: data.totalCost,
+                    count: data.count,
+                    averageCost: data.totalCost / data.count
+                }));
+
+                // Sort by total cost descending
+                costByStep.sort((a, b) => b.totalCost - a.totalCost);
+
                 res.json({
                     success: true,
                     data: {
@@ -630,7 +655,7 @@ export class AgentTraceController {
                         totalCost,
                         averageTraceCost,
                         topTraceTypes,
-                        costByStep: [] // Not implemented in this version
+                        costByStep
                     }
                 });
                 return;
@@ -801,9 +826,9 @@ export class AgentTraceController {
                                 // Create a realistic pattern with higher values during work hours
                                 const hour = i % 24;
                                 if (hour >= 9 && hour <= 17) {
-                                    return Math.floor(Math.random() * 5) + 3; // 3-8 during work hours
+                                    return Math.floor((hour - 8) * 0.5) + 2; // Deterministic pattern based on hour
                                 } else {
-                                    return Math.floor(Math.random() * 3); // 0-2 outside work hours
+                                    return Math.max(0, Math.floor((24 - hour) * 0.1)); // Lower values outside work hours
                                 }
                             })
                         },
@@ -835,7 +860,7 @@ export class AgentTraceController {
                                 date.setDate(date.getDate() - (6 - i));
                                 return {
                                     date: date.toISOString().split('T')[0],
-                                    amount: totalCost / 7 * (0.8 + Math.random() * 0.4) // Randomize daily cost around the average
+                                    amount: totalCost / 7 * (0.8 + (i * 0.1)) // Deterministic variation based on day index
                                 };
                             })
                         }

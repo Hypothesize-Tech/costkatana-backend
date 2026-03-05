@@ -11,6 +11,7 @@ import { AICostTrackingService } from './aiCostTracking.service';
 import { decodeFromTOON } from '@utils/toon.utils';
 import { S3Service } from './s3.service';
 import { RawPricingData, LLMExtractionResult } from '../types/modelDiscovery.types';
+import sharp from 'sharp';
 
 interface PromptOptimizationRequest {
     prompt: string;
@@ -64,6 +65,7 @@ export class BedrockService {
         // Claude 4.6, 4.5, Opus 4, and newer models should use Converse API for better support
         const converseModels = [
             'claude-opus-4-6',
+            'claude-sonnet-4-6',
             'claude-sonnet-4-5',
             'claude-opus-4-5',
             'claude-haiku-4-5',
@@ -198,6 +200,8 @@ export class BedrockService {
         // Reference: https://docs.anthropic.com/en/docs/about-claude/models
         if (modelId.includes('claude-opus-4-6')) {
             return 65536; // Claude Opus 4.6 - 1M context (beta), use 64K output for safety
+        } else if (modelId.includes('claude-sonnet-4-6')) {
+            return 65536; // Claude Sonnet 4.6 - 64K output, 1M context (beta)
         } else if (modelId.includes('claude-sonnet-4-5') || modelId.includes('claude-opus-4-5')) {
             return 32768; // Claude Sonnet 4.5 / Opus 4.5 - supports up to 64K, using 32K for safety
         } else if (modelId.includes('claude-opus-4')) {
@@ -234,8 +238,9 @@ export class BedrockService {
             // Legacy Claude 3 models removed - use Claude 3.5+ only
             'anthropic.claude-3-haiku-20240307-v1:0': `${regionPrefix}.anthropic.claude-3-haiku-20240307-v1:0`,
             
-            // Claude Opus 4.6 and Claude 4
+            // Claude Opus 4.6, Sonnet 4.6, and Claude 4
             'anthropic.claude-opus-4-6-v1': `${regionPrefix}.anthropic.claude-opus-4-6-v1`,
+            'anthropic.claude-sonnet-4-6-v1:0': `${regionPrefix}.anthropic.claude-sonnet-4-6-v1:0`,
             'anthropic.claude-opus-4-1-20250805-v1:0': `${regionPrefix}.anthropic.claude-opus-4-1-20250805-v1:0`,
             
             // Add Nova Pro
@@ -967,12 +972,12 @@ Format your response as JSON:
         modelId: string = 'us.anthropic.claude-3-5-sonnet-20241022-v2:0'
     ): Promise<{ response: string; inputTokens: number; outputTokens: number; cost: number }> {
         // ABSOLUTE FIRST THING: Log that this function was called
-        console.log('='.repeat(80));
-        console.log('🚨 BEDROCK SERVICE invokeWithImage CALLED - ABSOLUTE FIRST LOG');
-        console.log('imageUrl type:', typeof imageUrl);
-        console.log('imageUrl length:', imageUrl?.length);
-        console.log('imageUrl first 100 chars:', imageUrl?.substring(0, 100));
-        console.log('='.repeat(80));
+        loggingService.info('='.repeat(80));
+        loggingService.info('🚨 BEDROCK SERVICE invokeWithImage CALLED - ABSOLUTE FIRST LOG');
+        loggingService.info('imageUrl type:', { value: typeof imageUrl });
+        loggingService.info('imageUrl length:', { value: imageUrl?.length });
+        loggingService.info('imageUrl first 100 chars:', { value: imageUrl?.substring(0, 100) });
+        loggingService.info('='.repeat(80));
         
         // CRITICAL DEBUG: Log exactly what we receive
         loggingService.info('🔍 BEDROCK SERVICE invokeWithImage CALLED', {
@@ -1181,16 +1186,31 @@ Format your response as JSON:
                 mediaType = 'image/gif';
             }
 
-            // TEMPORARY TEST: Skip Sharp processing to test if it's causing corruption
-            // Use the raw buffer directly
-            const processedBuffer = imageBuffer;
-            
-            loggingService.info('TESTING: Using raw buffer without Sharp processing', {
-                component: 'BedrockService',
-                bufferSize: imageBuffer.length,
-                originalType: imageType
-            });
-            
+            // Process image with Sharp for consistent format/size (required for Bedrock API reliability)
+            let processedBuffer: Buffer;
+            let outputMediaType = mediaType;
+            try {
+                processedBuffer = await sharp(imageBuffer)
+                    .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+                    .jpeg({ quality: 90 })
+                    .toBuffer();
+                outputMediaType = 'image/jpeg';
+                loggingService.info('Image processed with Sharp', {
+                    component: 'BedrockService',
+                    originalSize: imageBuffer.length,
+                    processedSize: processedBuffer.length,
+                    mediaType: outputMediaType,
+                });
+            } catch (sharpError) {
+                loggingService.warn('Sharp processing failed, using raw buffer', {
+                    component: 'BedrockService',
+                    error: sharpError instanceof Error ? sharpError.message : String(sharpError),
+                });
+                processedBuffer = imageBuffer;
+            }
+
+            mediaType = outputMediaType;
+
             // Convert processed buffer to base64
             // IMPORTANT: For data URIs, imageBase64 is already cleaned and validated (line 862)
             // For other sources (HTTP, S3), we need to encode the buffer

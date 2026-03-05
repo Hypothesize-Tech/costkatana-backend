@@ -353,12 +353,13 @@ export class CacheService {
                     } while (cursor !== '0');
                     
                     keys.push(...scannedKeys);
-                } else if (typeof (redisService as any).keys === 'function') {
-                    // Fallback to KEYS command (use with caution in production)
-                    const redisKeys = await (redisService as any).keys(pattern);
-                    if (Array.isArray(redisKeys)) {
-                        keys.push(...redisKeys);
-                    }
+                } else {
+                    // KEYS command is dangerous in production - avoid using it
+                    loggingService.warn('Redis SCAN not available and KEYS command disabled for safety', {
+                        pattern,
+                        reason: 'KEYS command can block Redis in production'
+                    });
+                    // Return empty array rather than using dangerous KEYS command
                 }
             } catch (error) {
                 loggingService.warn('Redis keys operation failed', {

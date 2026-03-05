@@ -546,10 +546,35 @@ export class PerformanceCostAnalysisService {
         // Enhance with performance metrics
         const enhancedData = await Promise.all(
             usageData.map(async (usage) => {
-                // In a real implementation, you would fetch actual performance metrics
-                // For now, we'll simulate some metrics based on usage patterns
-                const latency = this.simulateLatency(usage);
-                const errorRate = this.simulateErrorRate(usage);
+                // Try to get real performance metrics first, fall back to simulation
+                let latency: number;
+                let errorRate: number;
+
+                // Get real performance metrics - no simulation fallbacks in production
+                try {
+                    // Check if real metrics are available (e.g., from observability service)
+                    const realMetrics = await this.getRealPerformanceMetrics(usage);
+                    if (realMetrics) {
+                        latency = realMetrics.latency;
+                        errorRate = realMetrics.errorRate;
+                    } else {
+                        // No real metrics available - use safe defaults
+                        loggingService.warn('Real performance metrics not available', {
+                            usageId: usage._id
+                        });
+                        latency = 0; // Indicates no data available
+                        errorRate = 0; // Indicates no data available
+                    }
+                } catch (metricsError) {
+                    loggingService.error('Failed to get performance metrics', {
+                        usageId: usage._id,
+                        error: metricsError instanceof Error ? metricsError.message : String(metricsError)
+                    });
+
+                    // Use safe defaults on error - don't simulate
+                    latency = -1; // Negative value indicates error state
+                    errorRate = -1; // Negative value indicates error state
+                }
                 const qualityScore = await this.getQualityScore(usage);
                 const retryCount = usage.metadata?.retryCount || 0;
                 const successRate = usage.metadata?.successRate || 100;
@@ -572,16 +597,197 @@ export class PerformanceCostAnalysisService {
 
     // Additional helper methods for simulating metrics and calculations
     private static simulateLatency(usage: IUsage): number {
-        // Simulate latency based on token count and service
-        const baseLatency = usage.service.includes('gpt-4') ? 2000 : 1000;
-        const tokenMultiplier = usage.totalTokens / 100;
-        return baseLatency + (tokenMultiplier * 10) + (Math.random() * 500);
+        // Calculate deterministic latency estimate from model, token count, and service
+        let baseLatency: number;
+
+        if (usage.model?.includes('gpt-4') || usage.model?.includes('claude-3')) {
+            baseLatency = 2000;
+        } else if (usage.model?.includes('gpt-3.5') || usage.model?.includes('claude-haiku')) {
+            baseLatency = 1000;
+        } else if (usage.model?.includes('gemini')) {
+            baseLatency = 1500;
+        } else {
+            baseLatency = 1200;
+        }
+
+        const tokenMultiplier = Math.sqrt(usage.totalTokens || 0) * 5;
+        const serviceMultiplier = usage.service?.includes('anthropic') ? 1.2 :
+                                 usage.service?.includes('openai') ? 1.0 :
+                                 usage.service?.includes('google') ? 0.9 : 1.0;
+
+        return Math.round((baseLatency + tokenMultiplier) * serviceMultiplier);
     }
 
     private static simulateErrorRate(usage: IUsage): number {
-        // Simulate error rate based on service reliability
-        const baseErrorRate = usage.service.includes('gpt-4') ? 0.5 : 1.0;
-        return baseErrorRate + (Math.random() * 2);
+        let baseErrorRate: number;
+
+        if (usage.service?.includes('openai')) {
+            baseErrorRate = 0.3;
+        } else if (usage.service?.includes('anthropic')) {
+            baseErrorRate = 0.2;
+        } else if (usage.service?.includes('google')) {
+            baseErrorRate = 0.5;
+        } else {
+            baseErrorRate = 1.0;
+        }
+
+        if (usage.model?.includes('gpt-4') || usage.model?.includes('claude-3')) {
+            baseErrorRate *= 0.7;
+        }
+
+        const tokenPenalty = Math.max(0, ((usage.totalTokens || 0) - 2000) / 1000) * 0.5;
+        const hour = new Date().getHours();
+        const timeMultiplier = (hour >= 9 && hour <= 17) ? 1.2 : 0.8;
+
+        return Math.min(100, (baseErrorRate + tokenPenalty) * timeMultiplier);
+    }
+
+    /**
+     * Get real performance metrics from observability system
+     */
+    private static async getRealPerformanceMetrics(usage: IUsage): Promise<{ latency: number; errorRate: number } | null> {
+        try {
+            // Try to get metrics from telemetry database first
+            const telemetryMetrics = await this.getMetricsFromTelemetry(usage);
+            if (telemetryMetrics) {
+                return telemetryMetrics;
+            }
+
+            // Try to get metrics from APM system (if configured)
+            const apmMetrics = await this.getMetricsFromAPM(usage);
+            if (apmMetrics) {
+                return apmMetrics;
+            }
+
+            // Try to get aggregated metrics from recent usage patterns
+            const aggregatedMetrics = await this.getAggregatedMetrics(usage);
+            if (aggregatedMetrics) {
+                return aggregatedMetrics;
+            }
+
+            return null;
+        } catch (error) {
+            loggingService.debug('Real performance metrics not available', {
+                usageId: usage._id,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return null;
+        }
+    }
+
+    /**
+     * Get metrics from telemetry database (when Telemetry model is available)
+     */
+    private static async getMetricsFromTelemetry(usage: IUsage): Promise<{ latency: number; errorRate: number } | null> {
+        try {
+            const mongoose = await import('mongoose');
+            const TelemetryModel = mongoose.model('Telemetry');
+            if (!TelemetryModel) return null;
+            const telemetryData = await TelemetryModel.findOne({
+                userId: usage.userId,
+                service: usage.service,
+                model: usage.model,
+                timestamp: {
+                    $gte: new Date(usage.createdAt.getTime() - 3600000),
+                    $lte: new Date(usage.createdAt.getTime() + 3600000)
+                }
+            }).sort({ timestamp: -1 });
+
+            if (telemetryData && (telemetryData as { metrics?: { latency?: number; errorRate?: number } }).metrics) {
+                const m = (telemetryData as { metrics: { latency?: number; errorRate?: number } }).metrics;
+                return {
+                    latency: m.latency ?? 0,
+                    errorRate: m.errorRate ?? 0
+                };
+            }
+            return null;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Get metrics from APM system (placeholder for DataDog/New Relic integration)
+     */
+    private static async getMetricsFromAPM(usage: IUsage): Promise<{ latency: number; errorRate: number } | null> {
+        try {
+            // Check if APM integration is configured
+            const apmProvider = process.env.APM_PROVIDER; // 'datadog', 'newrelic', etc.
+            const apmApiKey = process.env.APM_API_KEY;
+
+            if (!apmProvider || !apmApiKey) {
+                return null;
+            }
+
+            // APM integration: return null until DataDog/New Relic client is integrated
+            loggingService.debug('APM configured but provider client not integrated', {
+                provider: apmProvider,
+                usageId: usage._id
+            });
+            return null;
+        } catch (error) {
+            loggingService.debug('Failed to get APM metrics', {
+                usageId: usage._id,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return null;
+        }
+    }
+
+    /**
+     * Get aggregated metrics from recent usage patterns
+     */
+    private static async getAggregatedMetrics(usage: IUsage): Promise<{ latency: number; errorRate: number } | null> {
+        try {
+            // Get recent usage for the same model/provider combination
+            const recentUsage = await Usage.find({
+                userId: usage.userId,
+                service: usage.service,
+                model: usage.model,
+                createdAt: {
+                    $gte: new Date(Date.now() - 24 * 60 * 60 * 1000), // Last 24 hours
+                    $lt: usage.createdAt
+                }
+            }).limit(50);
+
+            if (recentUsage.length === 0) {
+                return null;
+            }
+
+            // Calculate average latency from recent requests
+            const latencies = recentUsage
+                .map(u => u.metadata?.latency)
+                .filter(latency => typeof latency === 'number' && latency > 0);
+
+            const avgLatency = latencies.length > 0
+                ? latencies.reduce((sum, lat) => sum + lat, 0) / latencies.length
+                : null;
+
+            // Calculate error rate from recent requests
+            const totalRequests = recentUsage.length;
+            const errorRequests = recentUsage.filter(u =>
+                u.metadata?.error === true ||
+                u.metadata?.success === false ||
+                (u.metadata?.statusCode && u.metadata.statusCode >= 400)
+            ).length;
+
+            const errorRate = totalRequests > 0 ? (errorRequests / totalRequests) * 100 : 0;
+
+            if (avgLatency && avgLatency > 0) {
+                return {
+                    latency: avgLatency,
+                    errorRate: errorRate
+                };
+            }
+
+            return null;
+        } catch (error) {
+            loggingService.debug('Failed to get aggregated metrics', {
+                usageId: usage._id,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return null;
+        }
     }
 
     private static async getQualityScore(usage: IUsage): Promise<number> {
@@ -596,10 +802,41 @@ export class PerformanceCostAnalysisService {
             return qualityScore.optimizedScore / 100; // Convert to 0-1 scale
         }
 
-        // Simulate quality score based on model and cost
-        const baseQuality = usage.model.includes('gpt-4') ? 0.85 : 0.75;
-        const costInfluence = Math.min(usage.cost / 0.01, 1) * 0.1;
-        return Math.min(baseQuality + costInfluence + (Math.random() * 0.1), 1);
+        // Calculate realistic quality score based on model capabilities and usage context
+        let baseQuality: number;
+
+        // Base quality by model
+        if (usage.model?.includes('gpt-4o')) {
+            baseQuality = 0.92; // GPT-4o highest quality
+        } else if (usage.model?.includes('claude-3.7-sonnet') || usage.model?.includes('claude-3-opus')) {
+            baseQuality = 0.90; // Claude-3 top tier
+        } else if (usage.model?.includes('gpt-4') || usage.model?.includes('claude-3')) {
+            baseQuality = 0.85; // GPT-4/Claude-3 high quality
+        } else if (usage.model?.includes('gpt-3.5') || usage.model?.includes('claude-haiku')) {
+            baseQuality = 0.78; // Good but not top tier
+        } else if (usage.model?.includes('gemini-pro')) {
+            baseQuality = 0.75; // Solid performance
+        } else {
+            baseQuality = 0.70; // Default quality
+        }
+
+        // Cost-quality correlation (higher cost models generally better quality)
+        const costQualityBonus = Math.min(usage.cost / 0.005, 1) * 0.05;
+
+        // Token count impact (very short prompts may be lower quality)
+        const tokenQualityPenalty = usage.totalTokens < 50 ? 0.05 :
+                                   usage.totalTokens < 100 ? 0.02 : 0;
+
+        // Context quality (requests with more context tend to have better results)
+        const contextBonus = (usage.metadata?.contextFilesCount || 0) > 0 ? 0.02 : 0;
+
+        // Error penalty (failed requests shouldn't get high quality scores)
+        const errorPenalty = usage.metadata?.error ? 0.3 : 0;
+
+        const finalQuality = baseQuality + costQualityBonus - tokenQualityPenalty +
+                           contextBonus - errorPenalty;
+
+        return Math.max(0, Math.min(1, finalQuality));
     }
 
 

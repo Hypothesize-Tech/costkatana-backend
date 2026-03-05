@@ -165,13 +165,14 @@ export class IntegrationSecurityService {
 
         // Check database for persistent kill switch setting
         try {
-            // TODO: Create SystemConfiguration model
-            // const { SystemConfiguration } = await import('../models/SystemConfiguration');
-            // const config = await SystemConfiguration.findOne({ key: 'global_kill_switch' });
-            // return config?.value === 'true' || false;
-            return false;
+            // Import system configuration service dynamically
+            const { SystemConfigurationService } = await import('./systemConfiguration.service');
+            const configService = SystemConfigurationService.getInstance();
+
+            const killSwitchEnabled = await configService.getBooleanConfig('global_kill_switch', false);
+            return killSwitchEnabled;
         } catch (error) {
-            loggingService.warn('Failed to check database kill switch', {
+            loggingService.warn('Failed to check database kill switch, assuming disabled', {
                 component: 'IntegrationSecurityService',
                 error: error instanceof Error ? error.message : 'Unknown'
             });
@@ -182,17 +183,18 @@ export class IntegrationSecurityService {
     /**
      * Check organization-specific kill switch
      */
-    private static async checkOrganizationKillSwitch(_organizationId: string): Promise<boolean> {
+    private static async checkOrganizationKillSwitch(organizationId: string): Promise<boolean> {
         try {
-            // TODO: Create Organization model
-            // const { Organization } = await import('../models/Organization');
-            // const org = await Organization.findById(organizationId).select('killSwitchActive');
-            // return org?.killSwitchActive || false;
-            return false;
+            // Import organization service dynamically
+            const { OrganizationService } = await import('../modules/organization/organization.service');
+            const orgService = OrganizationService.getInstance();
+
+            const organization = await orgService.getOrganizationById(organizationId);
+            return organization?.securitySettings?.killSwitchActive || false;
         } catch (error) {
-            loggingService.warn('Failed to check organization kill switch', {
+            loggingService.warn('Failed to check organization kill switch, assuming disabled', {
                 component: 'IntegrationSecurityService',
-                organizationId: _organizationId,
+                organizationId,
                 error: error instanceof Error ? error.message : 'Unknown'
             });
             return false;

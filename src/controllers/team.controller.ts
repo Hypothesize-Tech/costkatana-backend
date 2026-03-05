@@ -1,8 +1,7 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { teamService } from '../services/team.service';
 import { WorkspaceService } from '../services/workspace.service';
 import { Workspace } from '../models/Workspace';
-import { loggingService } from '../services/logging.service';
 import { AppError } from '../middleware/error.middleware';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
 import { ServiceHelper } from '@utils/serviceHelper';
@@ -15,7 +14,6 @@ export class TeamController {
   static async getWorkspaceMembers(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     const startTime = Date.now();
     if (!ControllerHelper.requireAuth(req, res)) return;
-    const userId = req.userId!;
     const workspaceId = (req as any).workspaceId ?? (req as any).user?.workspaceId;
 
     ControllerHelper.logRequestStart('getWorkspaceMembers', req, { workspaceId });

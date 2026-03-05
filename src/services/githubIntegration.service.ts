@@ -337,14 +337,17 @@ export class GitHubIntegrationService {
                         });
                     }
                     
-                    // Use user's API key if available, otherwise fall back to default or placeholder
-                    const apiKeyToUse = userApiKey ?? process.env.COSTKATANA_DEFAULT_API_KEY ?? 'dak_your_key_here';
-                    
+                    // Use user's API key if available, otherwise fall back to default
+                    const apiKeyToUse = userApiKey ?? process.env.COSTKATANA_DEFAULT_API_KEY;
+
+                    if (!apiKeyToUse) {
+                        throw new Error('No API key available for code generation. User must configure their API key in the dashboard.');
+                    }
+
                     if (!userApiKey) {
-                        loggingService.info('Using fallback API key for code generation', {
+                        loggingService.info('Using default API key for code generation', {
                             userId: integration.userId,
-                            hasDefaultEnv: !!process.env.COSTKATANA_DEFAULT_API_KEY,
-                            note: 'User should replace this with their own API key from dashboard'
+                            hasDefaultEnv: !!process.env.COSTKATANA_DEFAULT_API_KEY
                         });
                     }
                     

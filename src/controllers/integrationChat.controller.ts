@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { IntegrationChatService, ParsedMention } from '../services/integrationChat.service';
 import { MCPIntegrationHandler } from '../services/mcpIntegrationHandler.service';
 import { IntegrationService } from '../services/integration.service';
@@ -10,7 +10,6 @@ import { GitHubService } from '../services/github.service';
 import { IGitHubConnection } from '../models';
 import { loggingService } from '../services/logging.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
 
 export interface ExecuteCommandRequest {
   message: string;

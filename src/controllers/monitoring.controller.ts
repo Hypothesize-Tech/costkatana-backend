@@ -2,7 +2,6 @@ import { Response } from 'express';
 import { Usage } from '../models/Usage';
 import { loggingService } from '../services/logging.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
 
 export class MonitoringController {
     // Background processing queue

@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { ProjectService } from '../services/project.service';
 import { ApprovalRequest } from '../models/ApprovalRequest';
-import { loggingService } from '../services/logging.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
 import { ServiceHelper } from '@utils/serviceHelper';
 

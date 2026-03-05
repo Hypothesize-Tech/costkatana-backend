@@ -2,7 +2,6 @@ import { Response } from 'express';
 import { PerformanceCostAnalysisService } from '../services/performanceCostAnalysis.service';
 import { loggingService } from '../services/logging.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
 
 export class PerformanceCostAnalysisController {
     // Background processing queue

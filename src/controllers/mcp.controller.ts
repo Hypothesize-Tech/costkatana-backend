@@ -12,7 +12,7 @@ import { PermissionManager } from '../mcp/permissions/permission-manager';
 import { ConfirmationService } from '../mcp/permissions/confirmation-service';
 import { initializeMCP } from '../mcp/init';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
+
 
 // Global SSE transport instance
 let sseTransport: SSETransport | null = null;

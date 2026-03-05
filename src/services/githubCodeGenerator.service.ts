@@ -1585,8 +1585,8 @@ Return a JSON object with this exact structure:
         const configFile = `${isTypeScript ? "import { ai } from 'cost-katana';\n\n" : "const { ai } = require('cost-katana');\n\n"}// Initialize CostKatana
 // Example usage
 const response = await ai('gpt-4', 'Hello, world!');
-console.log(response.text);
-console.log(\`Cost: \${response.cost}\`);
+loggingService.info(response.text);
+loggingService.info(\`Cost: \${response.cost}\`);
 
 ${isTypeScript ? 'export { ai };' : 'module.exports = { ai };'}
 `;

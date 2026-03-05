@@ -2,7 +2,7 @@ import { Response } from 'express';
 import { GoogleService } from '../services/google.service';
 import { GoogleIntegrationService } from '../services/googleIntegration.service';
 import { GoogleConnection } from '../models/GoogleConnection';
-import { GoogleExportAudit } from '../models/GoogleExportAudit';
+import { GoogleExportAudit, IGoogleExportAudit } from '../models/GoogleExportAudit';
 import { loggingService } from '../services/logging.service';
 import { GoogleErrors } from '../utils/googleErrors';
 import mongoose from 'mongoose';
@@ -15,7 +15,6 @@ export class GoogleController {
      * GET /api/google/auth
      */
     static async initiateOAuth(req: AuthenticatedRequest, res: Response): Promise<void> {
-        const startTime = Date.now();
         
         if (!ControllerHelper.requireAuth(req, res)) return;
         const userId = req.userId!;
@@ -671,7 +670,7 @@ export class GoogleController {
             if (exportType) query.exportType = exportType;
             if (datasetType) query.datasetType = datasetType;
 
-            const audits = await GoogleExportAudit.find(query)
+            const audits: IGoogleExportAudit[] = await GoogleExportAudit.find(query)
                 .sort({ exportedAt: -1 })
                 .limit(parseInt(limit as string));
 

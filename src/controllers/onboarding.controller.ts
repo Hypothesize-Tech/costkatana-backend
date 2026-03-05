@@ -6,7 +6,6 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret';
 
@@ -85,11 +84,23 @@ export class OnboardingController {
             const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3000';
             const magicLink = `${frontendUrl}/connect/chatgpt?token=${token}&data=${encodedData}`;
 
+            // Store the magic link token in database for verification
+            const { MagicLinkToken } = await import('../models/MagicLinkToken');
+            await MagicLinkToken.create({
+                token,
+                email: email.toLowerCase().trim(),
+                name,
+                source,
+                sessionId,
+                expiresAt: new Date(Date.now() + 15 * 60 * 1000) // 15 minutes
+            });
+
             ControllerHelper.logRequestSuccess('generateMagicLink', req as AuthenticatedRequest, startTime, {
                 email,
                 sessionId,
                 source,
-                hasMagicLink: !!magicLink
+                hasMagicLink: !!magicLink,
+                tokenStored: true
             });
 
             // Log business event
@@ -849,10 +860,35 @@ export class OnboardingController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            // For now, return success if token exists
-            // In production, you'd verify against stored tokens
+            // Verify token against database
+            const { MagicLinkToken } = await import('../models/MagicLinkToken');
+            const magicLinkToken = await MagicLinkToken.findOne({
+                token,
+                isUsed: false,
+                expiresAt: { $gt: new Date() }
+            });
+
+            if (!magicLinkToken) {
+                loggingService.warn('Magic link verification failed - invalid or expired token', {
+                    hasToken: !!token,
+                    tokenPreview: token ? token.substring(0, 10) + '...' : 'none',
+                    requestId: req.headers['x-request-id'] as string
+                });
+
+                res.status(400).json({
+                    success: false,
+                    error: 'Invalid or expired magic link token'
+                });
+                return;
+            }
+
+            // Mark token as used
+            await magicLinkToken.markAsUsed();
+
             ControllerHelper.logRequestSuccess('verifyMagicLink', req as AuthenticatedRequest, startTime, {
-                hasToken: !!token
+                hasToken: !!token,
+                tokenVerified: true,
+                email: magicLinkToken.email
             });
 
             // Log business event

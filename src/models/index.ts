@@ -33,6 +33,7 @@ export { RepositoryUserMapping, IRepositoryUserMapping } from './RepositoryUserM
 export { AILog, IAILog } from './AILog';
 export { LogQueryConversation, ILogQueryConversation } from './LogQueryConversation';
 export { LogQueryAudit, ILogQueryAudit } from './LogQueryAudit';
+export { MagicLinkToken, IMagicLinkToken } from './MagicLinkToken';
 export { AgentTraceVersion, IAgentTraceVersion } from './AgentTraceVersion';
 export { GitHubCodeChunkModel, IGitHubCodeChunk } from './GitHubCodeChunk';
 export { SymbolIndexModel, ISymbolIndex } from './SymbolIndex';

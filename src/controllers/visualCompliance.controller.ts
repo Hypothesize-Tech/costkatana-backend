@@ -7,7 +7,6 @@ import { AWS_BEDROCK_PRICING } from '../utils/pricing/aws-bedrock';
 import { S3Service } from '../services/s3.service';
 import mongoose from 'mongoose';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
 
 export class VisualComplianceController {
   

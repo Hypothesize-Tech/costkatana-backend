@@ -31,50 +31,120 @@ export class IntegrationCostTrackingService {
     /**
      * Track embedding generation
      */
-    static trackEmbedding(
+    static async trackEmbedding(
         repoFullName: string,
         userId: string,
         embeddingCount: number
-    ): void {
-        // In production, this would store in a database
-        loggingService.info('Embedding tracked', {
-            component: 'IntegrationCostTrackingService',
-            repoFullName,
-            userId,
-            embeddingCount
-        });
+    ): Promise<void> {
+        try {
+            const { CostTrackingRecord } = await import('../models/CostTrackingRecord');
+            const cost = this.estimateEmbeddingCost(embeddingCount);
+
+            await CostTrackingRecord.create({
+                repoFullName,
+                userId,
+                operationType: 'embedding',
+                count: embeddingCount,
+                cost,
+                timestamp: new Date()
+            });
+
+            loggingService.info('Embedding tracked in database', {
+                component: 'IntegrationCostTrackingService',
+                repoFullName,
+                userId,
+                embeddingCount,
+                cost
+            });
+        } catch (error) {
+            loggingService.warn('Failed to track embedding in database', {
+                component: 'IntegrationCostTrackingService',
+                repoFullName,
+                userId,
+                embeddingCount,
+                error: error instanceof Error ? error.message : 'Unknown'
+            });
+        }
     }
 
     /**
      * Track vector query
      */
-    static trackQuery(
+    static async trackQuery(
         repoFullName: string,
         userId: string,
         tokensUsed: number
-    ): void {
-        loggingService.info('Vector query tracked', {
-            component: 'IntegrationCostTrackingService',
-            repoFullName,
-            userId,
-            tokensUsed
-        });
+    ): Promise<void> {
+        try {
+            const { CostTrackingRecord } = await import('../models/CostTrackingRecord');
+            const cost = this.estimateQueryCost(1); // Assuming 1 query
+
+            await CostTrackingRecord.create({
+                repoFullName,
+                userId,
+                operationType: 'query',
+                count: 1,
+                tokensUsed,
+                cost,
+                timestamp: new Date()
+            });
+
+            loggingService.info('Vector query tracked in database', {
+                component: 'IntegrationCostTrackingService',
+                repoFullName,
+                userId,
+                tokensUsed,
+                cost
+            });
+        } catch (error) {
+            loggingService.warn('Failed to track query in database', {
+                component: 'IntegrationCostTrackingService',
+                repoFullName,
+                userId,
+                tokensUsed,
+                error: error instanceof Error ? error.message : 'Unknown'
+            });
+        }
     }
 
     /**
      * Track code generation
      */
-    static trackGeneration(
+    static async trackGeneration(
         repoFullName: string,
         userId: string,
         tokensUsed: number
-    ): void {
-        loggingService.info('Code generation tracked', {
-            component: 'IntegrationCostTrackingService',
-            repoFullName,
-            userId,
-            tokensUsed
-        });
+    ): Promise<void> {
+        try {
+            const { CostTrackingRecord } = await import('../models/CostTrackingRecord');
+            const cost = this.estimateGenerationCost(tokensUsed);
+
+            await CostTrackingRecord.create({
+                repoFullName,
+                userId,
+                operationType: 'generation',
+                count: 1,
+                tokensUsed,
+                cost,
+                timestamp: new Date()
+            });
+
+            loggingService.info('Code generation tracked in database', {
+                component: 'IntegrationCostTrackingService',
+                repoFullName,
+                userId,
+                tokensUsed,
+                cost
+            });
+        } catch (error) {
+            loggingService.warn('Failed to track generation in database', {
+                component: 'IntegrationCostTrackingService',
+                repoFullName,
+                userId,
+                tokensUsed,
+                error: error instanceof Error ? error.message : 'Unknown'
+            });
+        }
     }
 
     /**
@@ -124,16 +194,15 @@ export class IntegrationCostTrackingService {
             }
 
             // Query cost tracking records from database
-            // TODO: Implement CostTrackingRecord model
-            const costRecords: any[] = [];
-            // const costRecords = await CostTrackingRecord.find({
-            //     repoFullName,
-            //     userId,
-            //     timestamp: {
-            //         $gte: startDate,
-            //         $lte: endDate
-            //     }
-            // });
+            const { CostTrackingRecord } = await import('../models/CostTrackingRecord');
+            const costRecords = await CostTrackingRecord.find({
+                repoFullName,
+                userId,
+                timestamp: {
+                    $gte: startDate,
+                    $lte: endDate
+                }
+            }).sort({ timestamp: -1 });
 
             // Aggregate metrics
             let embeddingsProduced = 0;

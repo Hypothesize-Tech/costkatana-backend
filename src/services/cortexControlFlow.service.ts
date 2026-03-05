@@ -6,14 +6,21 @@
  * Reduces LLM round-trips by executing complex logic in single calls.
  */
 
-import { 
-    CortexFrame, 
-    CortexPrimitive, 
+import {
+    CortexFrame,
+    CortexPrimitive,
     CortexValue,
     CortexControlFrame,
     CortexConditionalFrame,
     CortexLoopFrame,
-    CortexSequenceFrame
+    CortexSequenceFrame,
+    CortexQueryFrame,
+    CortexAnswerFrame,
+    CortexEventFrame,
+    CortexStateFrame,
+    CortexEntityFrame,
+    CortexListFrame,
+    CortexErrorFrame,
 } from '../types/cortex.types';
 import { loggingService } from './logging.service';
 
@@ -326,7 +333,7 @@ export class CortexControlFlowService {
                 switch (step.type) {
                     case 'action':
                         if (step.frame) {
-                            const result = await this.executeFrame();
+                            const result = await this.executeFrame(step.frame);
                             results.push(result);
                         }
                         break;
@@ -521,8 +528,8 @@ export class CortexControlFlowService {
         for (let i = 0; i < sequenceFrame.steps.length; i++) {
             try {
                 executedSteps.push(`sequence_step_${i}`);
-                const stepResult = await this.executeFrame();
-                
+                const stepResult = await this.executeFrame(sequenceFrame.steps[i]);
+
                 if (sequenceFrame.collectResults) {
                     results.push(stepResult);
                 }
@@ -601,15 +608,230 @@ export class CortexControlFlowService {
         this.variables.set(name, value);
     }
 
-    private async executeFrame(): Promise<any> {
-        // This would delegate to appropriate frame processors
-        throw new Error('Frame execution not implemented - requires integration with actual frame processors');
+    private async executeFrame(frame?: CortexFrame): Promise<any> {
+        if (!frame) {
+            throw new Error('No frame provided for execution');
+        }
+
+        try {
+            // Execute frame based on its type
+            switch (frame.frameType) {
+                case 'query':
+                    return await this.executeQueryFrame(frame as CortexQueryFrame);
+
+                case 'answer':
+                    return await this.executeAnswerFrame(frame as CortexAnswerFrame);
+
+                case 'event':
+                    return await this.executeEventFrame(frame as CortexEventFrame);
+
+                case 'state':
+                    return await this.executeStateFrame(frame as CortexStateFrame);
+
+                case 'entity':
+                    return await this.executeEntityFrame(frame as CortexEntityFrame);
+
+                case 'list':
+                    return await this.executeListFrame(frame as CortexListFrame);
+
+                case 'error':
+                    return await this.executeErrorFrame(frame as CortexErrorFrame);
+
+                case 'control':
+                case 'conditional':
+                case 'loop':
+                case 'sequence':
+                    // For control flow frames, delegate to the main execution method
+                    return await this.executeControlFlow(frame as any);
+
+                default: {
+                    const frameWithType = frame as { frameType: string; id?: string };
+                    loggingService.warn('Unknown frame type for execution', {
+                        frameType: frameWithType.frameType,
+                        frameId: frameWithType.id,
+                    });
+                    return {
+                        success: false,
+                        error: `Unsupported frame type: ${frameWithType.frameType}`,
+                        frame,
+                    };
+                }
+            }
+        } catch (error) {
+            loggingService.error('Frame execution failed', {
+                error: error instanceof Error ? error.message : String(error),
+                frameType: frame.frameType,
+                frameId: (frame as any).id,
+            });
+
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Frame execution failed',
+                frame,
+            };
+        }
+    }
+
+    /**
+     * Execute a query frame
+     */
+    private async executeQueryFrame(frame: CortexQueryFrame): Promise<any> {
+        loggingService.debug('Executing query frame', { frameId: frame.id });
+
+        // Extract query parameters from frame roles
+        const query = this.extractRoleValue(frame, 'question') ||
+                     this.extractRoleValue(frame, 'task') ||
+                     this.extractRoleValue(frame, 'content');
+
+        const target = this.extractRoleValue(frame, 'target');
+        const aspect = this.extractRoleValue(frame, 'aspect');
+        const format = this.extractRoleValue(frame, 'format');
+
+        // This would typically call an AI service or knowledge base
+        // For now, return a structured response
+        return {
+            success: true,
+            type: 'query_response',
+            query: query,
+            target: target,
+            aspect: aspect,
+            format: format,
+            result: `Processed query: ${query}`,
+            timestamp: new Date().toISOString(),
+        };
+    }
+
+    /**
+     * Execute an answer frame
+     */
+    private async executeAnswerFrame(frame: CortexAnswerFrame): Promise<any> {
+        loggingService.debug('Executing answer frame', { frameId: frame.id });
+
+        const content = this.extractRoleValue(frame, 'content') ||
+                       this.extractRoleValue(frame, 'summary');
+        const forTask = this.extractRoleValue(frame, 'for_task');
+        const status = this.extractRoleValue(frame, 'status');
+
+        return {
+            success: true,
+            type: 'answer',
+            content: content,
+            forTask: forTask,
+            status: status || 'completed',
+            timestamp: new Date().toISOString(),
+        };
+    }
+
+    /**
+     * Execute an event frame
+     */
+    private async executeEventFrame(frame: CortexEventFrame): Promise<any> {
+        loggingService.debug('Executing event frame', { frameId: frame.id });
+
+        const action = this.extractRoleValue(frame, 'action');
+        const agent = this.extractRoleValue(frame, 'agent');
+        const object = this.extractRoleValue(frame, 'object');
+        const instrument = this.extractRoleValue(frame, 'instrument');
+
+        // This would typically trigger an action or update state
+        return {
+            success: true,
+            type: 'event_executed',
+            action: action,
+            agent: agent,
+            object: object,
+            instrument: instrument,
+            executedAt: new Date().toISOString(),
+        };
+    }
+
+    /**
+     * Execute a state frame
+     */
+    private async executeStateFrame(frame: CortexStateFrame): Promise<any> {
+        loggingService.debug('Executing state frame', { frameId: frame.id });
+
+        const properties = this.extractRoleValue(frame, 'properties');
+        const target = this.extractRoleValue(frame, 'target');
+
+        return {
+            success: true,
+            type: 'state_retrieved',
+            target: target,
+            properties: properties,
+            timestamp: new Date().toISOString(),
+        };
+    }
+
+    /**
+     * Execute an entity frame
+     */
+    private async executeEntityFrame(frame: CortexEntityFrame): Promise<any> {
+        loggingService.debug('Executing entity frame', { frameId: frame.id });
+
+        const properties = this.extractRoleValue(frame, 'properties');
+        const target = this.extractRoleValue(frame, 'target');
+
+        return {
+            success: true,
+            type: 'entity_info',
+            entity: target,
+            properties: properties,
+            timestamp: new Date().toISOString(),
+        };
+    }
+
+    /**
+     * Execute a list frame
+     */
+    private async executeListFrame(frame: CortexListFrame): Promise<any> {
+        loggingService.debug('Executing list frame', { frameId: frame.id });
+
+        const items = this.extractRoleValue(frame, 'content') || [];
+        const target = this.extractRoleValue(frame, 'target');
+
+        return {
+            success: true,
+            type: 'list_result',
+            target: target,
+            items: Array.isArray(items) ? items : [items],
+            count: Array.isArray(items) ? items.length : 1,
+            timestamp: new Date().toISOString(),
+        };
+    }
+
+    /**
+     * Execute an error frame
+     */
+    private async executeErrorFrame(frame: CortexErrorFrame): Promise<any> {
+        loggingService.debug('Executing error frame', { frameId: frame.id });
+
+        const error = this.extractRoleValue(frame, 'content') ||
+                     this.extractRoleValue(frame, 'reason');
+
+        return {
+            success: false,
+            type: 'error_handled',
+            error: error,
+            frame: frame,
+            timestamp: new Date().toISOString(),
+        };
+    }
+
+    /**
+     * Extract value from a frame role
+     */
+    private extractRoleValue(frame: any, role: string): any {
+        if (!frame.roles) return null;
+
+        const roleEntry = frame.roles.find((r: any) => r.role === role);
+        return roleEntry ? roleEntry.value : null;
     }
 
     private async executeFrameSequence(frames: CortexFrame[]): Promise<any[]> {
         const results = [];
         for (const frame of frames) {
-            const result = await this.executeFrame();
+            const result = await this.executeFrame(frame);
             results.push(result);
         }
         return results;

@@ -6,7 +6,6 @@ import { S3Service } from '../services/s3.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
 import { ServiceHelper } from '@utils/serviceHelper';
 
-
 // Allowed file types for document upload
 const ALLOWED_FILE_EXTENSIONS = [
     // Documents

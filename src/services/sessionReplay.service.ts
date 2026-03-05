@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import { Session, ISession } from '../models/Session';
 import { Telemetry } from '../models/Telemetry';
 import { loggingService } from './logging.service';
@@ -750,13 +751,15 @@ class SessionReplayService {
                 ? new Date(Date.now() + options.expiresIn * 60 * 60 * 1000)
                 : undefined;
 
-            // Store share metadata in session metadata
+            // Store share metadata in session metadata (password hashed for production)
             const shareMetadata = {
                 shareToken,
                 accessLevel: options.accessLevel || 'team',
                 createdAt: new Date(),
                 expiresAt,
-                password: options.password // In production, hash this
+                password: options.password
+                    ? crypto.createHash('sha256').update(options.password).digest('hex')
+                    : undefined,
             };
 
             await Session.updateOne(

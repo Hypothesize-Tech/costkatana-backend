@@ -75,7 +75,8 @@ const GoogleFileAccessSchema = new Schema<IGoogleFileAccess>(
         }
     },
     {
-        timestamps: true
+        timestamps: true,
+        collection: 'google_file_access'
     }
 );
 

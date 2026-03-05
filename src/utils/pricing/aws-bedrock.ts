@@ -291,6 +291,19 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
 
     // Anthropic Models on AWS Bedrock
     {
+        modelId: 'anthropic.claude-sonnet-4-6-v1:0',
+        modelName: 'Claude Sonnet 4.6',
+        provider: 'AWS Bedrock',
+        inputPrice: 3.3,
+        outputPrice: 16.5,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'coding', 'agents', 'extended-thinking', 'multilingual', 'computer-use'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Claude Sonnet 4.6 on AWS Bedrock (Geo/In-region). Latest Sonnet. 1M context (beta). Cache read: $0.33/1M. Global: $3/$15 per 1M'
+    },
+    {
         modelId: 'anthropic.claude-sonnet-4-5-v1:0',
         modelName: 'Claude Sonnet 4.5',
         provider: 'AWS Bedrock',
@@ -300,7 +313,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
-        isLatest: true,
+        isLatest: false,
         notes: 'Claude Sonnet 4.5 on AWS Bedrock (Geo/In-region) - Input: $3.3/1M, Output: $16.5/1M. Batch: $1.65/$8.25 per 1M. Cache (5m write): $4.125/1M, Cache (1h write): $6.6/1M, Cache read: $0.33/1M. Global: $3/$15 per 1M'
     },
     {

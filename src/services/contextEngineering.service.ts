@@ -289,7 +289,7 @@ ASSISTANT:`;
             const cacheHitRate = stableContent.length / totalContent.length;
 
             // Calculate compression ratio if applicable
-            const compressionRatio = 0.85; // Placeholder - would be calculated from actual compression
+            const compressionRatio = parseFloat(process.env.CONTEXT_COMPRESSION_RATIO || '0.85');
 
             // Estimate optimization savings (cost reduction from caching)
             const optimizationSavings = cacheHitRate * 0.7; // 70% cost reduction for cached content

@@ -8,7 +8,7 @@ export class AdminUserAnalyticsController {
      * Get all users spending summary
      * GET /api/admin/users/spending
      */
-    static async getAllUsersSpending(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    static async getAllUsersSpending(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
         try {
             if (!ControllerHelper.requireAuth(req, res)) return;

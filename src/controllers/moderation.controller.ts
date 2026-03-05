@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { loggingService } from '../services/logging.service';
 import { ThreatLog } from '../models/ThreatLog';
+import { UserModerationConfig } from '../models/UserModerationConfig';
+import { Appeal } from '../models/Appeal';
 import mongoose from 'mongoose';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
 import { ServiceHelper } from '@utils/serviceHelper';
@@ -322,9 +324,6 @@ export class ModerationController {
         ControllerHelper.logRequestStart('getModerationConfig', req);
 
         try {
-
-            // Get user's moderation settings (would typically be stored in User model or Settings)
-            // For now, return default configuration
             const defaultConfig = {
                 inputModeration: {
                     enableBasicFirewall: true,
@@ -350,24 +349,53 @@ export class ModerationController {
                 }
             };
 
+            const doc = await UserModerationConfig.findOne({ userId, isActive: true }).lean();
+            const config = doc
+                ? {
+                    inputModeration: {
+                        enableBasicFirewall: doc.enableContentFiltering ?? defaultConfig.inputModeration.enableBasicFirewall,
+                        enableAdvancedFirewall: doc.blockUnsafeContent ?? defaultConfig.inputModeration.enableAdvancedFirewall,
+                        promptGuardThreshold: 0.7,
+                        openaiSafeguardThreshold: 0.7
+                    },
+                    outputModeration: {
+                        enableOutputModeration: doc.filterModelResponses ?? defaultConfig.outputModeration.enableOutputModeration,
+                        toxicityThreshold: 0.7,
+                        enablePIIDetection: doc.enablePIIDetection ?? defaultConfig.outputModeration.enablePIIDetection,
+                        enableToxicityCheck: true,
+                        enableHateSpeechCheck: doc.blockHateSpeech ?? true,
+                        enableSexualContentCheck: !doc.allowAdultContent,
+                        enableViolenceCheck: doc.blockViolence ?? true,
+                        enableSelfHarmCheck: true,
+                        action: 'block' as const
+                    },
+                    piiDetection: {
+                        enablePIIDetection: doc.enablePIIDetection ?? defaultConfig.piiDetection.enablePIIDetection,
+                        useAI: doc.piiDetectionLevel === 'comprehensive',
+                        sanitizationEnabled: doc.maskSensitiveData ?? defaultConfig.piiDetection.sanitizationEnabled
+                    }
+                }
+                : defaultConfig;
+
             ControllerHelper.logRequestSuccess('getModerationConfig', req, startTime, {
-                hasConfig: !!defaultConfig
+                hasConfig: true,
+                fromDb: !!doc
             });
 
-            // Log business event
             loggingService.logBusiness({
                 event: 'moderation_configuration_retrieved',
                 category: 'moderation_operations',
                 value: Date.now() - startTime,
                 metadata: {
                     userId,
-                    hasConfig: !!defaultConfig
+                    hasConfig: true,
+                    fromDb: !!doc
                 }
             });
 
             res.json({
                 success: true,
-                data: defaultConfig
+                data: config
             });
         } catch (error: any) {
             ControllerHelper.handleError('getModerationConfig', error, req, res, startTime);
@@ -392,18 +420,32 @@ export class ModerationController {
         });
 
         try {
+            // Persist the moderation configuration to database
+            const moderationConfig = await UserModerationConfig.findOneAndUpdate(
+                { userId },
+                {
+                    ...config,
+                    userId,
+                    updatedAt: new Date()
+                },
+                {
+                    upsert: true,
+                    new: true,
+                    runValidators: true
+                }
+            );
 
-            // Configuration persistence will be implemented in future versions
-            // For now, validate and return success
-            loggingService.info('Moderation configuration updated', { 
-                userId, 
+            loggingService.info('Moderation configuration persisted', {
+                userId,
+                configId: moderationConfig._id,
                 config,
                 requestId: req.headers['x-request-id'] as string
             });
 
             ControllerHelper.logRequestSuccess('updateModerationConfig', req, startTime, {
                 hasConfig: !!config,
-                configKeys: config ? Object.keys(config) : []
+                configKeys: config ? Object.keys(config) : [],
+                configId: moderationConfig._id
             });
 
             // Log business event
@@ -413,6 +455,7 @@ export class ModerationController {
                 value: Date.now() - startTime,
                 metadata: {
                     userId,
+                    configId: moderationConfig._id,
                     hasConfig: !!config,
                     configKeys: config ? Object.keys(config) : []
                 }
@@ -421,7 +464,10 @@ export class ModerationController {
             res.json({
                 success: true,
                 message: 'Moderation configuration updated successfully',
-                data: config
+                data: {
+                    configId: moderationConfig._id,
+                    ...moderationConfig.toObject()
+                }
             });
         } catch (error: any) {
             ControllerHelper.handleError('updateModerationConfig', error, req, res, startTime, {
@@ -502,24 +548,45 @@ export class ModerationController {
                 return;
             }
 
-            // Create appeal record (you might want a separate Appeals model)
-            const appealData = {
+            // Check if user already has a pending appeal for this threat
+            const existingAppeal = await Appeal.findOne({
+                threatId: new mongoose.Types.ObjectId(threatId),
+                userId: new mongoose.Types.ObjectId(userId),
+                status: { $in: ['pending', 'under_review'] }
+            });
+
+            if (existingAppeal) {
+                res.status(409).json({
+                    success: false,
+                    error: 'Appeal already exists',
+                    message: 'You already have a pending appeal for this moderation decision'
+                });
+                return;
+            }
+
+            // Create appeal record
+            const appeal = new Appeal({
+                threatId: new mongoose.Types.ObjectId(threatId),
+                userId: new mongoose.Types.ObjectId(userId),
+                reason,
+                additionalContext,
+                status: 'pending'
+            });
+
+            await appeal.save();
+
+            loggingService.info('Moderation appeal submitted', {
+                appealId: appeal._id.toString(),
                 threatId,
                 userId,
                 reason,
-                additionalContext,
-                status: 'pending',
-                submittedAt: new Date()
-            };
-
-            // Appeal system will be implemented in future versions
-            // For now, log the appeal
-            loggingService.info('Moderation appeal submitted', {
-                ...appealData,
+                status: appeal.status,
+                submittedAt: appeal.submittedAt,
                 requestId: req.headers['x-request-id'] as string
             });
 
             ControllerHelper.logRequestSuccess('appealModerationDecision', req, startTime, {
+                appealId: appeal._id.toString(),
                 threatId,
                 hasThreat: !!threat,
                 threatUserId: threat.userId?.toString()
@@ -533,6 +600,7 @@ export class ModerationController {
                 metadata: {
                     userId,
                     threatId,
+                    appealId: appeal._id.toString(),
                     reason,
                     additionalContext,
                     hasThreat: !!threat,
@@ -542,11 +610,11 @@ export class ModerationController {
 
             res.json({
                 success: true,
-                message: 'Appeal submitted successfully. It will be reviewed by our team.',
+                message: 'Appeal submitted successfully. It will be reviewed by our team within 24-48 hours.',
                 data: {
-                    appealId: `appeal_${Date.now()}`, // Temporary ID
-                    status: 'pending',
-                    submittedAt: appealData.submittedAt
+                    appealId: appeal._id.toString(),
+                    status: appeal.status,
+                    submittedAt: appeal.submittedAt
                 }
             });
         } catch (error: any) {
@@ -554,6 +622,118 @@ export class ModerationController {
                 threatId,
                 hasReason: !!reason
             });
+        }
+    }
+
+    /**
+     * Get user's appeals
+     * GET /api/moderation/appeals
+     */
+    static async getUserAppeals(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        ControllerHelper.logRequestStart('getUserAppeals', req);
+
+        try {
+            const appeals = await Appeal.find({ userId: new mongoose.Types.ObjectId(userId) })
+                .populate('threatId', 'threatType severity message timestamp')
+                .sort({ submittedAt: -1 })
+                .limit(50); // Limit to prevent excessive data
+
+            ControllerHelper.logRequestSuccess('getUserAppeals', req, startTime, {
+                appealCount: appeals.length
+            });
+
+            res.json({
+                success: true,
+                data: appeals.map(appeal => ({
+                    id: appeal._id.toString(),
+                    threatId: appeal.threatId._id?.toString(),
+                    reason: appeal.reason,
+                    additionalContext: appeal.additionalContext,
+                    status: appeal.status,
+                    submittedAt: appeal.submittedAt,
+                    reviewedAt: appeal.reviewedAt,
+                    reviewNotes: appeal.reviewNotes,
+                    resolution: appeal.resolution,
+                    resolutionNotes: appeal.resolutionNotes,
+                    isExpired: appeal.isExpired(),
+                    threat: appeal.threatId ? {
+                        type: (appeal.threatId as unknown as { threatType: string }).threatType,
+                        severity: (appeal.threatId as unknown as { severity: string }).severity,
+                        message: (appeal.threatId as unknown as { message: string }).message,
+                        timestamp: (appeal.threatId as unknown as { timestamp: Date }).timestamp
+                    } : null
+                }))
+            });
+        } catch (error: any) {
+            ControllerHelper.handleError('getUserAppeals', error, req, res, startTime);
+        }
+    }
+
+    /**
+     * Get appeal status
+     * GET /api/moderation/appeals/:appealId
+     */
+    static async getAppealStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        const { appealId } = req.params;
+
+        ControllerHelper.logRequestStart('getAppealStatus', req, { appealId });
+
+        try {
+            ServiceHelper.validateObjectId(appealId, 'appealId');
+
+            const appeal = await Appeal.findOne({
+                _id: new mongoose.Types.ObjectId(appealId),
+                userId: new mongoose.Types.ObjectId(userId)
+            }).populate('threatId', 'threatType severity message timestamp reviewedBy');
+
+            if (!appeal) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Appeal not found',
+                    message: 'The specified appeal was not found or you do not have permission to view it'
+                });
+                return;
+            }
+
+            ControllerHelper.logRequestSuccess('getAppealStatus', req, startTime, {
+                appealId,
+                status: appeal.status
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    id: appeal._id.toString(),
+                    threatId: appeal.threatId._id?.toString(),
+                    reason: appeal.reason,
+                    additionalContext: appeal.additionalContext,
+                    status: appeal.status,
+                    submittedAt: appeal.submittedAt,
+                    reviewedAt: appeal.reviewedAt,
+                    reviewNotes: appeal.reviewNotes,
+                    resolution: appeal.resolution,
+                    resolutionNotes: appeal.resolutionNotes,
+                    isExpired: appeal.isExpired(),
+                    canBeReviewed: appeal.canBeReviewed(),
+                    threat: appeal.threatId ? {
+                        type: (appeal.threatId as unknown as { threatType: string }).threatType,
+                        severity: (appeal.threatId as unknown as { severity: string }).severity,
+                        message: (appeal.threatId as unknown as { message: string }).message,
+                        timestamp: (appeal.threatId as unknown as { timestamp: Date }).timestamp
+                    } : null
+                }
+            });
+        } catch (error: any) {
+            ControllerHelper.handleError('getAppealStatus', error, req, res, startTime, { appealId });
         }
     }
 

@@ -1119,33 +1119,192 @@ export class OptimizationManagerTool extends Tool {
         return breakdown;
     }
 
-    // Placeholder methods for remaining operations
-    private async optimizePrompts(_operation: OptimizationOperation): Promise<string> {
-        return JSON.stringify({
-            success: true,
-            message: 'Prompt optimization - implementation pending'
-        });
+    // Prompt optimization: rule-based analysis and suggestions (no external AI required)
+    private async optimizePrompts(operation: OptimizationOperation): Promise<string> {
+        try {
+            const userId = operation.userId;
+            if (!userId) {
+                return JSON.stringify({
+                    success: false,
+                    operation: 'optimize_prompts',
+                    error: 'userId is required for prompt optimization.'
+                });
+            }
+            const timeRange = this.getTimeRange(operation.analysisParams?.timeRange);
+            const usageAnalysis = await Usage.aggregate([
+                {
+                    $match: {
+                        userId,
+                        createdAt: { $gte: timeRange.start, $lte: timeRange.end }
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$model',
+                        avgPromptTokens: { $avg: '$promptTokens' },
+                        avgCompletionTokens: { $avg: '$completionTokens' },
+                        totalRequests: { $sum: 1 },
+                        totalCost: { $sum: '$cost' }
+                    }
+                },
+                { $sort: { totalCost: -1 } },
+                { $limit: 5 }
+            ]);
+
+            const recommendations: Array<{ model: string; suggestion: string; estimatedTokenReduction: number; estimatedSavings: number }> = [];
+            for (const row of usageAnalysis) {
+                const avgPrompt = Math.round(row.avgPromptTokens || 0);
+                let reductionPct = 0;
+                let suggestion = '';
+                if (avgPrompt > 2000) {
+                    reductionPct = 0.3;
+                    suggestion = 'Remove redundant context and use prompt templates; trim to essential instructions.';
+                } else if (avgPrompt > 1000) {
+                    reductionPct = 0.2;
+                    suggestion = 'Audit prompts for redundancy; use variables for repeated blocks.';
+                } else if (avgPrompt > 500) {
+                    reductionPct = 0.15;
+                    suggestion = 'Consider shorter system prompts and fewer examples.';
+                } else {
+                    reductionPct = 0.05;
+                    suggestion = 'Minor trimming possible; focus on removing filler.';
+                }
+                const estimatedTokenReduction = Math.round(avgPrompt * reductionPct);
+                const estimatedSavings = Number((row.totalCost * reductionPct).toFixed(4));
+                recommendations.push({
+                    model: row._id,
+                    suggestion,
+                    estimatedTokenReduction,
+                    estimatedSavings
+                });
+            }
+
+            const totalPotentialSavings = recommendations.reduce((sum, r) => sum + r.estimatedSavings, 0);
+            return JSON.stringify({
+                success: true,
+                operation: 'optimize_prompts',
+                data: {
+                    summary: {
+                        modelsAnalyzed: usageAnalysis.length,
+                        totalPotentialSavings: Number(totalPotentialSavings.toFixed(4)),
+                        timeRange: { start: timeRange.start, end: timeRange.end }
+                    },
+                    recommendations,
+                    nextSteps: [
+                        'Apply suggestions to high-volume prompts first',
+                        'A/B test optimized prompts for quality',
+                        'Monitor token usage and cost after changes'
+                    ]
+                }
+            }, null, 2);
+        } catch (error) {
+            return `Failed to optimize prompts: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        }
     }
 
-    private async applyOptimization(_operation: OptimizationOperation): Promise<string> {
-        return JSON.stringify({
-            success: true,
-            message: 'Apply optimization - implementation pending'
-        });
+    private async applyOptimization(operation: OptimizationOperation): Promise<string> {
+        try {
+            if (!operation.userId) {
+                return JSON.stringify({ success: false, message: 'userId is required to apply optimization.' });
+            }
+            const optimizationId = (operation as unknown as Record<string, unknown>).optimizationId as string | undefined;
+            if (!optimizationId) {
+                return JSON.stringify({
+                    success: true,
+                    operation: 'apply_optimization',
+                    message: 'Apply optimization requires optimizationId. Use list_optimizations to get IDs.',
+                    applied: 0
+                }, null, 2);
+            }
+            const opt = await Optimization.findById(optimizationId);
+            if (!opt) {
+                return JSON.stringify({ success: false, message: 'Optimization not found.' });
+            }
+            const doc = opt as unknown as { appliedCount?: number };
+            const appliedCount = ((doc.appliedCount as number) || 0) + 1;
+            await Optimization.updateOne(
+                { _id: optimizationId },
+                { $set: { applied: true, appliedCount } }
+            );
+            return JSON.stringify({
+                success: true,
+                operation: 'apply_optimization',
+                message: 'Optimization marked as applied.',
+                optimizationId: opt._id,
+                appliedCount
+            }, null, 2);
+        } catch (error) {
+            return `Failed to apply optimization: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        }
     }
 
-    private async bulkAnalysis(_operation: OptimizationOperation): Promise<string> {
-        return JSON.stringify({
-            success: true,
-            message: 'Bulk analysis - implementation pending'
-        });
+    private async bulkAnalysis(operation: OptimizationOperation): Promise<string> {
+        try {
+            const userId = operation.userId;
+            const projectIds = operation.bulkParams?.projectIds || [];
+            if (!userId) {
+                return JSON.stringify({ success: false, message: 'userId is required for bulk analysis.' });
+            }
+            const timeRange = this.getTimeRange(operation.analysisParams?.timeRange);
+            const match: any = { userId, createdAt: { $gte: timeRange.start, $lte: timeRange.end } };
+            if (projectIds.length > 0) match.projectId = { $in: projectIds };
+            const summary = await Usage.aggregate([
+                { $match: match },
+                {
+                    $group: {
+                        _id: null,
+                        totalCost: { $sum: '$cost' },
+                        totalRequests: { $sum: 1 },
+                        totalTokens: { $sum: { $add: ['$promptTokens', '$completionTokens'] } }
+                    }
+                }
+            ]);
+            const s = summary[0] || { totalCost: 0, totalRequests: 0, totalTokens: 0 };
+            return JSON.stringify({
+                success: true,
+                operation: 'bulk_analysis',
+                data: {
+                    projectsAnalyzed: projectIds.length || 1,
+                    totalCost: Number(s.totalCost.toFixed(4)),
+                    totalRequests: s.totalRequests,
+                    totalTokens: s.totalTokens,
+                    timeRange: { start: timeRange.start, end: timeRange.end }
+                }
+            }, null, 2);
+        } catch (error) {
+            return `Failed to run bulk analysis: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        }
     }
 
-    private async costForecast(_operation: OptimizationOperation): Promise<string> {
-        return JSON.stringify({
-            success: true,
-            message: 'Cost forecast - implementation pending'
-        });
+    private async costForecast(operation: OptimizationOperation): Promise<string> {
+        try {
+            const userId = operation.userId;
+            if (!userId) {
+                return JSON.stringify({ success: false, message: 'userId is required for cost forecast.' });
+            }
+            const timeRange = this.getTimeRange(operation.analysisParams?.timeRange);
+            const days = Math.max(1, (timeRange.end.getTime() - timeRange.start.getTime()) / (24 * 60 * 60 * 1000));
+            const usage = await Usage.aggregate([
+                { $match: { userId, createdAt: { $gte: timeRange.start, $lte: timeRange.end } } },
+                { $group: { _id: null, totalCost: { $sum: '$cost' }, count: { $sum: 1 } } }
+            ]);
+            const totalCost = usage[0]?.totalCost || 0;
+            const count = usage[0]?.count || 0;
+            const dailyAvg = totalCost / days;
+            const monthlyForecast = dailyAvg * 30;
+            return JSON.stringify({
+                success: true,
+                operation: 'cost_forecast',
+                data: {
+                    basedOn: { days, totalCost: Number(totalCost.toFixed(4)), requestCount: count },
+                    dailyAverage: Number(dailyAvg.toFixed(4)),
+                    monthlyForecast: Number(monthlyForecast.toFixed(4)),
+                    timeRange: { start: timeRange.start, end: timeRange.end }
+                }
+            }, null, 2);
+        } catch (error) {
+            return `Failed to generate cost forecast: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        }
     }
 
     private isValidOperation(operation: OptimizationOperation): boolean {

@@ -167,7 +167,8 @@ const GoogleWorkflowSchema = new Schema<IGoogleWorkflow>(
         ]
     },
     {
-        timestamps: true
+        timestamps: true,
+        collection: 'google_workflows'
     }
 );
 

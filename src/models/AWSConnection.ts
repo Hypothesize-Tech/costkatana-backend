@@ -98,15 +98,19 @@ export interface IAWSConnection extends Document {
   updateHealth(success: boolean, error?: string, latencyMs?: number): Promise<void>;
 }
 
-// Encryption key from environment (should be in secrets manager in production)
-const ENCRYPTION_KEY = process.env.AWS_CONNECTION_ENCRYPTION_KEY ?? 'costkatana-default-key-change-in-prod';
+// Encryption key from environment (required - no fallback)
+const ENCRYPTION_KEY = process.env.AWS_CONNECTION_ENCRYPTION_KEY;
+
+if (!ENCRYPTION_KEY) {
+  throw new Error('AWS_CONNECTION_ENCRYPTION_KEY environment variable is required');
+}
 
 /**
  * Encrypt external ID using scrypt-based key derivation
  * Format: iv:authTag:encrypted:salt
  */
 function encrypt(text: string): string {
-  const result = EncryptionService.encryptGCMWithScrypt(text, ENCRYPTION_KEY);
+  const result = EncryptionService.encryptGCMWithScrypt(text, ENCRYPTION_KEY!);
   return `${result.iv}:${result.authTag}:${result.encrypted}:${result.salt}`;
 }
 
@@ -120,7 +124,7 @@ function decrypt(encryptedText: string): string {
   // Support new format: iv:authTag:encrypted:salt (4 parts)
   if (parts.length === 4) {
     const [iv, authTag, encrypted, salt] = parts;
-    return EncryptionService.decryptGCMWithScrypt(encrypted, iv, authTag, salt, ENCRYPTION_KEY);
+    return EncryptionService.decryptGCMWithScrypt(encrypted, iv, authTag, salt, ENCRYPTION_KEY!);
   }
   
   // Legacy format support: iv:authTag:encrypted (3 parts - old scrypt format without explicit salt)
@@ -129,7 +133,7 @@ function decrypt(encryptedText: string): string {
     const [iv, authTag, encrypted] = parts;
     // Use fixed 'salt' as the salt value for legacy compatibility
     const legacySalt = Buffer.from('salt').toString('hex');
-    return EncryptionService.decryptGCMWithScrypt(encrypted, iv, authTag, legacySalt, ENCRYPTION_KEY);
+    return EncryptionService.decryptGCMWithScrypt(encrypted, iv, authTag, legacySalt, ENCRYPTION_KEY!);
   }
   
   throw new Error('Invalid encrypted format for AWS external ID');
@@ -355,6 +359,7 @@ const awsConnectionSchema = new Schema<IAWSConnection>({
   },
 }, {
   timestamps: true,
+  collection: 'aws_connections'
 });
 
 // Indexes for efficient queries

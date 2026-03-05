@@ -426,7 +426,7 @@ export class ChatService {
             this.setupLangchainModels();
             
             // Create specialized agents
-            this.createLangchainAgents();
+            await this.createLangchainAgents();
             
             // Build the state graph
             this.buildLangchainGraph();
@@ -543,7 +543,7 @@ export class ChatService {
     /**
      * Create specialized Langchain agents
      */
-    private static createLangchainAgents(): void {
+    private static async createLangchainAgents(): Promise<void> {
         const agentConfigs: LangchainAgentConfig[] = [
             {
                 name: 'master_coordinator',
@@ -659,31 +659,142 @@ export class ChatService {
             }
         ];
 
-        // Create agents (simplified for now, can be enhanced with actual tools)
+        // Create agents with proper tool integration
         for (const config of agentConfigs) {
             const model = this.langchainModels.get(config.name);
             if (!model) continue;
 
-            // For now, create simple chat-based agents
-            // In production, these would be enhanced with proper tool integration
-            const agent = {
-                name: config.name,
-                model: model,
-                config: config,
-                invoke: async (messages: BaseMessage[]) => {
-                    const systemMessage = new SystemMessage(config.systemPrompt);
-                    const allMessages = [systemMessage, ...messages];
-                    return await model.invoke(allMessages);
-                }
-            };
+            // Get appropriate tools for this agent type
+            const tools = await this.getToolsForAgent(config.name, config);
 
-            this.langchainAgents.set(config.name, agent as any);
+            // Create agent with tool integration
+            const agent = await this.createAgentWithTools(config, model, tools);
+
+            this.langchainAgents.set(config.name, agent);
         }
 
-        loggingService.info('🤖 Langchain agents created', {
+        loggingService.info('🤖 Langchain agents created with tool integration', {
             agentCount: this.langchainAgents.size,
             agents: Array.from(this.langchainAgents.keys())
         });
+    }
+
+    /**
+     * Get appropriate tools for a specific agent type
+     */
+    private static async getToolsForAgent(agentName: string, config: any): Promise<any[]> {
+        const tools: any[] = [];
+
+        switch (agentName) {
+            case 'web_scraper_agent':
+                // Add web scraping tools
+                const { WebSearchTool } = await import('../tools/webSearch.tool');
+                tools.push(new WebSearchTool());
+                break;
+
+            case 'github_agent':
+                // Add GitHub integration tools
+                if (config.githubTools) {
+                    tools.push(...config.githubTools);
+                }
+                break;
+
+            case 'vercel_agent':
+                // Add Vercel deployment tools
+                if (config.vercelTools) {
+                    tools.push(...config.vercelTools);
+                }
+                break;
+
+            case 'mcp_agent':
+                // Add MCP integration tools
+                if (config.mcpTools) {
+                    tools.push(...config.mcpTools);
+                }
+                break;
+
+            case 'integration_agent':
+                // Add integration management tools
+                tools.push({
+                    name: 'list_integrations',
+                    description: 'List available integrations',
+                    invoke: async () => {
+                        // Implementation would list user's integrations
+                        return 'Available integrations: GitHub, Vercel, MongoDB, Linear, JIRA';
+                    }
+                });
+                break;
+
+            default:
+                // Default tools for general agents
+                tools.push({
+                    name: 'get_current_time',
+                    description: 'Get current timestamp',
+                    invoke: async () => new Date().toISOString()
+                });
+        }
+
+        return tools;
+    }
+
+    /**
+     * Create an agent with proper tool integration using LangChain
+     */
+    private static async createAgentWithTools(config: any, model: any, tools: any[]): Promise<any> {
+        const { AgentExecutor, createToolCallingAgent } = await import('langchain/agents');
+        const { ChatPromptTemplate, MessagesPlaceholder } = await import('@langchain/core/prompts');
+
+        // Create prompt template for the agent
+        const prompt = ChatPromptTemplate.fromMessages([
+            ['system', config.systemPrompt],
+            ['placeholder', '{chat_history}'],
+            ['human', '{input}'],
+            ['placeholder', '{agent_scratchpad}']
+        ]);
+
+        // Create tool-calling agent
+        const agent = await createToolCallingAgent({
+            llm: model,
+            tools,
+            prompt
+        });
+
+        // Create agent executor
+        const agentExecutor = new AgentExecutor({
+            agent,
+            tools,
+            verbose: process.env.NODE_ENV === 'development',
+            maxIterations: 5,
+            returnIntermediateSteps: true
+        });
+
+        return {
+            name: config.name,
+            model: model,
+            config: config,
+            tools: tools,
+            executor: agentExecutor,
+            invoke: async (messages: BaseMessage[]) => {
+                // Convert messages to input format for agent
+                const input = messages[messages.length - 1]?.content || '';
+                const chatHistory = messages.slice(0, -1);
+
+                try {
+                    const result = await agentExecutor.invoke({
+                        input,
+                        chat_history: chatHistory
+                    });
+
+                    return result.output;
+                } catch (error) {
+                    loggingService.error('Agent execution failed', {
+                        agentName: config.name,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                    throw error;
+                }
+            }
+        };
     }
 
     /**
@@ -2154,6 +2265,17 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
             this.convertToHandlerRequest(request),
             recentMessages
         );
+    }
+
+    /**
+     * Public wrapper for MCP route handling
+     */
+    static async processMCPRoute(
+        request: ChatSendMessageRequest,
+        context: ConversationContext,
+        recentMessages: any[]
+    ): Promise<any> {
+        return this.handleMCPRoute(request, context, recentMessages);
     }
 
     /**

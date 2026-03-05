@@ -9,6 +9,7 @@ import { ParallelExecutionOptimizerService } from '../compiler/parallelExecution
 import { ProactiveSuggestionsService } from '../services/proactiveSuggestions.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
 import { ServiceHelper } from '@utils/serviceHelper';
+import { UserOptimizationConfig } from '../models/UserOptimizationConfig';
 
 /**
  * Model mapping from short names to full AWS Bedrock model IDs
@@ -25,6 +26,7 @@ const mapToFullModelId = (shortName?: string): string | undefined => {
         
         // Claude 4.6 and Claude 4 models
         'claude-opus-4-6': 'anthropic.claude-opus-4-6-v1',
+        'claude-sonnet-4-6': 'anthropic.claude-sonnet-4-6-v1:0',
         'claude-4': 'anthropic.claude-opus-4-1-20250805-v1:0',
         'claude-opus-4': 'anthropic.claude-opus-4-1-20250805-v1:0',
         
@@ -37,6 +39,7 @@ const mapToFullModelId = (shortName?: string): string | undefined => {
         'global.anthropic.claude-haiku-4-5-20251001-v1:0': 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         'anthropic.claude-3-5-sonnet-20240620-v1:0': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
         'anthropic.claude-opus-4-6-v1': 'anthropic.claude-opus-4-6-v1',
+        'anthropic.claude-sonnet-4-6-v1:0': 'anthropic.claude-sonnet-4-6-v1:0',
         'anthropic.claude-opus-4-1-20250805-v1:0': 'anthropic.claude-opus-4-1-20250805-v1:0',
         'amazon.nova-pro-v1:0': 'amazon.nova-pro-v1:0'
     };
@@ -1103,10 +1106,9 @@ export class OptimizationController {
     static async getOptimizationConfig(_req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
         ControllerHelper.logRequestStart('getOptimizationConfig', _req);
+        const userId = (_req as AuthenticatedRequest).userId;
 
         try {
-            // For now, return default configuration
-            // In a real implementation, this would be stored per user in the database
             const defaultConfig = {
                 enabledTechniques: [
                     'prompt_compression',
@@ -1139,11 +1141,58 @@ export class OptimizationController {
                 }
             };
 
+            if (!userId) {
+                ControllerHelper.logRequestSuccess('getOptimizationConfig', _req, startTime);
+                res.json({ success: true, data: defaultConfig });
+                return;
+            }
+
+            const doc = await UserOptimizationConfig.findOne({ userId, isActive: true }).lean();
+            const config = doc
+                ? {
+                    enabledTechniques: [
+                        ...(doc.enablePromptOptimization !== false ? ['prompt_compression'] : []),
+                        'context_trimming',
+                        ...(doc.enableSemanticCaching !== false ? ['request_fusion'] : [])
+                    ].length > 0
+                        ? [
+                            ...(doc.enablePromptOptimization !== false ? ['prompt_compression'] : []),
+                            'context_trimming',
+                            ...(doc.enableSemanticCaching !== false ? ['request_fusion'] : [])
+                        ]
+                        : defaultConfig.enabledTechniques,
+                    defaultSettings: {
+                        promptCompression: {
+                            enabled: doc.enablePromptOptimization ?? defaultConfig.defaultSettings.promptCompression.enabled,
+                            minCompressionRatio: defaultConfig.defaultSettings.promptCompression.minCompressionRatio,
+                            jsonCompressionThreshold: defaultConfig.defaultSettings.promptCompression.jsonCompressionThreshold
+                        },
+                        contextTrimming: {
+                            enabled: true,
+                            maxContextLength: 4000,
+                            preserveRecentMessages: 3
+                        },
+                        requestFusion: {
+                            enabled: doc.enableSemanticCaching ?? defaultConfig.defaultSettings.requestFusion.enabled,
+                            maxFusionBatch: 5,
+                            fusionWaitTime: 1000
+                        }
+                    },
+                    thresholds: {
+                        highCostPerRequest: doc.maxCostPerRequest ?? defaultConfig.thresholds.highCostPerRequest,
+                        highTokenUsage: 2000,
+                        frequencyThreshold: 5,
+                        batchingThreshold: 3,
+                        modelDowngradeConfidence: doc.maxModelDowngrade ? 0.8 : 0
+                    }
+                }
+                : defaultConfig;
+
             ControllerHelper.logRequestSuccess('getOptimizationConfig', _req, startTime);
 
             res.json({
                 success: true,
-                data: defaultConfig,
+                data: config,
             });
         } catch (error: any) {
             ControllerHelper.handleError('getOptimizationConfig', error, _req, res, startTime);
@@ -1159,17 +1208,39 @@ export class OptimizationController {
         ControllerHelper.logRequestStart('updateOptimizationConfig', req);
 
         try {
-            // For now, just acknowledge the update
-            // In a real implementation, this would update the user's configuration in the database
+            // Persist the optimization configuration to database
+            const optimizationConfig = await UserOptimizationConfig.findOneAndUpdate(
+                { userId },
+                {
+                    ...config,
+                    userId,
+                    updatedAt: new Date()
+                },
+                {
+                    upsert: true,
+                    new: true,
+                    runValidators: true
+                }
+            );
+
+            loggingService.info('Optimization configuration persisted', {
+                userId,
+                configId: optimizationConfig._id,
+                configKeys: Object.keys(config || {})
+            });
 
             ControllerHelper.logRequestSuccess('updateOptimizationConfig', req, startTime, {
-                configKeys: Object.keys(config || {})
+                configKeys: Object.keys(config || {}),
+                configId: optimizationConfig._id
             });
 
             res.json({
                 success: true,
                 message: 'Optimization configuration updated successfully',
-                data: config,
+                data: {
+                    configId: optimizationConfig._id,
+                    ...optimizationConfig.toObject()
+                },
             });
         } catch (error: any) {
             ControllerHelper.handleError('updateOptimizationConfig', error, req, res, startTime);

@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { SimulationTrackingService, SimulationTrackingData, OptimizationApplication } from '../services/simulationTracking.service';
 import { loggingService } from '../services/logging.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';

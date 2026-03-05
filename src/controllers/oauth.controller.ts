@@ -5,7 +5,7 @@ import { MFAService } from '../services/mfa.service';
 import { loggingService } from '../services/logging.service';
 import { redisService } from '../services/redis.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
+
 
 export class OAuthController {
     /**

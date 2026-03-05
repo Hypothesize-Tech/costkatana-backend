@@ -156,7 +156,8 @@ const UserTelemetryConfigSchema = new Schema<IUserTelemetryConfig>({
         default: 0
     }
 }, {
-    timestamps: true
+    timestamps: true,
+    collection: 'user_telemetry_configs'
 });
 
 // Indexes

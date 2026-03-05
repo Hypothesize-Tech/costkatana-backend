@@ -357,8 +357,8 @@ export class PromptFirewallService extends BaseService {
         prompt: string,
         threshold: number
     ): Promise<ThreatDetectionResult> {
-        // Disable Bedrock for now to avoid model errors - use reliable pattern matching
-        const useBedrockModels = false; // process.env.ENABLE_BEDROCK_FIREWALL === 'true' && this.bedrockClient;
+        // Use Bedrock models for advanced threat detection if enabled
+        const useBedrockModels = process.env.ENABLE_BEDROCK_FIREWALL === 'true' && this.bedrockClient;
 
         if (useBedrockModels && !this.isServiceCircuitBreakerOpen()) {
             try {

@@ -236,27 +236,23 @@ class DefaultResourceConfigService {
         throw new Error('Failed to create security group');
       }
 
-      // Add SSH ingress rule (allow from anywhere for now - user can restrict)
+      // Add secure ingress rules - SSH access is NEVER open to the world
       const ingressCommand = new AuthorizeSecurityGroupIngressCommand({
         GroupId: createResponse.GroupId,
         IpPermissions: [
-          {
-            IpProtocol: 'tcp',
-            FromPort: 22,
-            ToPort: 22,
-            IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'SSH access' }],
-          },
+          // HTTPS access (web application)
           {
             IpProtocol: 'tcp',
             FromPort: 443,
             ToPort: 443,
-            IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'HTTPS access' }],
+            IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'HTTPS access for web application' }],
           },
+          // HTTP access (redirect to HTTPS)
           {
             IpProtocol: 'tcp',
             FromPort: 80,
             ToPort: 80,
-            IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'HTTP access' }],
+            IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'HTTP access (redirect to HTTPS)' }],
           },
         ],
       });

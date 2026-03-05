@@ -1146,12 +1146,68 @@ export class ServicePrioritizationService extends EventEmitter {
      * Update service usage metrics
      */
     private async updateServiceUsageMetrics(): Promise<void> {
-        // This would integrate with actual metrics collection
-        // For now, we'll simulate usage updates
-        for (const [_, allocation] of this.currentAllocations) {
-            // Simulate current usage (would come from real metrics)
-            const simulatedUsage = Math.random() * allocation.allocated_percentage;
-            allocation.current_usage = simulatedUsage;
+        // Implement real usage tracking based on recent service usage patterns
+        const now = Date.now();
+        const oneHourAgo = now - (60 * 60 * 1000); // Last hour
+
+        for (const [serviceKey, allocation] of this.currentAllocations) {
+            try {
+                // Get recent usage for this service
+                const recentUsage = await this.getRecentServiceUsage(serviceKey, oneHourAgo);
+
+                if (recentUsage.length > 0) {
+                    // Calculate current usage as percentage of allocated capacity
+                    const totalRequests = recentUsage.length;
+                    const avgRequestsPerMinute = totalRequests / 60; // Assuming 1 hour window
+
+                    // Calculate usage percentage based on request rate vs allocated capacity
+                    // This is a simplified calculation - in production, you'd use actual capacity metrics
+                    const capacityBaseline = allocation.allocated_percentage * 10; // Baseline requests per minute
+                    const currentUsagePercent = Math.min(100, (avgRequestsPerMinute / capacityBaseline) * 100);
+
+                    // Add some smoothing to avoid sudden spikes
+                    const smoothingFactor = 0.7;
+                    allocation.current_usage = Math.round(
+                        (allocation.current_usage * smoothingFactor) +
+                        (currentUsagePercent * (1 - smoothingFactor))
+                    );
+                } else {
+                    // No recent usage, decay towards zero
+                    allocation.current_usage = Math.max(0, allocation.current_usage * 0.9);
+                }
+
+                // Ensure usage stays within bounds
+                allocation.current_usage = Math.max(0, Math.min(100, allocation.current_usage));
+
+            } catch (error) {
+                loggingService.warn('Failed to update usage metrics for service', {
+                    service: serviceKey,
+                    error: error instanceof Error ? error.message : String(error)
+                });
+                // Fallback to gradual decay
+                allocation.current_usage = Math.max(0, allocation.current_usage * 0.95);
+            }
+        }
+    }
+
+    private async getRecentServiceUsage(serviceKey: string, sinceTimestamp: number): Promise<any[]> {
+        try {
+            // Query recent usage for this service
+            // This would typically query your usage analytics service
+            const { Usage } = await import('../models/Usage');
+
+            const usage = await Usage.find({
+                service: serviceKey,
+                createdAt: { $gte: new Date(sinceTimestamp) }
+            }).limit(1000).lean(); // Limit to prevent excessive memory usage
+
+            return usage || [];
+        } catch (error) {
+            loggingService.warn('Failed to query service usage', {
+                service: serviceKey,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return [];
         }
     }
 
