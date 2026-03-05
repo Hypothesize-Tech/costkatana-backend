@@ -1,5 +1,4 @@
 import { Response, NextFunction } from 'express';
-
 import { redisService } from '../services/redis.service';
 import { loggingService } from '../services/logging.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';

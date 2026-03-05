@@ -1,6 +1,5 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { UserTelemetryConfig } from '../models/UserTelemetryConfig';
-import { loggingService } from '../services/logging.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
 import { ServiceHelper } from '@utils/serviceHelper';
 
@@ -314,7 +313,7 @@ export const testTelemetryEndpoint = async (req: AuthenticatedRequest, res: Resp
             const response = await axios.get(testUrl, {
                 headers,
                 timeout: 10000,
-                validateStatus: () => true // Accept any status for now
+                validateStatus: (status: number) => status >= 200 && status < 300 // Accept 2xx status codes only
             });
 
             const responseTime = Date.now() - startTime;

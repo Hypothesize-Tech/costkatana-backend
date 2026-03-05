@@ -2,9 +2,7 @@
  * Modular RAG Orchestrator
  * Coordinates modules and executes patterns based on query analysis
  */
-
 import {
-  RAGContext,
   RAGResult,
   RAGPatternType,
   RAGConfig,
@@ -17,7 +15,6 @@ import { AdaptiveRAGPattern } from '../patterns/adaptive.pattern';
 import { IterativeRAGPattern } from '../patterns/iterative.pattern';
 import { RecursiveRAGPattern } from '../patterns/recursive.pattern';
 import {
-  DEFAULT_RAG_CONFIG,
   DEFAULT_ORCHESTRATOR_CONFIG,
   getPatternConfig,
 } from '../config/default.config';
@@ -37,8 +34,8 @@ export class ModularRAGOrchestrator {
     // Initialize LLM for pattern selection if auto-select is enabled
     if (this.config.autoSelectPattern) {
       this.llm = new ChatBedrockConverse({
-        model: this.config.patternSelectionModel || 'amazon.nova-micro-v1:0',
-        region: process.env.AWS_REGION || 'us-east-1',
+        model: this.config.patternSelectionModel ?? 'amazon.nova-micro-v1:0',
+        region: process.env.AWS_REGION ?? 'us-east-1',
         temperature: 0.3,
         maxTokens: 200,
       });

@@ -65,6 +65,8 @@ export interface IUser {
             alertTypeRouting?: Map<string, string[]>; // Per-alert-type integration routing
             fallbackToEmail?: boolean;
         };
+        /** Custom monthly budget limit in USD; overrides tier default when set */
+        monthlyBudgetLimit?: number;
     };
     subscriptionId?: ObjectId; // Reference to Subscription model
     usage: {
@@ -338,6 +340,12 @@ const userSchema = new Schema<IUser>({
                 type: Boolean,
                 default: true
             }
+        },
+        /** Custom monthly budget limit in USD; overrides tier default when set */
+        monthlyBudgetLimit: {
+            type: Number,
+            default: undefined,
+            min: 0
         }
     },
     subscriptionId: {

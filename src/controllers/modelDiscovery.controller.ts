@@ -4,7 +4,6 @@ import { ModelDiscoveryJob } from '../jobs/modelDiscovery.job';
 import { AIModelPricing } from '../models/AIModelPricing';
 import { loggingService } from '../services/logging.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
 
 /**
  * Model Discovery Controller

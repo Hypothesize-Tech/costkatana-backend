@@ -172,11 +172,30 @@ class InternalAccessControlService {
   private operatorMFAData: Map<string, OperatorMFAData> = new Map();
   
   // Encryption key for MFA secrets (in production, use AWS KMS or similar)
-  private readonly ENCRYPTION_KEY = process.env.INTERNAL_MFA_ENCRYPTION_KEY ?? 
-    crypto.createHash('sha256').update('default-key-change-in-production').digest();
+  private readonly ENCRYPTION_KEY: Buffer;
   private readonly ENCRYPTION_ALGORITHM = 'aes-256-gcm';
   
   private constructor() {
+    const key = process.env.INTERNAL_MFA_ENCRYPTION_KEY?.trim();
+    if (!key) {
+      throw new Error(
+        'INTERNAL_MFA_ENCRYPTION_KEY environment variable is required for AWS internal access control'
+      );
+    }
+    if (key.length < 32) {
+      throw new Error(
+        'INTERNAL_MFA_ENCRYPTION_KEY must be at least 32 characters'
+      );
+    }
+    if (['default-key-change-in-production', 'changeme', 'test', 'development']
+      .map(v => v.toLowerCase())
+      .includes(key.toLowerCase())) {
+      throw new Error(
+        'INTERNAL_MFA_ENCRYPTION_KEY must be a secure unique secret, not a placeholder value'
+      );
+    }
+    this.ENCRYPTION_KEY = crypto.createHash('sha256').update(key).digest();
+
     // Start cleanup interval
     this.startCleanupInterval();
   }

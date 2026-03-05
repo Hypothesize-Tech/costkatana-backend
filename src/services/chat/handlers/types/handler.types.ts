@@ -96,6 +96,11 @@ export interface HandlerResult {
         connectUrl: string;
     };
     
+    /** Whether the handler completed successfully */
+    success?: boolean;
+    /** Error message when success is false */
+    error?: string;
+    
     // Strategy formation
     strategyFormed?: any;
     autonomousActions?: string[];

@@ -1,10 +1,12 @@
 import jwt, { SignOptions, Secret, JwtPayload } from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { User, IUser } from '../models/User';
 import { config } from '../config';
 import { generateToken } from '../utils/helpers';
 import { loggingService } from './logging.service';
 import { ActivityService } from './activity.service';
 import { MFAService } from './mfa.service';
+import { EmailService } from './email.service';
 
 interface TokenPayload extends JwtPayload {
     id: string;
@@ -274,10 +276,10 @@ export class AuthService {
             const [isPasswordValid, deviceTrustCheck] = await Promise.all([
                 // Password validation
                 (async () => {
-                    if (typeof user.comparePassword !== 'function') {
-                        throw new Error('Password comparison not implemented');
+                    if (!user.password) {
+                        throw new Error('No password set for this user. Please use OAuth login.');
                     }
-                    return await user.comparePassword(password);
+                    return await bcrypt.compare(password, user.password);
                 })(),
                 // Device trust check (if MFA enabled and device info provided)
                 (async () => {
@@ -605,6 +607,19 @@ export class AuthService {
             user.resetPasswordExpires = new Date(Date.now() + 3600000); // 1 hour
             await user.save();
 
+            // Send password reset email
+            try {
+                const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
+                await EmailService.sendPasswordResetEmail(user, resetUrl);
+            } catch (emailError) {
+                loggingService.error('Failed to send password reset email', {
+                    userId: user._id?.toString(),
+                    email,
+                    error: emailError instanceof Error ? emailError.message : String(emailError)
+                });
+                // Don't fail the request if email fails
+            }
+
             loggingService.info(`Password reset requested for: ${user.email}`);
 
             return resetToken;
@@ -648,9 +663,6 @@ export class AuthService {
             }
 
             // Validate old password
-            if (typeof user.comparePassword !== 'function') {
-                throw new Error('Password comparison not implemented');
-            }
             const isPasswordValid = await user.comparePassword(oldPassword);
 
             if (!isPasswordValid) {

@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { loggingService } from '../services/logging.service';
 import { memoryService } from '../services/memory.service';
 import { userPreferenceService } from '../services/userPreference.service';

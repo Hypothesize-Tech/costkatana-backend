@@ -649,7 +649,8 @@ export class SemanticPatternAnalyzerService {
     const requestsPerUser = clusterData.length / userStats.size;
 
     // Growth rate (simplified - would need historical data)
-    const growthRate = 0; // Placeholder
+    // Default to 0 if not configured, can be set via env for testing
+    const growthRate = parseFloat(process.env.SEMANTIC_GROWTH_RATE || '0');
     const isGrowing = growthRate > 5;
 
     return {

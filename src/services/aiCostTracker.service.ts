@@ -138,11 +138,7 @@ export class AICostTrackerService {
         }
 
         if (providers.length === 0) {
-            loggingService.warn('No AI provider API keys configured. Adding default OpenAI provider for tracking purposes only.');
-            providers.push({
-                provider: AIProvider.OpenAI,
-                apiKey: 'dummy-key-for-tracking-only'
-            });
+            loggingService.error('No AI provider API keys configured. Cost tracking will be limited. Please configure valid API keys for production use.');
         }
 
         const optimization: OptimizationConfig = {
@@ -887,30 +883,69 @@ export class AICostTrackerService {
     }
 
     /**
-     * Make a tracked request (placeholder for future implementation)
+     * Make a tracked request: call the appropriate provider API, then track the request/response and return the result.
      */
     static async makeTrackedRequest(
         request: any,
         userId: string,
         metadata?: any
     ): Promise<any> {
-        // This would be implemented to make actual API calls to providers
-        // For now, we'll just track the usage and return a mock response
+        const prompt = request.prompt ?? (request.messages?.length
+            ? request.messages.map((m: any) => m.content).join('\n')
+            : '');
+        const model = request.model || 'gpt-4o-mini';
+        const maxTokens = request.maxTokens ?? 1024;
+        const temperature = request.temperature ?? 0.7;
 
-        const mockResponse = {
-            content: 'Mock response for tracking purposes',
+        let content: string;
+        let promptTokens: number;
+        let completionTokens: number;
+
+        const isOpenAI = /^gpt-|^o1-|^chatgpt-/i.test(model) && process.env.OPENAI_API_KEY;
+
+        if (isOpenAI) {
+            const OpenAI = (await import('openai')).default;
+            const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+            const messages = request.messages ?? [{ role: 'user' as const, content: prompt }];
+            const completion = await client.chat.completions.create({
+                model: model.startsWith('gpt-') || model.startsWith('o1-') ? model : 'gpt-4o-mini',
+                messages,
+                max_tokens: maxTokens,
+                temperature,
+            });
+            const choice = completion.choices?.[0];
+            content = choice?.message?.content ?? '';
+            promptTokens = completion.usage?.prompt_tokens ?? estimateTokens(prompt, AIProvider.OpenAI);
+            completionTokens = completion.usage?.completion_tokens ?? estimateTokens(content, AIProvider.OpenAI);
+        } else {
+            const { BedrockService } = await import('./bedrock.service');
+            const result = await BedrockService.invokeModel(prompt, model, {
+                recentMessages: request.messages?.map((m: any) => ({ role: m.role ?? 'user', content: m.content ?? '' })),
+                useSystemPrompt: false,
+            });
+            const resultStr = typeof result === 'string' ? result : (result?.response ?? result?.result ?? '');
+            content = resultStr;
+            promptTokens = typeof result?.inputTokens === 'number' ? result.inputTokens : estimateTokens(prompt, AIProvider.AWSBedrock);
+            completionTokens = typeof result?.outputTokens === 'number' ? result.outputTokens : estimateTokens(content, AIProvider.AWSBedrock);
+        }
+
+        const response = {
+            content,
             usage: {
-                promptTokens: estimateTokens(request.prompt || '', AIProvider.OpenAI),
-                completionTokens: 50,
-                totalTokens: 0
-            }
+                promptTokens,
+                completionTokens,
+                totalTokens: promptTokens + completionTokens,
+            },
         };
 
-        mockResponse.usage.totalTokens = mockResponse.usage.promptTokens + mockResponse.usage.completionTokens;
+        await this.trackRequest(
+            { ...request, prompt: prompt || request.prompt, model },
+            response,
+            userId,
+            metadata,
+        );
 
-        await this.trackRequest(request, mockResponse, userId, metadata);
-
-        return mockResponse;
+        return response;
     }
 
     /**

@@ -1,6 +1,5 @@
 import { GoogleSearchService } from './googleSearch.service';
 import { BedrockService } from './bedrock.service';
-import { WebScraperService } from './web-scraper.service';
 import { loggingService } from './logging.service';
 import { AIModelPricing, IAIModelPricing } from '../models/AIModelPricing';
 import {

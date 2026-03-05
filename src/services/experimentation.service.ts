@@ -344,9 +344,12 @@ export class ExperimentationService extends BaseService {
                 // Calculate actual cost based on tokens used
                 actualCost = await this.calculateActualCost(prompt, bedrockOutput, model.model);
             } else {
-                // Simulation mode - get response based on historical data
-                modelResponse = await this.simulateModelResponse(userId, model, prompt);
-                actualCost = await this.estimateSimulatedCost(prompt, modelResponse, model.model);
+                // Simulation mode not supported - experimentation requires real API calls
+                throw new Error(
+                    `Model experimentation requires real API execution. ` +
+                    `Cannot simulate responses for ${model.provider}:${model.model}. ` +
+                    `Set executeOnBedrock=true to run actual model comparisons.`
+                );
             }
 
             const executionTime = Date.now() - startTime;
@@ -833,39 +836,6 @@ export class ExperimentationService extends BaseService {
         }
     }
 
-    /**
-     * Simulate model response based on historical data
-     */
-    private static async simulateModelResponse(
-        userId: string, 
-        model: ModelComparisonRequest['models'][0], 
-        prompt: string
-    ): Promise<string> {
-        try {
-            // Get similar historical responses from usage data
-            const similarUsage = await Usage.findOne({
-                userId: new mongoose.Types.ObjectId(userId),
-                model: { $regex: model.model, $options: 'i' }
-            }).sort({ createdAt: -1 });
-
-            if (similarUsage?.completion) {
-                return `${similarUsage.completion}\n\n[Simulated response based on historical usage]`;
-            }
-
-            // Fallback to a generic response
-            return `This is a simulated response from ${model.model} for the prompt: "${prompt.substring(0, 100)}..."`;
-        } catch (error) {
-            loggingService.error('Error simulating model response:', { error: error instanceof Error ? error.message : String(error) });
-            return `Simulated response from ${model.model}`;
-        }
-    }
-
-    /**
-     * Estimate cost for simulated execution
-     */
-    private static async estimateSimulatedCost(prompt: string, response: string, modelName: string): Promise<number> {
-        return await this.calculateActualCost(prompt, response, modelName);
-    }
 
     /**
      * Calculate model performance metrics
@@ -1148,22 +1118,146 @@ export class ExperimentationService extends BaseService {
     ): Promise<ExperimentResult> {
         try {
             const experimentId = `exp_${Date.now()}`;
-            
-            // Get actual usage data for these models to base comparison on
-            const results = await this.analyzeModelsFromUsageData(userId, request);
+            const startTime = new Date();
+            const iterations = request.iterations || 1;
+            const results: ModelComparisonResult[] = [];
+
+            // Run comparison for each model
+            for (let i = 0; i < request.models.length; i++) {
+                const model = request.models[i];
+                const modelStartTime = Date.now();
+
+                try {
+                    loggingService.info(`Running comparison for ${model.provider}/${model.model}`);
+
+                    // Get model response
+                    let response = '';
+                    let actualCost = 0;
+                    let tokenCount = 0;
+                    let executionTime = 0;
+
+                    // Check if real API calls are enabled
+                    const realCallsEnabled = process.env.ENABLE_REAL_MODEL_COMPARISON === 'true';
+
+                    if (realCallsEnabled) {
+                        const result = await this.executeModelComparison(
+                            userId,
+                            model,
+                            request.prompt,
+                            false, // Don't use Bedrock for basic comparison
+                            'balanced'
+                        );
+                        response = result.response;
+                        actualCost = result.actualCost;
+                        executionTime = result.executionTime;
+                        tokenCount = this.estimateTokenCount(request.prompt, response);
+                    } else {
+                        // Real API calls required for experimentation - no simulation fallbacks
+                        throw new Error(
+                            `Model experimentation requires real API execution. ` +
+                            `Cannot simulate responses for ${model.provider}:${model.model}. ` +
+                            `Set ENABLE_REAL_MODEL_COMPARISON=true to run actual model comparisons.`
+                        );
+                    }
+
+                    // Calculate quality score based on evaluation criteria
+                    let qualityScore = 0;
+                    try {
+                        qualityScore = await this.performBasicQualityEvaluation(
+                            request.prompt,
+                            response,
+                            request.evaluationCriteria
+                        );
+                    } catch (error) {
+                        loggingService.error('Quality evaluation failed, using default score:', { error: error instanceof Error ? error.message : String(error) });
+                        qualityScore = 70; // Default score
+                    }
+
+                    const modelResult: ModelComparisonResult = {
+                        id: `${model.provider}-${model.model}-${Date.now()}`,
+                        provider: model.provider,
+                        model: model.model,
+                        response,
+                        metrics: {
+                            cost: actualCost,
+                            latency: executionTime,
+                            tokenCount,
+                            qualityScore,
+                            errorRate: 0,
+                        },
+                        performance: {
+                            responseTime: executionTime,
+                            throughput: 1000 / executionTime, // requests per second
+                            reliability: 1.0, // Assume successful
+                        },
+                        costBreakdown: {
+                            inputTokens: this.estimateTokenCount(request.prompt, ''),
+                            outputTokens: this.estimateTokenCount('', response),
+                            inputCost: actualCost * 0.3, // Estimate
+                            outputCost: actualCost * 0.7, // Estimate
+                            totalCost: actualCost,
+                        },
+                        timestamp: new Date().toISOString(),
+                    };
+
+                    results.push(modelResult);
+
+                } catch (error) {
+                    loggingService.error(`Model comparison failed for ${model.provider}/${model.model}:`, { error: error instanceof Error ? error.message : String(error) });
+
+                    // Add failed result
+                    results.push({
+                        id: `${model.provider}-${model.model}-${Date.now()}`,
+                        provider: model.provider,
+                        model: model.model,
+                        response: '',
+                        metrics: {
+                            cost: 0,
+                            latency: Date.now() - modelStartTime,
+                            tokenCount: 0,
+                            qualityScore: 0,
+                            errorRate: 1,
+                        },
+                        performance: {
+                            responseTime: Date.now() - modelStartTime,
+                            throughput: 0,
+                            reliability: 0,
+                        },
+                        costBreakdown: {
+                            inputTokens: 0,
+                            outputTokens: 0,
+                            inputCost: 0,
+                            outputCost: 0,
+                            totalCost: 0,
+                        },
+                        timestamp: new Date().toISOString(),
+                    });
+                }
+            }
+
+            const endTime = new Date();
+            const duration = endTime.getTime() - startTime.getTime();
 
             const experiment: ExperimentResult = {
                 id: experimentId,
-                name: `Model Comparison: ${request.models.map(m => m.model).join(' vs ')}`,
+                name: `Model Comparison - ${new Date().toISOString().split('T')[0]}`,
                 type: 'model_comparison',
                 status: 'completed',
-                startTime: new Date().toISOString(),
-                endTime: new Date().toISOString(),
-                results,
+                startTime: startTime.toISOString(),
+                endTime: endTime.toISOString(),
+                results: {
+                    prompt: request.prompt,
+                    models: request.models.map((m) => ({
+                        provider: m.provider,
+                        model: m.model,
+                    })),
+                    evaluationCriteria: request.evaluationCriteria,
+                    results,
+                },
                 metadata: {
-                    duration: 5, // Quick analysis
-                    iterations: request.iterations || 1,
-                    confidence: results.confidence || 0.8
+                    duration,
+                    iterations,
+                    confidence: this.calculateConfidence(results),
                 },
                 userId,
                 createdAt: new Date()
@@ -1195,6 +1289,113 @@ export class ExperimentationService extends BaseService {
             loggingService.error('Error running model comparison:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
+    }
+
+    /**
+     * Perform basic quality evaluation based on evaluation criteria
+     */
+    private static async performBasicQualityEvaluation(
+        prompt: string,
+        response: string,
+        criteria: string[],
+    ): Promise<number> {
+        if (!response || response.trim().length === 0) {
+            return 0;
+        }
+
+        let totalScore = 0;
+        let criteriaCount = 0;
+
+        // Basic heuristics for common criteria
+        for (const criterion of criteria) {
+            criteriaCount++;
+
+            switch (criterion.toLowerCase()) {
+                case 'relevance':
+                    // Check if response addresses the prompt
+                    const promptWords = prompt.toLowerCase().split(/\s+/);
+                    const responseWords = response.toLowerCase().split(/\s+/);
+                    const commonWords = promptWords.filter(word =>
+                        word.length > 3 && responseWords.includes(word)
+                    );
+                    totalScore += Math.min(commonWords.length / promptWords.length * 100, 100);
+                    break;
+
+                case 'coherence':
+                    // Check for sentence structure and readability
+                    const sentences = response.split(/[.!?]+/).filter(s => s.trim().length > 0);
+                    const avgSentenceLength = response.length / sentences.length;
+                    totalScore += avgSentenceLength > 20 && avgSentenceLength < 200 ? 85 : 50;
+                    break;
+
+                case 'accuracy':
+                    // Basic check for factual content (hard to evaluate without domain knowledge)
+                    totalScore += response.includes('I don\'t know') || response.includes('uncertain') ? 60 : 80;
+                    break;
+
+                case 'completeness':
+                    // Check response length as proxy for completeness
+                    const wordCount = response.split(/\s+/).length;
+                    totalScore += wordCount > 50 ? 90 : wordCount > 20 ? 70 : 40;
+                    break;
+
+                case 'creativity':
+                    // Check for varied vocabulary
+                    const uniqueWords = new Set(response.toLowerCase().split(/\s+/));
+                    const uniquenessRatio = uniqueWords.size / response.split(/\s+/).length;
+                    totalScore += uniquenessRatio > 0.6 ? 85 : uniquenessRatio > 0.4 ? 70 : 50;
+                    break;
+
+                default:
+                    // Default score for unknown criteria
+                    totalScore += 75;
+                    break;
+            }
+        }
+
+        return Math.round(totalScore / criteriaCount);
+    }
+
+    /**
+     * Estimate token count for a text
+     */
+    private static estimateTokenCount(input: string, output: string): number {
+        // Rough estimation: ~4 characters per token
+        const totalChars = input.length + output.length;
+        return Math.ceil(totalChars / 4);
+    }
+
+    /**
+     * Calculate confidence score for experiment results
+     */
+    private static calculateConfidence(results: ModelComparisonResult[]): number {
+        if (results.length === 0) return 0;
+
+        const successfulResults = results.filter(r => r.metrics.errorRate === 0);
+        const avgQuality = successfulResults.reduce((sum, r) => sum + r.metrics.qualityScore, 0) / successfulResults.length;
+
+        // Base confidence on success rate and quality consistency
+        const successRate = successfulResults.length / results.length;
+        const qualityVariance = this.calculateVariance(successfulResults.map(r => r.metrics.qualityScore));
+
+        // Lower variance = higher confidence, higher success rate = higher confidence
+        const varianceScore = Math.max(0, 100 - qualityVariance);
+        const successScore = successRate * 100;
+
+        return Math.round((varianceScore + successScore) / 2);
+    }
+
+    /**
+     * Calculate variance of an array of numbers
+     */
+    private static calculateVariance(values: number[]): number {
+        if (values.length === 0) return 0;
+
+        const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
+        const squaredDiffs = values.map(val => Math.pow(val - mean, 2));
+        const variance = squaredDiffs.reduce((sum, val) => sum + val, 0) / values.length;
+
+        return variance;
     }
 
     /**

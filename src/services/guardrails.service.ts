@@ -18,6 +18,7 @@ import { Usage } from '../models/Usage';
 import mongoose from 'mongoose';
 import { MODEL_PRICING } from '../utils/pricing';
 import { AIRouterService } from './aiRouter.service';
+import { CacheService } from './cache.service';
 
 // Subscription plan limits based on costkxatana.com pricing
 export interface PlanLimits {
@@ -52,34 +53,48 @@ export interface GuardrailViolation {
     suggestions: string[];
 }
 
-// In-memory cache for quick lookups (replace with Redis in production)
+// Redis-based cache for production scalability
 class UsageCache {
-    private cache: Map<string, { data: any; expiry: number }> = new Map();
     private readonly TTL = 60000; // 1 minute cache
+    private readonly cacheService = CacheService.getInstance();
 
-    set(key: string, value: any, ttl: number = this.TTL): void {
-        this.cache.set(key, {
-            data: value,
-            expiry: Date.now() + ttl
-        });
+    async set(key: string, value: any, ttl: number = this.TTL): Promise<void> {
+        try {
+            await this.cacheService.set(`guardrails:${key}`, value, Math.floor(ttl / 1000));
+        } catch (error) {
+            loggingService.warn('Failed to set guardrails cache', {
+                key,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
     }
 
-    get(key: string): any {
-        const item = this.cache.get(key);
-        if (!item) return null;
-        if (Date.now() > item.expiry) {
-            this.cache.delete(key);
+    async get(key: string): Promise<any> {
+        try {
+            return await this.cacheService.get(`guardrails:${key}`);
+        } catch (error) {
+            loggingService.warn('Failed to get guardrails cache', {
+                key,
+                error: error instanceof Error ? error.message : String(error)
+            });
             return null;
         }
-        return item.data;
     }
 
-    delete(key: string): void {
-        this.cache.delete(key);
+    async delete(key: string): Promise<void> {
+        try {
+            await this.cacheService.delete(`guardrails:${key}`);
+        } catch (error) {
+            loggingService.warn('Failed to delete guardrails cache', {
+                key,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
     }
 
     clear(): void {
-        this.cache.clear();
+        // UsageCache delegates to CacheService; no global clear for namespaced keys
+        // Individual keys are cleared via delete() when needed
     }
 }
 
@@ -433,7 +448,7 @@ export class GuardrailsService {
         try {
             // Check cache first
             const cacheKey = `usage:${userId}`;
-            const cached = this.usageCache.get(cacheKey);
+            const cached = await this.usageCache.get(cacheKey);
             loggingService.info(`Cache lookup for ${cacheKey}: ${cached ? 'Hit' : 'Miss'}`);
             if (cached) return cached;
 

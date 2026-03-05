@@ -74,13 +74,29 @@ export async function priorityQueueMiddleware(
             : requestIdHeader;
         
         // Check if queue is over capacity
+        const priorityLevel = explicitPriority ?? PriorityLevel.NORMAL;
         if (priorityQueueService.isQueueOverCapacity()) {
             loggingService.warn('Priority queue over capacity', {
                 requestId: requestId || 'unknown',
                 userTier
             });
-            
-            // For now, just log and continue (in production, you might want to reject low-priority requests)
+
+            // Reject low-priority requests when queue is over capacity
+            if (priorityLevel === PriorityLevel.BULK) {
+                loggingService.info('Rejecting low-priority request due to queue capacity', {
+                    requestId: requestId || 'unknown',
+                    userTier,
+                    priorityLevel
+                });
+                res.status(429).json({
+                    error: 'Service temporarily unavailable',
+                    message: 'The service is currently experiencing high load. Please try again later.',
+                    retryAfter: 300, // 5 minutes
+                    queueStatus: 'over-capacity'
+                });
+                return;
+            }
+
             res.setHeader('CostKatana-Queue-Status', 'over-capacity');
         }
         

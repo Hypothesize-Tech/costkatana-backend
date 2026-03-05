@@ -4,7 +4,7 @@ import { TelemetryService } from '../services/telemetry.service';
 import { loggingService } from '../services/logging.service';
 import { trace } from '@opentelemetry/api';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
+import { isTelemetryInitialized } from '../observability/otel';
 
 export class TelemetryController {
   // Background processing queue
@@ -32,7 +32,6 @@ export class TelemetryController {
   static async getTelemetry(req: AuthenticatedRequest, res: Response) {
     const startTime = Date.now();
     if (!ControllerHelper.requireAuth(req, res)) return;
-    const userId = req.userId!;
     ControllerHelper.logRequestStart('getTelemetry', req);
     const requestId = req.headers['x-request-id'] as string;
     const {
@@ -683,9 +682,9 @@ export class TelemetryController {
   }
 
   /**
-   * Get span processor health and buffer stats
+   * Get span processor health and buffer stats (production: uses OTEL state when available)
    */
-  static async getProcessorHealth(_req: AuthenticatedRequest, res: Response) {
+  static getProcessorHealth(_req: AuthenticatedRequest, res: Response): void {
     const startTime = Date.now();
     ControllerHelper.logRequestStart('getProcessorHealth', _req);
     const requestId = _req?.headers?.['x-request-id'] as string;
@@ -696,36 +695,47 @@ export class TelemetryController {
         hasRequestId: !!requestId
       });
 
-      // This would need to be implemented to access the processor instance
-      // For now, return basic health info
+      const initialized = isTelemetryInitialized();
+      const tracerProvider = trace.getTracerProvider();
+      const hasProvider = Boolean(tracerProvider);
+      const isExporting =
+        process.env.OTEL_TRACES_EXPORTER !== 'none' &&
+        Boolean(process.env.OTLP_HTTP_TRACES_URL);
+
       const duration = Date.now() - startTime;
       ControllerHelper.logRequestSuccess('getProcessorHealth', _req, startTime);
 
-      // Log business event
       loggingService.logBusiness({
         event: 'processor_health_checked',
         category: 'telemetry',
         value: duration,
         metadata: {
-          status: 'healthy'
+          status: initialized ? 'healthy' : 'not_initialized'
         }
       });
 
       res.json({
         success: true,
         processor_health: {
-          status: 'healthy',
+          status:
+            initialized && hasProvider
+              ? 'healthy'
+              : initialized
+                ? 'degraded'
+                : 'not_initialized',
           buffer_size: 0,
-          is_exporting: false,
+          is_exporting: isExporting,
           oldest_span_age: 0,
           features: {
             redis_failover: true,
             ai_enrichment: true,
             semantic_inference: true
-          }
+          },
+          otel_initialized: initialized,
+          tracer_provider_active: !!hasProvider
         }
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       ControllerHelper.handleError('getProcessorHealth', error, _req, res, startTime);
     }
   }

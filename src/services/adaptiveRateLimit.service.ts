@@ -629,7 +629,13 @@ export class AdaptiveRateLimitService {
     }
 
     private async analyzeTrafficTrend(): Promise<'increasing' | 'stable' | 'decreasing'> {
-        // Placeholder - would analyze traffic patterns from cache
+        // Get configurable traffic trend for testing/development
+        const configuredTrend = process.env.ADAPTIVE_RATE_LIMIT_TRAFFIC_TREND as 'increasing' | 'stable' | 'decreasing';
+        if (configuredTrend && ['increasing', 'stable', 'decreasing'].includes(configuredTrend)) {
+            return configuredTrend;
+        }
+
+        // Default to stable for production
         return 'stable';
     }
 

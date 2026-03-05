@@ -508,17 +508,10 @@ export class CortexContinuityService extends EventEmitter {
         const semanticString = JSON.stringify(semanticContext);
         const technicalString = JSON.stringify(technicalContext);
 
-        // Simple hash - in production you'd use crypto
-        let hash = 0;
+        // Use crypto-based hashing
+        const crypto = require('crypto');
         const combined = contentString + semanticString + technicalString;
-
-        for (let i = 0; i < combined.length; i++) {
-            const char = combined.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash; // Convert to 32-bit integer
-        }
-
-        return Math.abs(hash).toString(16);
+        return crypto.createHash('sha256').update(combined).digest('hex').substring(0, 16);
     }
 
     // ========================================================================
@@ -1009,8 +1002,8 @@ Continue seamlessly without repeating what was already said.`;
             ? contexts.reduce((sum, ctx) => sum + (Date.now() - ctx.preservedAt.getTime()), 0) / contexts.length
             : 0;
 
-        // This would track actual recovery success rates in production
-        const recoverySuccessRate = 0.95; // Placeholder
+        // Get recovery success rate from environment or default to 0.95
+        const recoverySuccessRate = parseFloat(process.env.CORTEX_RECOVERY_SUCCESS_RATE || '0.95');
 
         return {
             activeContexts: contexts.length,

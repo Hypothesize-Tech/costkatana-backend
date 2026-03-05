@@ -1262,25 +1262,25 @@ Provide timing and scaling insights.`;
         const isPeakHours = timeSlot >= 1 && timeSlot <= Math.max(1, timeSlotCount - 2); // Middle time slots are peak
         
         if (isWeekday && isPeakHours) {
-          baseRequests = 20 + Math.floor(Math.random() * 40); // 20-60 requests
-          baseCost = baseRequests * (0.03 + Math.random() * 0.04); // $0.03-0.07 per request
+          baseRequests = 20 + Math.floor((timeSlot + day) % 40); // Deterministic requests based on time
+          baseCost = baseRequests * 0.05; // Fixed cost per request
         } else if (isWeekday && !isPeakHours) {
-          baseRequests = 5 + Math.floor(Math.random() * 15); // 5-20 requests
-          baseCost = baseRequests * (0.02 + Math.random() * 0.03); // $0.02-0.05 per request
+          baseRequests = 5 + Math.floor((timeSlot + day) % 15); // Deterministic requests
+          baseCost = baseRequests * 0.035; // Fixed cost per request
         } else {
           // Weekend or off-hours
-          baseRequests = 2 + Math.floor(Math.random() * 8); // 2-10 requests
-          baseCost = baseRequests * (0.01 + Math.random() * 0.02); // $0.01-0.03 per request
+          baseRequests = 2 + Math.floor((timeSlot + day) % 8); // Deterministic requests
+          baseCost = baseRequests * 0.015; // Fixed cost per request
         }
         
         requestCounts[timeSlot][day] = baseRequests;
         totalCosts[timeSlot][day] = Math.round(baseCost * 100) / 100;
         errorCounts[timeSlot][day] = Math.floor(baseRequests * 0.02); // 2% error rate
-        avgDuration[timeSlot][day] = baseRequests * (150 + Math.floor(Math.random() * 200));
+        avgDuration[timeSlot][day] = baseRequests * (150 + Math.floor((timeSlot + day) * 10)); // Deterministic duration
         durationCounts[timeSlot][day] = baseRequests;
         
         // Set top operation
-        const topOp = operations[Math.floor(Math.random() * operations.length)];
+        const topOp = operations[(timeSlot + day) % operations.length]; // Deterministic selection
         topOperations[timeSlot][day].set(topOp, Math.floor(baseRequests * 0.6));
       }
     }
@@ -1329,7 +1329,7 @@ Provide timing and scaling insights.`;
           }
           
           if (count > 0) {
-            const factor = 0.7 + (Math.random() * 0.6); // 0.7-1.3 variation
+            const factor = 0.7 + ((timeSlot + day) % 60) / 100; // Deterministic variation
             requestCounts[timeSlot][day] = Math.floor((similarRequests / count) * factor);
             totalCosts[timeSlot][day] = Math.round((similarCosts / count) * factor * 100) / 100;
             errorCounts[timeSlot][day] = Math.floor((similarErrors / count) * factor);

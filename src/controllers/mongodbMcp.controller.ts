@@ -147,14 +147,8 @@ export const handleMongoDBMCPToolCall = async (req: Request, res: Response): Pro
  */
 export const listMongoDBMCPTools = async (_req: Request, res: Response): Promise<void> => {
     try {
-        // Create temporary service to get tool definitions
-        const service = new MongoDBMCPService({
-            userId: 'temp',
-            connectionId: 'temp',
-            transport: 'http',
-        });
-
-        const tools = (service as any).getToolDefinitions();
+        // Get tool definitions statically (no authentication needed for tool listing)
+        const tools = (MongoDBMCPService as any).getToolDefinitions();
 
         res.json({
             success: true,

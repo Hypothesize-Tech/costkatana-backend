@@ -215,13 +215,13 @@ export class VisualComplianceOptimizedService {
       const { BedrockService } = await import('./bedrock.service');
       
       // ABSOLUTE FIRST THING: Console log before calling Bedrock
-      console.log('='.repeat(80));
-      console.log('🚨 VISUAL COMPLIANCE: ABOUT TO CALL BedrockService.invokeWithImage');
-      console.log('evidenceImage type:', typeof request.evidenceImage);
-      console.log('evidenceImage is string?', typeof request.evidenceImage === 'string');
-      console.log('evidenceImage length:', typeof request.evidenceImage === 'string' ? request.evidenceImage.length : 'N/A');
-      console.log('evidenceImage first 100:', typeof request.evidenceImage === 'string' ? request.evidenceImage.substring(0, 100) : 'N/A');
-      console.log('='.repeat(80));
+      loggingService.info('='.repeat(80));
+      loggingService.info('🚨 VISUAL COMPLIANCE: ABOUT TO CALL BedrockService.invokeWithImage');
+      loggingService.info('evidenceImage type:', { value: typeof request.evidenceImage });
+      loggingService.info('evidenceImage is string?', { value: typeof request.evidenceImage === 'string' });
+      loggingService.info('evidenceImage length:', { value: typeof request.evidenceImage === 'string' ? request.evidenceImage.length : 'N/A' });
+      loggingService.info('evidenceImage first 100:', { value: typeof request.evidenceImage === 'string' ? request.evidenceImage.substring(0, 100) : 'N/A' });
+      loggingService.info('='.repeat(80));
       
       // CRITICAL DEBUG: Log the evidence image details
       loggingService.info('🔍 ABOUT TO CALL BedrockService.invokeWithImage', {
@@ -249,17 +249,17 @@ export class VisualComplianceOptimizedService {
       );
 
       // Log the raw response for debugging
-      console.log('='.repeat(80));
-      console.log('🔍 RAW BEDROCK RESPONSE:');
-      console.log('Response length:', result.response.length);
-      console.log('Response preview:', result.response.substring(0, 500));
-      console.log('Response full:', result.response);
-      console.log('='.repeat(80));
+      loggingService.info('='.repeat(80));
+      loggingService.info('🔍 RAW BEDROCK RESPONSE:');
+      loggingService.info('Response length:', { value: result.response.length });
+      loggingService.info('Response preview:', { value: result.response.substring(0, 500) });
+      loggingService.info('Response full:', { value: result.response });
+      loggingService.info('='.repeat(80));
 
       // Parse TOON response (ONLY TOON format expected)
       let complianceResults: any;
       try {
-        console.log('🔍 Parsing TOON response...');
+        loggingService.info('🔍 Parsing TOON response...');
         
         // Parse TOON format directly (more reliable than toon.utils)
         const lines = result.response.trim().split('\n');
@@ -268,7 +268,7 @@ export class VisualComplianceOptimizedService {
         const errorLine = lines[0]?.match(/ERROR\[Analysis\]\{([^}]+)\}:(.+)/);
         if (errorLine) {
           const errorMessage = errorLine[2]?.trim() || 'Image analysis error';
-          console.log('⚠️  Claude detected an issue:', errorMessage);
+          loggingService.info('⚠️  Claude detected an issue:', { value: errorMessage });
           
           // Return failed compliance with error message
           complianceResults = {
@@ -285,7 +285,7 @@ export class VisualComplianceOptimizedService {
             }))
           };
           
-          console.log('✅ Parsed ERROR response as failed compliance');
+          loggingService.info('✅ Parsed ERROR response as failed compliance');
         } else {
           // Line 1: Compliance[Result]{score:XX,pass:true/false,conf:0.XX}:summary
           const complianceLine = lines[0]?.match(/Compliance\[Result\]\{([^}]+)\}:(.+)/);
@@ -327,7 +327,7 @@ export class VisualComplianceOptimizedService {
             }
           }
           
-          console.log('✅ Successfully parsed TOON response:', {
+          loggingService.info('✅ Successfully parsed TOON response:', {
             score: complianceResults.compliance_score,
             pass: complianceResults.pass_fail,
             itemsCount: complianceResults.criteria.length

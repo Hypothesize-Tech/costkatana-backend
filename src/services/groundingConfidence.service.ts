@@ -174,7 +174,7 @@ export class GroundingConfidenceService extends EventEmitter {
       await this.cacheDecision(context, result);
       
       // Logging & metrics
-      this.logDecision(context, result, Date.now() - startTime);
+      await this.logDecision(context, result, Date.now() - startTime);
       
       // Emit event for analytics
       this.emit('grounding_evaluated', { context, result });
@@ -510,11 +510,11 @@ export class GroundingConfidenceService extends EventEmitter {
   /**
    * Log decision for metrics & debugging
    */
-  private logDecision(
+  private async logDecision(
     context: GroundingContext,
     result: GroundingDecision,
     evaluationTimeMs: number
-  ): void {
+  ): Promise<void> {
     if (!this.loggingEnabled) return;
     
     const logData = {
@@ -576,8 +576,40 @@ export class GroundingConfidenceService extends EventEmitter {
       loggingService.info(`✅ GCL Decision: GENERATE`, logData);
     }
     
-    // TODO: Send to metrics system (Mixpanel, DataDog, etc.)
-    // await metricsService.track('grounding_decision', logData);
+    // Send to metrics system (DataDog, Mixpanel, etc.)
+    try {
+      const metricsModule = await import('./metrics.service').catch(() => null);
+      if (!metricsModule?.MetricsService) return;
+      const metricsService = metricsModule.MetricsService.getInstance();
+
+      await metricsService.trackGroundingDecision(logData);
+
+      // Also track key metrics for monitoring
+      await metricsService.incrementCounter('grounding_decision_total', {
+        decision: result.decision,
+        agent_type: context.agentType,
+        query_type: context.queryType
+      });
+
+      if (result.decision === 'REFUSE') {
+        await metricsService.incrementCounter('grounding_refusals_total', {
+          reason: result.reasons[0]?.substring(0, 50) || 'unknown',
+          agent_type: context.agentType
+        });
+      }
+
+      await metricsService.recordGauge('grounding_score', result.groundingScore, {
+        agent_type: context.agentType,
+        decision: result.decision
+      });
+
+    } catch (metricsError) {
+      loggingService.warn('Failed to send grounding metrics', {
+        component: 'GroundingConfidenceService',
+        error: metricsError instanceof Error ? metricsError.message : String(metricsError),
+        decision: result.decision
+      });
+    }
   }
 
   /**

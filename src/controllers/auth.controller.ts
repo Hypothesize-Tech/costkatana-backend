@@ -5,7 +5,6 @@ import { loggingService } from '../services/logging.service';
 import { config } from '../config';
 import { User } from '../models/User';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
 
 export interface IUser {
     _id?: string;
@@ -572,9 +571,7 @@ export class AuthController {
                 }
             });
 
-            // In production, send email with reset link
-            // For development, return token in response
-            const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+            const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
 
             res.json({
                 success: true,

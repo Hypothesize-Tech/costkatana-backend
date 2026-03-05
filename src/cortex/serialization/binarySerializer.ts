@@ -84,11 +84,11 @@ export class BinarySerializer {
       if (options.encrypt) {
         const crypto = await import('crypto');
         const algorithm = 'aes-256-cbc';
-        const key = crypto.scryptSync(
-          process.env.CORTEX_ENCRYPTION_KEY || 'cortex-default-key-change-in-production',
-          'salt',
-          32
-        );
+        const encryptionKey = process.env.CORTEX_ENCRYPTION_KEY;
+        if (!encryptionKey) {
+          throw new Error('CORTEX_ENCRYPTION_KEY environment variable is required');
+        }
+        const key = crypto.scryptSync(encryptionKey, 'salt', 32);
         const iv = crypto.randomBytes(16);
         const cipher = crypto.createCipheriv(algorithm, key, iv);
         
@@ -162,11 +162,11 @@ export class BinarySerializer {
       if (flags & this.FLAG_ENCRYPTED) {
         const crypto = await import('crypto');
         const algorithm = 'aes-256-cbc';
-        const key = crypto.scryptSync(
-          process.env.CORTEX_ENCRYPTION_KEY || 'cortex-default-key-change-in-production',
-          'salt',
-          32
-        );
+        const encryptionKey = process.env.CORTEX_ENCRYPTION_KEY;
+        if (!encryptionKey) {
+          throw new Error('CORTEX_ENCRYPTION_KEY environment variable is required');
+        }
+        const key = crypto.scryptSync(encryptionKey, 'salt', 32);
         
         // Extract IV from the beginning of content
         const iv = content.slice(0, 16);

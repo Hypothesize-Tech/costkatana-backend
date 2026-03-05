@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { CortexModelRouterService } from '../services/cortexModelRouter.service';
+import { PricingRegistryService } from '../services/pricingRegistry.service';
 
 /** Priority for request flow */
 export type FlowPriority = 'critical' | 'high' | 'normal' | 'low';
@@ -25,6 +26,7 @@ export interface RequestContext {
     priority: FlowPriority;
     budgetRemaining: number;
     projectId?: string;
+    req?: Request;
 }
 
 export interface InterventionDecision {
@@ -195,7 +197,8 @@ export class RequestInterceptor {
                 userTier: (req as any).user?.tier || 'free',
                 priority,
                 budgetRemaining: budgetCheck.allowed ? budgetCheck.currentUtilization : 0,
-                projectId: body.projectId
+                projectId: body.projectId,
+                req
             };
 
         } catch (error) {
@@ -256,7 +259,7 @@ export class RequestInterceptor {
                 context.budgetRemaining > 0.5 &&
                 context.userTier !== 'enterprise'
             ) {
-                const compressionEstimate = await this.estimateCompressionSavings(context.prompt);
+                const compressionEstimate = await this.estimateCompressionSavings(context.prompt, context.req);
                 
                 if (compressionEstimate.savings > this.config.thresholds.costSavingsMinimum) {
                     return {
@@ -442,31 +445,36 @@ export class RequestInterceptor {
     }
 
     /**
-     * Estimate cost for a model and prompt
+     * Get approximate cost per token for a model (for routing decisions).
      */
-    private async estimateCost(model: string, prompt: string): Promise<number> {
-        // Simplified estimation - in production, use actual pricing service
-        const tokenEstimate = Math.ceil(prompt.length / 4);
-        const costPerToken = this.getCostPerToken(model);
-        return (tokenEstimate * costPerToken);
+    private getCostPerToken(model: string): number {
+        try {
+            const costResult = PricingRegistryService.getInstance().calculateCost({ modelId: model, inputTokens: 1, outputTokens: 0 });
+            return costResult?.totalCost ?? 0.000001;
+        } catch {
+            return 0.000001;
+        }
     }
 
     /**
-     * Get cost per token for a model
+     * Estimate cost for a model and prompt
      */
-    private getCostPerToken(model: string): number {
-        // Simplified pricing - should use actual pricing service
-        const pricing: Record<string, number> = {
-            'gpt-4': 0.00003,
-            'gpt-4-turbo': 0.00001,
-            'gpt-3.5-turbo': 0.0000015,
-            'claude-3-opus': 0.000015,
-            'claude-3-sonnet': 0.000003,
-            'claude-3-haiku': 0.00000025,
-            'gemini-pro': 0.000001
-        };
-        
-        return pricing[model] || 0.000001;
+    private async estimateCost(model: string, prompt: string): Promise<number> {
+        try {
+            const tokenEstimate = Math.ceil(prompt.length / 4); // Rough estimation
+            const costResult = PricingRegistryService.getInstance().calculateCost({
+                modelId: model,
+                inputTokens: tokenEstimate,
+                outputTokens: 0, // Only estimate input cost for interceptor
+            });
+
+            return costResult ? costResult.totalCost : tokenEstimate * 0.000001; // Fallback
+        } catch (error) {
+            loggingService.warn(`Failed to calculate cost for model ${model} in request interceptor`, { error: error instanceof Error ? error.message : String(error) });
+            // Fallback estimation
+            const tokenEstimate = Math.ceil(prompt.length / 4);
+            return tokenEstimate * 0.000001;
+        }
     }
 
     /**
@@ -614,14 +622,17 @@ export class RequestInterceptor {
     /**
      * Estimate compression savings using Cortex
      */
-    private async estimateCompressionSavings(prompt: string): Promise<{
+    private async estimateCompressionSavings(prompt: string, req?: Request): Promise<{
         compressedPrompt: string;
         savings: number;
     }> {
         try {
+            if (!req) {
+                return { compressedPrompt: prompt, savings: 0 };
+            }
             // Use GatewayCortex to compress prompt
             const compressed = await GatewayCortexService.processGatewayRequest(
-                {} as any, // Mock request
+                req,
                 { prompt }
             );
 

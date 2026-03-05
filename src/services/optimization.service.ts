@@ -19,7 +19,6 @@ import { CortexCacheService } from './cortexCache.service';
 import { CortexLispInstructionGeneratorService } from './cortexLispInstructionGenerator.service';
 import { CortexDecoderService } from './cortexDecoder.service';
 import {
-    CortexProcessingRequest,
     DEFAULT_CORTEX_CONFIG
 } from '../types/cortex.types';
 import { CortexEncoderService } from './cortexEncoder.service';

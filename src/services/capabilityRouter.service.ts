@@ -37,6 +37,9 @@ export interface CapabilityRoutingRequest {
     // Optional capabilities (nice to have)
     optionalCapabilities?: ModelCapability[];
     
+    /** Optional agent identity ID for audit */
+    agentIdentityId?: string;
+    
     // Strategic preferences
     strategy: ModelSelectionStrategy;
     
@@ -262,7 +265,7 @@ export class CapabilityRouterService extends BaseService {
             
             const decisionId = await this.decisionAudit.recordDecision({
                 agentId: request.agentId || 'capability-router',
-                agentIdentityId: new mongoose.Types.ObjectId(), // Placeholder
+                agentIdentityId: request.agentIdentityId ?? 'capability-router', // Use real ID if available
                 userId: request.userId!,
                 
                 decisionType: 'model_selection',

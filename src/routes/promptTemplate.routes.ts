@@ -3,6 +3,7 @@ import { PromptTemplateController } from '../controllers/promptTemplate.controll
 import { authenticate } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { body, param, query } from 'express-validator';
+import { loggingService } from '../services/logging.service';
 
 const router = Router();
 
@@ -42,11 +43,11 @@ router.get(
     ],
     validateRequest,
     (req: any, _res: any, next: any) => {
-        console.log('=== ROUTE HANDLER REACHED ===');
-        console.log('Request path:', req.path);
-        console.log('Request method:', req.method);
-        console.log('Request query:', req.query);
-        console.log('Request user:', req.user);
+        loggingService.info('=== ROUTE HANDLER REACHED ===');
+        loggingService.info('Request path:', req.path);
+        loggingService.info('Request method:', req.method);
+        loggingService.info('Request query:', req.query);
+        loggingService.info('Request user:', req.user);
         next();
     },
     PromptTemplateController.getTemplates

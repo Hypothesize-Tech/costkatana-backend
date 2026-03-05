@@ -14,7 +14,6 @@ export { PromptTemplateService } from './promptTemplate.service';
 export { RealtimePricingService } from './realtime-pricing.service';
 export { TaggingService } from './tagging.service';
 export { PerformanceCostAnalysisService } from './performanceCostAnalysis.service';
-export { RecommendationEngineService } from './recommendationEngine.service';
 export { KeyVaultService } from './keyVault.service';
 export { FailoverService } from './failover.service';
 export { AILoggerService, aiLogger } from './aiLogger.service';

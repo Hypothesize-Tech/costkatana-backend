@@ -26,6 +26,7 @@ export interface ResearchResult {
   }>;
   synthesis: string;
   keyFindings: string[];
+  searchTimestamp?: string;
 }
 
 export interface PlanStep {

@@ -11,6 +11,7 @@ import { AICostTrackingService } from './aiCostTracking.service';
 import { decodeFromTOON } from '@utils/toon.utils';
 import { S3Service } from './s3.service';
 import { RawPricingData, LLMExtractionResult } from '../types/modelDiscovery.types';
+import sharp from 'sharp';
 
 interface PromptOptimizationRequest {
     prompt: string;
@@ -971,12 +972,12 @@ Format your response as JSON:
         modelId: string = 'us.anthropic.claude-3-5-sonnet-20241022-v2:0'
     ): Promise<{ response: string; inputTokens: number; outputTokens: number; cost: number }> {
         // ABSOLUTE FIRST THING: Log that this function was called
-        console.log('='.repeat(80));
-        console.log('🚨 BEDROCK SERVICE invokeWithImage CALLED - ABSOLUTE FIRST LOG');
-        console.log('imageUrl type:', typeof imageUrl);
-        console.log('imageUrl length:', imageUrl?.length);
-        console.log('imageUrl first 100 chars:', imageUrl?.substring(0, 100));
-        console.log('='.repeat(80));
+        loggingService.info('='.repeat(80));
+        loggingService.info('🚨 BEDROCK SERVICE invokeWithImage CALLED - ABSOLUTE FIRST LOG');
+        loggingService.info('imageUrl type:', { value: typeof imageUrl });
+        loggingService.info('imageUrl length:', { value: imageUrl?.length });
+        loggingService.info('imageUrl first 100 chars:', { value: imageUrl?.substring(0, 100) });
+        loggingService.info('='.repeat(80));
         
         // CRITICAL DEBUG: Log exactly what we receive
         loggingService.info('🔍 BEDROCK SERVICE invokeWithImage CALLED', {
@@ -1185,16 +1186,31 @@ Format your response as JSON:
                 mediaType = 'image/gif';
             }
 
-            // TEMPORARY TEST: Skip Sharp processing to test if it's causing corruption
-            // Use the raw buffer directly
-            const processedBuffer = imageBuffer;
-            
-            loggingService.info('TESTING: Using raw buffer without Sharp processing', {
-                component: 'BedrockService',
-                bufferSize: imageBuffer.length,
-                originalType: imageType
-            });
-            
+            // Process image with Sharp for consistent format/size (required for Bedrock API reliability)
+            let processedBuffer: Buffer;
+            let outputMediaType = mediaType;
+            try {
+                processedBuffer = await sharp(imageBuffer)
+                    .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
+                    .jpeg({ quality: 90 })
+                    .toBuffer();
+                outputMediaType = 'image/jpeg';
+                loggingService.info('Image processed with Sharp', {
+                    component: 'BedrockService',
+                    originalSize: imageBuffer.length,
+                    processedSize: processedBuffer.length,
+                    mediaType: outputMediaType,
+                });
+            } catch (sharpError) {
+                loggingService.warn('Sharp processing failed, using raw buffer', {
+                    component: 'BedrockService',
+                    error: sharpError instanceof Error ? sharpError.message : String(sharpError),
+                });
+                processedBuffer = imageBuffer;
+            }
+
+            mediaType = outputMediaType;
+
             // Convert processed buffer to base64
             // IMPORTANT: For data URIs, imageBase64 is already cleaned and validated (line 862)
             // For other sources (HTTP, S3), we need to encode the buffer

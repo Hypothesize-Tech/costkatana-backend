@@ -136,7 +136,7 @@ const SymbolIndexSchema = new Schema<ISymbolIndex>({
     }
 }, {
     timestamps: true,
-    collection: 'symbol_index'
+    collection: 'symbol_indexes'
 });
 
 // Compound indexes for common queries

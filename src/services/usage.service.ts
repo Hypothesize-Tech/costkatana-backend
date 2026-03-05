@@ -1586,22 +1586,25 @@ Identify any anomalies in cost or token usage patterns. Return a JSON object wit
     }
 
     /**
-     * Get user budget from settings
+     * Get user budget from settings (production: supports custom monthlyBudgetLimit per user)
      */
     private static async getUserBudget(userId: string): Promise<number> {
         try {
-            // This would typically come from user settings or billing configuration
-            // For now, return a default budget based on user tier
-            const user = await mongoose.model('User').findById(userId).select('subscriptionTier billingPlan').lean();
+            const user = await mongoose.model('User').findById(userId).select('subscriptionTier billingPlan preferences').lean();
             
-            if (user && typeof user === 'object' && 'subscriptionTier' in user) {
-                if (user.subscriptionTier === 'enterprise') {
-                    return 1000; // $1000 budget for enterprise users
-                } else if (user.subscriptionTier === 'pro') {
-                    return 500; // $500 budget for pro users
+            if (user && typeof user === 'object') {
+                const prefs = (user as any).preferences;
+                const customBudget = prefs?.monthlyBudgetLimit;
+                if (typeof customBudget === 'number' && customBudget >= 0) {
+                    return customBudget;
+                }
+                if ('subscriptionTier' in user) {
+                    const tier = (user as any).subscriptionTier;
+                    if (tier === 'enterprise') return 1000;
+                    if (tier === 'pro') return 500;
                 }
             }
-            return 100; // $100 budget for basic users
+            return 100;
         } catch (error) {
             loggingService.error('Error getting user budget:', { error: error instanceof Error ? error.message : String(error) });
             return 0;

@@ -23,4 +23,10 @@ router.put('/config', asyncHandler(ModerationController.updateModerationConfig))
 // Appeal a moderation decision
 router.post('/appeal', asyncHandler(ModerationController.appealModerationDecision));
 
+// Get user's appeals
+router.get('/appeals', asyncHandler(ModerationController.getUserAppeals));
+
+// Get specific appeal status
+router.get('/appeals/:appealId', asyncHandler(ModerationController.getAppealStatus));
+
 export default router;

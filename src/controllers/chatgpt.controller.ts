@@ -3,7 +3,6 @@ import { ProjectService } from '../services/project.service';
 import { UsageService } from '../services/usage.service';
 import { loggingService } from '../services/logging.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
 
 interface ChatGPTRequest extends Request {
     body: {
@@ -361,25 +360,26 @@ export class ChatGPTController {
 
             // Generate magic link using the onboarding controller
             const { OnboardingController } = await import('./onboarding.controller');
-            
-            // Create a mock request for the onboarding controller
-            const mockReq = {
-                body: { 
-                    email, 
+
+            // Synthesized request for internal call to OnboardingController (same shape as HTTP req)
+            const magicLinkReq = {
+                body: {
+                    email,
                     name,
-                    source: source || 'chatgpt'
-                }
+                    source: source || 'chatgpt',
+                },
+                headers: req.headers || {},
             } as Request;
 
             let magicLinkResponse: any;
-            const mockRes = {
+            const magicLinkRes = {
                 json: (data: any) => { magicLinkResponse = data; },
-                status: () => mockRes,
-                setHeader: () => mockRes,
-                send: () => mockRes
+                status: () => magicLinkRes,
+                setHeader: () => magicLinkRes,
+                send: () => magicLinkRes,
             } as any;
 
-            await OnboardingController.generateMagicLink(mockReq, mockRes);
+            await OnboardingController.generateMagicLink(magicLinkReq, magicLinkRes);
 
             if (magicLinkResponse?.success) {
                 const duration = Date.now() - startTime;

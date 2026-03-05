@@ -4,7 +4,6 @@ import { loggingService } from '../services/logging.service';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
 
 
 // Validation schemas

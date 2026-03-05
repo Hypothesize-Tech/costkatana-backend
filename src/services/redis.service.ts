@@ -79,17 +79,28 @@ export class RedisService {
             allowStale: false
         });
 
-        // Always use in-memory cache in development unless explicitly configured for Redis
-        this.isLocalDev = process.env.NODE_ENV === 'development' && !process.env.REDIS_HOST;
-        
+        // Use in-memory cache only for local development without Redis configuration
+        // Production and staging environments MUST use Redis
+        this.isLocalDev = process.env.NODE_ENV === 'development' &&
+                         !process.env.REDIS_HOST &&
+                         !process.env.REDIS_URL &&
+                         !process.env.FORCE_REDIS;
+
         if (this.isLocalDev) {
             loggingService.info('🔧 Redis: Local development mode - using in-memory cache (no Redis required)');
             this.client = this.createMockClient();
             this.readerClient = this.createMockClient();
             this._isConnected = true;
         } else {
+            // Production environments must have Redis configured
+            const hasRedisConfig = process.env.REDIS_HOST || process.env.REDIS_URL || process.env.FORCE_REDIS;
+            if (!hasRedisConfig) {
+                throw new Error(
+                    'Redis configuration required for production. Please set REDIS_HOST, REDIS_URL, or FORCE_REDIS environment variable. ' +
+                    'Mock Redis client cannot be used in production environments.'
+                );
+            }
             loggingService.info('🔧 Redis: Production mode - attempting Redis connection');
-            // Only create Redis clients if we have Redis configuration
             this.setupRedisClients();
         }
 

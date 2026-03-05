@@ -1,15 +1,16 @@
 import crypto from 'crypto';
 import { Types } from 'mongoose';
-import { 
-  AWSAuditLog, 
-  IAWSAuditLog, 
-  AuditEventType, 
+import {
+  AWSAuditLog,
+  IAWSAuditLog,
+  AuditEventType,
   AuditResult,
   IAuditContext,
   IAuditAction,
   IAuditImpact,
   calculateAuditEntryHash,
 } from '../../models/AWSAuditLog';
+import { AuditAnchor, IAuditAnchor } from '../../models/AuditAnchor';
 import { loggingService } from '../logging.service';
 
 /**
@@ -76,8 +77,7 @@ class AuditLoggerService {
   private lastHash: string = GENESIS_HASH;
   private initialized: boolean = false;
   
-  // Anchor storage (in production, this would go to S3 or external service)
-  private anchors: Map<string, AuditAnchor> = new Map();
+  // Anchor storage is now persistent in database
   private lastAnchorPosition: number = 0;
   
   // Anchor interval (entries between anchors)
@@ -372,9 +372,22 @@ class AuditLoggerService {
       createdAt: new Date(),
     };
     
-    // Store anchor
-    this.anchors.set(anchorId, anchor);
-    this.lastAnchorPosition = endPosition;
+    // Store anchor in database
+    try {
+      await AuditAnchor.create(anchor);
+      this.lastAnchorPosition = endPosition;
+      loggingService.info('Audit anchor created and stored in database', {
+        anchorId,
+        entryCount: anchor.entryCount,
+        positionRange: `${startPosition}-${endPosition}`
+      });
+    } catch (error) {
+      loggingService.error('Failed to store audit anchor in database', {
+        anchorId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
     
     // Update entries with anchor reference
     await AWSAuditLog.updateMany(
@@ -400,15 +413,52 @@ class AuditLoggerService {
   /**
    * Get anchor by ID
    */
-  public getAnchor(anchorId: string): AuditAnchor | null {
-    return this.anchors.get(anchorId) || null;
+  public async getAnchor(anchorId: string): Promise<AuditAnchor | null> {
+    try {
+      const anchorDoc = await AuditAnchor.findOne({ anchorId }).lean();
+      if (!anchorDoc) {
+        return null;
+      }
+
+      // Convert database document to AuditAnchor interface
+      return {
+        anchorId: anchorDoc.anchorId,
+        anchorHash: anchorDoc.anchorHash,
+        startPosition: anchorDoc.startPosition,
+        endPosition: anchorDoc.endPosition,
+        entryCount: anchorDoc.entryCount,
+        createdAt: anchorDoc.createdAt,
+      };
+    } catch (error) {
+      loggingService.error('Failed to get anchor from database', {
+        anchorId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return null;
+    }
   }
   
   /**
    * Get all anchors
    */
-  public getAllAnchors(): AuditAnchor[] {
-    return Array.from(this.anchors.values());
+  public async getAllAnchors(): Promise<AuditAnchor[]> {
+    try {
+      const anchorDocs = await AuditAnchor.find({}).sort({ createdAt: -1 }).lean();
+
+      return anchorDocs.map(doc => ({
+        anchorId: doc.anchorId,
+        anchorHash: doc.anchorHash,
+        startPosition: doc.startPosition,
+        endPosition: doc.endPosition,
+        entryCount: doc.entryCount,
+        createdAt: doc.createdAt,
+      }));
+    } catch (error) {
+      loggingService.error('Failed to get all anchors from database', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return [];
+    }
   }
   
   /**
@@ -418,8 +468,8 @@ class AuditLoggerService {
     valid: boolean;
     reason?: string;
   }> {
-    const anchor = this.anchors.get(anchorId);
-    
+    const anchor = await this.getAnchor(anchorId);
+
     if (!anchor) {
       return { valid: false, reason: 'Anchor not found' };
     }

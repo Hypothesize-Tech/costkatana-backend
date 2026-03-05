@@ -264,7 +264,7 @@ export class SemanticCacheService {
     
     /**
      * Generates a hash for a prompt to enable similarity matching.
-     * In a production system, this would use embeddings and vector similarity.
+     * Uses a simple hash; extend with embeddings when generateEmbeddings is available.
      */
     private static generatePromptHash(prompt: string): string {
         // Normalize prompt for better matching
@@ -274,14 +274,12 @@ export class SemanticCacheService {
             .replace(/\s+/g, ' ')
             .trim();
         
-        // Simple hash function (in production, use embeddings)
         let hash = 0;
         for (let i = 0; i < normalized.length; i++) {
             const char = normalized.charCodeAt(i);
             hash = ((hash << 5) - hash) + char;
             hash = hash & hash; // Convert to 32-bit integer
         }
-        
         return Math.abs(hash).toString(36);
     }
     
@@ -334,6 +332,85 @@ export class SemanticCacheService {
                 userId
             });
         }
+    }
+
+    /**
+     * Generate embeddings for semantic similarity
+     */
+    private async generateEmbeddings(text: string): Promise<number[]> {
+        try {
+            // Try to use OpenAI embeddings first
+            if (process.env.OPENAI_API_KEY) {
+                const { OpenAIEmbeddings } = await import('@langchain/openai');
+                const embeddings = new OpenAIEmbeddings({
+                    openAIApiKey: process.env.OPENAI_API_KEY,
+                    modelName: 'text-embedding-3-small'
+                });
+                const result = await embeddings.embedQuery(text);
+                return result;
+            }
+
+            // Fallback to a simple but effective hashing approach
+            return this.generateFallbackEmbeddings(text);
+        } catch (error) {
+            loggingService.warn('Embedding generation failed, using fallback', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return this.generateFallbackEmbeddings(text);
+        }
+    }
+
+    /**
+     * Generate fallback embeddings when AI services are unavailable
+     */
+    private generateFallbackEmbeddings(text: string): number[] {
+        // Create a 128-dimensional embedding using multiple hash functions
+        const dimensions = 128;
+        const embeddings: number[] = [];
+
+        // Use different seeds for variety
+        for (let i = 0; i < dimensions; i++) {
+            const hash = this.djb2Hash(text, i);
+            // Normalize to [-1, 1] range
+            embeddings.push((hash % 1000) / 500 - 1);
+        }
+
+        return embeddings;
+    }
+
+    /**
+     * Compute similarity hash from embeddings
+     */
+    private computeSimilarityHash(embeddings: number[]): string {
+        // Use locality-sensitive hashing (LSH) for similarity
+        const bands = 8;
+        const rowsPerBand = 4;
+        const hashBands: string[] = [];
+
+        for (let band = 0; band < bands; band++) {
+            let bandHash = 0;
+            for (let row = 0; row < rowsPerBand; row++) {
+                const index = band * rowsPerBand + row;
+                if (index < embeddings.length) {
+                    // Simple sign-based hashing
+                    bandHash = bandHash * 31 + (embeddings[index] > 0 ? 1 : 0);
+                }
+            }
+            hashBands.push(bandHash.toString(36));
+        }
+
+        return hashBands.join('_');
+    }
+
+    /**
+     * DJB2 hash function with seed
+     */
+    private djb2Hash(str: string, seed: number = 0): number {
+        let hash = 5381 + seed;
+        for (let i = 0; i < str.length; i++) {
+            hash = ((hash << 5) + hash) + str.charCodeAt(i);
+        }
+        return hash;
     }
 }
 

@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import multer from 'multer';
 import { S3Service } from '../services/s3.service';
 import { UploadedFile } from '../models/UploadedFile';

@@ -23,15 +23,26 @@ export class ModelMetadata {
             
             // === AWS Models ===
             'amazon.nova-micro-v1:0': 'Nova Micro',
-            'amazon.nova-lite-v1:0': 'Nova Lite', 
+            'amazon.nova-lite-v1:0': 'Nova Lite',
             'amazon.nova-pro-v1:0': 'Nova Pro',
+            'amazon.nova-2-lite-v1:0': 'Nova 2 Lite',
+            'amazon.nova-2-pro-v1:0': 'Nova 2 Pro',
+            'amazon.nova-2-omni-v1:0': 'Nova 2 Omni',
+            'amazon.nova-2-sonic-v1:0': 'Nova 2 Sonic',
             'amazon.titan-text-lite-v1': 'Titan Text Lite',
             'global.anthropic.claude-haiku-4-5-20251001-v1:0': 'Claude 3.5 Haiku',
             'anthropic.claude-sonnet-4-20250514-v1:0': 'Claude Sonnet 4',
+            'anthropic.claude-sonnet-4-5-v1:0': 'Claude Sonnet 4.5',
+            'anthropic.claude-sonnet-4-5-20250929-v1:0': 'Claude Sonnet 4.5',
             'anthropic.claude-3-5-sonnet-20240620-v1:0': 'Claude 3.5 Sonnet',
+            'anthropic.claude-3-sonnet-20240229-v1:0': 'Claude 3 Sonnet',
             'anthropic.claude-opus-4-6-v1': 'Claude Opus 4.6',
             'anthropic.claude-sonnet-4-6-v1:0': 'Claude Sonnet 4.6',
-            'anthropic.claude-opus-4-1-20250805-v1:0': 'Claude 4 Opus',
+            'anthropic.claude-opus-4-1-20250805-v1:0': 'Claude Opus 4.1',
+            'anthropic.claude-opus-4-20250514-v1:0': 'Claude Opus 4',
+            'global.anthropic.claude-sonnet-4-5-20250929-v1:0': 'Claude Sonnet 4.5 (Global)',
+            'global.anthropic.claude-sonnet-4-20250514-v1:0': 'Claude Sonnet 4 (Global)',
+            'global.anthropic.claude-opus-4-5-20250514-v1:0': 'Claude Opus 4.5 (Global)',
             'meta.llama3-1-8b-instruct-v1:0': 'Llama 3.1 8B',
             'meta.llama3-1-70b-instruct-v1:0': 'Llama 3.1 70B',
             'meta.llama3-1-405b-instruct-v1:0': 'Llama 3.1 405B',
@@ -166,8 +177,8 @@ export class ModelMetadata {
             return 'Unknown';
         }
 
-        if (modelId.startsWith('amazon.')) return 'Amazon';
-        if (modelId.startsWith('anthropic.')) return 'Anthropic';
+        if (modelId.startsWith('amazon.') || modelId.startsWith('us.amazon.')) return 'Amazon';
+        if (modelId.startsWith('anthropic.') || modelId.startsWith('global.anthropic.') || modelId.startsWith('us.anthropic.')) return 'Anthropic';
         if (modelId.startsWith('meta.')) return 'Meta';
         if (modelId.startsWith('cohere.')) return 'Cohere';
         if (modelId.startsWith('mistral.')) return 'Mistral AI';
@@ -200,9 +211,15 @@ export class ModelMetadata {
             'global.anthropic.claude-haiku-4-5-20251001-v1:0': 'Fast and intelligent for quick responses',
             'anthropic.claude-3-5-sonnet-20240620-v1:0': 'Advanced reasoning and analysis capabilities',
             'anthropic.claude-sonnet-4-20250514-v1:0': 'High-performance model with exceptional reasoning',
+            'anthropic.claude-sonnet-4-5-v1:0': 'Best for coding and complex agents',
+            'anthropic.claude-sonnet-4-5-20250929-v1:0': 'Best for coding and complex agents',
             'anthropic.claude-opus-4-6-v1': 'Next-gen flagship for agents, coding, and enterprise workflows',
             'anthropic.claude-sonnet-4-6-v1:0': 'Latest Sonnet: coding, computer use, long-context reasoning, agents',
             'anthropic.claude-opus-4-1-20250805-v1:0': 'Most powerful model for complex reasoning',
+            'anthropic.claude-opus-4-20250514-v1:0': 'Flagship model for complex reasoning',
+            'global.anthropic.claude-sonnet-4-5-20250929-v1:0': 'Best for coding and complex agents (1M context)',
+            'global.anthropic.claude-sonnet-4-20250514-v1:0': 'High-performance with cross-region inference',
+            'global.anthropic.claude-opus-4-5-20250514-v1:0': 'Flagship model with cross-region inference',
             'meta.llama3-1-8b-instruct-v1:0': 'Good balance of performance and efficiency',
             'meta.llama3-1-70b-instruct-v1:0': 'Large model for complex reasoning tasks',
             'meta.llama3-1-405b-instruct-v1:0': 'Most capable Llama model for advanced tasks',

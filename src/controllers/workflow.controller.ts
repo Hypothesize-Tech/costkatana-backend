@@ -807,20 +807,20 @@ export class WorkflowController {
                     performanceMetrics: {
                         throughput: {
                             period: 'hour',
-                            values: Array(24).fill(0).map((_, i) => {
-                                // Create a realistic pattern with higher values during work hours
-                                const hour = i % 24;
-                                if (hour >= 9 && hour <= 17) {
-                                    return Math.floor(Math.random() * 5) + 3; // 3-8 during work hours
-                                } else {
-                                    return Math.floor(Math.random() * 3); // 0-2 outside work hours
+                            values: (() => {
+                                const hourlyCounts = Array.from({ length: 24 }, () => 0);
+                                for (const w of workflowSummaries) {
+                                    const t = new Date(w.endTime || w.startTime).getTime();
+                                    const hour = new Date(t).getHours();
+                                    hourlyCounts[hour] = (hourlyCounts[hour] || 0) + 1;
                                 }
-                            })
+                                return hourlyCounts;
+                            })()
                         },
                         latency: {
-                            p50: workflowSummaries.reduce((sum, exec) => sum + exec.duration, 0) / workflowSummaries.length,
-                            p95: workflowSummaries.reduce((sum, exec) => sum + exec.duration, 0) / workflowSummaries.length * 1.5,
-                            p99: workflowSummaries.reduce((sum, exec) => sum + exec.duration, 0) / workflowSummaries.length * 2
+                            p50: workflowSummaries.length > 0 ? workflowSummaries.reduce((sum, exec) => sum + (exec.duration || 0), 0) / workflowSummaries.length : 0,
+                            p95: workflowSummaries.length > 0 ? workflowSummaries.reduce((sum, exec) => sum + (exec.duration || 0), 0) / workflowSummaries.length * 1.5 : 0,
+                            p99: workflowSummaries.length > 0 ? workflowSummaries.reduce((sum, exec) => sum + (exec.duration || 0), 0) / workflowSummaries.length * 2 : 0
                         },
                         errorRate: {
                             current: 5, // Assuming 5% error rate
@@ -839,15 +839,20 @@ export class WorkflowController {
                             };
                         }),
                         trend: {
-                            daily: Array(7).fill(0).map((_, i) => {
-                                // Create a realistic daily trend
-                                const date = new Date();
-                                date.setDate(date.getDate() - (6 - i));
-                                return {
-                                    date: date.toISOString().split('T')[0],
-                                    amount: totalCost / 7 * (0.8 + Math.random() * 0.4) // Randomize daily cost around the average
-                                };
-                            })
+                            daily: (() => {
+                                const byDay = new Map<string, { count: number; cost: number }>();
+                                for (const w of workflowSummaries) {
+                                    const d = new Date(w.endTime || w.startTime);
+                                    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                                    const cur = byDay.get(key) || { count: 0, cost: 0 };
+                                    cur.count += 1;
+                                    cur.cost += w.totalCost || 0;
+                                    byDay.set(key, cur);
+                                }
+                                return Array.from(byDay.entries())
+                                    .sort(([a], [b]) => a.localeCompare(b))
+                                    .map(([date, data]) => ({ date, ...data }));
+                            })()
                         }
                     },
                     alerts: []

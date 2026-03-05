@@ -326,19 +326,65 @@ export class CKQLController {
         });
       }
 
-      // This would typically fetch from the database
-      // For now, return a placeholder response
-      const narratives = record_ids.map(id => ({
-        record_id: id,
-        narrative: "Cost narrative will be generated based on telemetry data analysis.",
-        generated_at: new Date().toISOString()
-      }));
+      const { Usage } = await import('../models/Usage');
+      const { Telemetry } = await import('../models/Telemetry');
+      const mongoose = await import('mongoose');
+
+      const narratives: Array<{ record_id: string; narrative: string; generated_at: string }> = [];
+
+      for (const id of record_ids) {
+        const recordId = typeof id === 'string' ? id : String(id);
+        const generated_at = new Date().toISOString();
+
+        try {
+          if (mongoose.Types.ObjectId.isValid(recordId)) {
+            const usageDoc = await Usage.findById(recordId).lean();
+            if (usageDoc) {
+              const u = usageDoc as any;
+              const narrative =
+                `Usage on ${u.service || 'unknown'} (${u.model || 'unknown'}): ` +
+                `cost $${typeof u.cost === 'number' ? u.cost.toFixed(4) : '0.00'}, ` +
+                `${u.promptTokens ?? 0} prompt + ${u.completionTokens ?? 0} completion tokens.` +
+                (u.errorOccurred ? ' Request had an error.' : '');
+              narratives.push({ record_id: recordId, narrative, generated_at });
+              continue;
+            }
+
+            const telemetryDoc = await Telemetry.findById(recordId).lean();
+            if (telemetryDoc) {
+              const t = telemetryDoc as any;
+              const narrative =
+                t.cost_narrative ||
+                `Telemetry span ${t.operation_name || 'unknown'} (${t.gen_ai_model || t.service_name || 'unknown'}): ` +
+                  `cost $${typeof t.cost_usd === 'number' ? t.cost_usd.toFixed(4) : '0.00'}, ` +
+                  `${t.prompt_tokens ?? 0} + ${t.completion_tokens ?? 0} tokens.`;
+              narratives.push({ record_id: recordId, narrative, generated_at });
+              continue;
+            }
+          }
+
+          narratives.push({
+            record_id: recordId,
+            narrative: 'No usage or telemetry record found for this ID. Cost narrative will be generated when data is available.',
+            generated_at,
+          });
+        } catch (err) {
+          loggingService.warn('Cost narrative lookup failed for record', {
+            record_id: recordId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          narratives.push({
+            record_id: recordId,
+            narrative: 'Cost narrative could not be generated for this record.',
+            generated_at,
+          });
+        }
+      }
 
       ControllerHelper.logRequestSuccess('getCostNarratives', req as AuthenticatedRequest, startTime, {
         narrativesCount: narratives.length
       });
 
-      // Log business event
       loggingService.logBusiness({
         event: 'cost_narratives_generated',
         category: 'ckql_operations',

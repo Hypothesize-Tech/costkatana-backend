@@ -2,6 +2,7 @@ import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import { loggingService } from '../logging.service';
 import { auditLoggerService } from './auditLogger.service';
+import { AuditAnchor, DailyAnchorSummary } from '../../models/AuditAnchor';
 
 /**
  * Audit Anchor Service - External Verification & Tamper Resistance
@@ -48,14 +49,9 @@ export interface DailyAnchorSummary {
 
 class AuditAnchorService {
   private static instance: AuditAnchorService;
-  
-  // Anchor records (in production, backed by database)
-  private anchorRecords: Map<string, AnchorRecord> = new Map();
-  
-  // Daily summaries
-  private dailySummaries: Map<string, DailyAnchorSummary> = new Map();
-  
-  // Root of trust (first anchor hash)
+  private readonly signingKey: string;
+
+  // Root of trust (first anchor hash) - cached in memory for performance
   private rootOfTrust?: {
     anchorId: string;
     hash: string;
@@ -67,6 +63,18 @@ class AuditAnchorService {
   private readonly S3_REGION = process.env.AUDIT_ANCHOR_S3_REGION ?? 'us-east-1';
   
   private constructor() {
+    const configuredSigningKey = process.env.AUDIT_ANCHOR_SIGNING_KEY?.trim();
+    if (configuredSigningKey && configuredSigningKey !== 'costkatana-anchor-signing-key') {
+      this.signingKey = configuredSigningKey;
+    } else if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'AUDIT_ANCHOR_SIGNING_KEY must be configured securely in production'
+      );
+    } else {
+      this.signingKey = crypto.randomBytes(32).toString('hex');
+      loggingService.warn('AUDIT_ANCHOR_SIGNING_KEY not configured; using ephemeral development key');
+    }
+
     // Start daily anchor job
     this.scheduleDailyAnchor();
   }
@@ -96,23 +104,52 @@ class AuditAnchorService {
       verified: false,
     };
     
-    // Store locally
-    this.anchorRecords.set(anchor.anchorId, record);
-    
-    // Set root of trust if this is the first anchor
-    if (!this.rootOfTrust) {
-      this.rootOfTrust = {
-        anchorId: anchor.anchorId,
-        hash: anchor.anchorHash,
-        createdAt: anchor.createdAt,
-      };
-      
-      loggingService.info('Root of trust established', {
+    // Store in database
+    try {
+      await AuditAnchor.create({
+        anchorId: record.anchorId,
+        anchorHash: record.anchorHash,
+        startPosition: record.startPosition,
+        endPosition: record.endPosition,
+        entryCount: record.entryCount,
+        verified: record.verified,
+      });
+    } catch (dbError) {
+      loggingService.error('Failed to store audit anchor in database', {
         component: 'AuditAnchorService',
         operation: 'createAndPublishAnchor',
         anchorId: anchor.anchorId,
-        hashPrefix: anchor.anchorHash.substring(0, 16),
+        error: dbError instanceof Error ? dbError.message : String(dbError),
       });
+      throw dbError;
+    }
+
+    // Set root of trust if this is the first anchor
+    if (!this.rootOfTrust) {
+      // Check if we have any existing anchors in the database
+      const existingAnchors = await AuditAnchor.find().sort({ createdAt: 1 }).limit(1);
+      if (existingAnchors.length === 0) {
+        this.rootOfTrust = {
+          anchorId: anchor.anchorId,
+          hash: anchor.anchorHash,
+          createdAt: anchor.createdAt,
+        };
+
+        loggingService.info('Root of trust established', {
+          component: 'AuditAnchorService',
+          operation: 'createAndPublishAnchor',
+          anchorId: anchor.anchorId,
+          hashPrefix: anchor.anchorHash.substring(0, 16),
+        });
+      } else {
+        // Load existing root of trust
+        const firstAnchor = existingAnchors[0];
+        this.rootOfTrust = {
+          anchorId: firstAnchor.anchorId,
+          hash: firstAnchor.anchorHash,
+          createdAt: firstAnchor.createdAt,
+        };
+      }
     }
     
     // Publish to S3 (in production)
@@ -129,7 +166,7 @@ class AuditAnchorService {
     }
     
     // Update daily summary
-    this.updateDailySummary(record);
+    await this.updateDailySummary(record);
     
     loggingService.info('Anchor created and published', {
       component: 'AuditAnchorService',
@@ -146,9 +183,6 @@ class AuditAnchorService {
    * Publish anchor to S3 for external verification
    */
   private async publishToS3(record: AnchorRecord): Promise<void> {
-    // In production, this would use the AWS SDK to upload to S3
-    // For now, we simulate the upload
-    
     const s3Key = `anchors/${record.createdAt.toISOString().split('T')[0]}/${record.anchorId}.json`;
     
     const anchorDocument = {
@@ -161,7 +195,6 @@ class AuditAnchorService {
       signature: this.signAnchor(record),
     };
     
-    // Simulate S3 upload
     loggingService.info('Publishing anchor to S3', {
       component: 'AuditAnchorService',
       operation: 'publishToS3',
@@ -186,8 +219,6 @@ class AuditAnchorService {
    * Sign an anchor for non-repudiation
    */
   private signAnchor(record: AnchorRecord): string {
-    const signingKey = process.env.AUDIT_ANCHOR_SIGNING_KEY ?? 'costkatana-anchor-signing-key';
-    
     const content = JSON.stringify({
       anchorId: record.anchorId,
       anchorHash: record.anchorHash,
@@ -198,7 +229,7 @@ class AuditAnchorService {
     });
     
     return crypto
-      .createHmac('sha256', signingKey)
+      .createHmac('sha256', this.signingKey)
       .update(content)
       .digest('hex');
   }
@@ -207,9 +238,10 @@ class AuditAnchorService {
    * Verify an anchor
    */
   public async verifyAnchor(anchorId: string): Promise<AnchorVerificationResult> {
-    const record = this.anchorRecords.get(anchorId);
-    
-    if (!record) {
+    // Find record in database
+    const dbRecord = await AuditAnchor.findOne({ anchorId });
+
+    if (!dbRecord) {
       return {
         valid: false,
         anchorId,
@@ -218,28 +250,33 @@ class AuditAnchorService {
         verifiedAt: new Date(),
       };
     }
-    
+
     // Verify with audit logger
     const loggerVerification = await auditLoggerService.verifyAnchor(anchorId);
-    
+
     if (!loggerVerification.valid) {
       return {
         valid: false,
         anchorId,
         reason: loggerVerification.reason,
-        localHash: record.anchorHash,
+        localHash: dbRecord.anchorHash,
         verifiedAt: new Date(),
       };
     }
-    
-    // Update verification status
-    record.verified = true;
-    record.verifiedAt = new Date();
+
+    // Update verification status in database
+    await AuditAnchor.findOneAndUpdate(
+      { anchorId },
+      {
+        verified: true,
+        verifiedAt: new Date(),
+      }
+    );
     
     return {
       valid: true,
       anchorId,
-      localHash: record.anchorHash,
+      localHash: dbRecord.anchorHash,
       verifiedAt: new Date(),
     };
   }
@@ -247,64 +284,105 @@ class AuditAnchorService {
   /**
    * Update daily summary
    */
-  private updateDailySummary(record: AnchorRecord): void {
+  private async updateDailySummary(record: AnchorRecord): Promise<void> {
     const dateKey = record.createdAt.toISOString().split('T')[0];
-    
-    let summary = this.dailySummaries.get(dateKey);
-    
-    if (!summary) {
-      summary = {
+
+    try {
+      const existingSummary = await DailyAnchorSummary.findOne({ date: dateKey });
+
+      if (existingSummary) {
+        // Update existing summary
+        await DailyAnchorSummary.findOneAndUpdate(
+          { date: dateKey },
+          {
+            $inc: {
+              totalAnchors: 1,
+              totalEntries: record.entryCount,
+            },
+            lastAnchorId: record.anchorId,
+            // Note: firstAnchorId is set once and not updated
+          }
+        );
+      } else {
+        // Create new summary
+        await DailyAnchorSummary.create({
+          date: dateKey,
+          totalAnchors: 1,
+          verifiedAnchors: record.verified ? 1 : 0,
+          publishedAnchors: 0, // Will be updated when published
+          totalEntries: record.entryCount,
+          lastAnchorId: record.anchorId,
+        });
+      }
+    } catch (error) {
+      loggingService.warn('Failed to update daily summary', {
+        component: 'AuditAnchorService',
+        operation: 'updateDailySummary',
         date: dateKey,
-        anchorCount: 0,
-        totalEntries: 0,
-        dailyHash: '',
-      };
-      this.dailySummaries.set(dateKey, summary);
+        anchorId: record.anchorId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
-    
-    summary.anchorCount += 1;
-    summary.totalEntries += record.entryCount;
-    
-    if (!summary.firstAnchorId) {
-      summary.firstAnchorId = record.anchorId;
-    }
-    summary.lastAnchorId = record.anchorId;
-    
-    // Update daily hash
-    const hashContent = `${summary.dailyHash}:${record.anchorHash}`;
-    summary.dailyHash = crypto
-      .createHash('sha256')
-      .update(hashContent)
-      .digest('hex');
   }
   
   /**
    * Get anchor by ID
    */
-  public getAnchor(anchorId: string): AnchorRecord | null {
-    return this.anchorRecords.get(anchorId) ?? null;
+  public async getAnchor(anchorId: string): Promise<AnchorRecord | null> {
+    const dbRecord = await AuditAnchor.findOne({ anchorId });
+    if (!dbRecord) return null;
+
+    return {
+      anchorId: dbRecord.anchorId,
+      anchorHash: dbRecord.anchorHash,
+      startPosition: dbRecord.startPosition,
+      endPosition: dbRecord.endPosition,
+      entryCount: dbRecord.entryCount,
+      createdAt: dbRecord.createdAt,
+      verified: dbRecord.verified,
+    };
   }
   
   /**
    * Get all anchors for a date
    */
-  public getAnchorsForDate(date: string): AnchorRecord[] {
-    const anchors: AnchorRecord[] = [];
-    
-    for (const record of this.anchorRecords.values()) {
-      if (record.createdAt.toISOString().startsWith(date)) {
-        anchors.push(record);
-      }
-    }
-    
-    return anchors.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  public async getAnchorsForDate(date: string): Promise<AnchorRecord[]> {
+    const startOfDay = new Date(`${date}T00:00:00.000Z`);
+    const endOfDay = new Date(`${date}T23:59:59.999Z`);
+
+    const dbRecords = await AuditAnchor.find({
+      createdAt: {
+        $gte: startOfDay,
+        $lte: endOfDay,
+      },
+    }).sort({ createdAt: 1 });
+
+    return dbRecords.map(record => ({
+      anchorId: record.anchorId,
+      anchorHash: record.anchorHash,
+      startPosition: record.startPosition,
+      endPosition: record.endPosition,
+      entryCount: record.entryCount,
+      createdAt: record.createdAt,
+      verified: record.verified,
+    }));
   }
   
   /**
    * Get daily summary
    */
-  public getDailySummary(date: string): DailyAnchorSummary | null {
-    return this.dailySummaries.get(date) ?? null;
+  public async getDailySummary(date: string): Promise<DailyAnchorSummary | null> {
+    const summary = await DailyAnchorSummary.findOne({ date });
+    if (!summary) return null;
+
+    return {
+      date: summary.date,
+      anchorCount: summary.totalAnchors,
+      totalEntries: summary.totalEntries,
+      firstAnchorId: undefined, // Not stored in DB schema
+      lastAnchorId: summary.lastAnchorId,
+      dailyHash: '', // Not stored in DB schema
+    };
   }
   
   /**
@@ -317,26 +395,38 @@ class AuditAnchorService {
   /**
    * Get latest anchor
    */
-  public getLatestAnchor(): AnchorRecord | null {
-    let latest: AnchorRecord | null = null;
-    
-    for (const record of this.anchorRecords.values()) {
-      if (!latest || record.createdAt > latest.createdAt) {
-        latest = record;
-      }
-    }
-    
-    return latest;
+  public async getLatestAnchor(): Promise<AnchorRecord | null> {
+    const latestRecord = await AuditAnchor.findOne().sort({ createdAt: -1 });
+    if (!latestRecord) return null;
+
+    return {
+      anchorId: latestRecord.anchorId,
+      anchorHash: latestRecord.anchorHash,
+      startPosition: latestRecord.startPosition,
+      endPosition: latestRecord.endPosition,
+      entryCount: latestRecord.entryCount,
+      createdAt: latestRecord.createdAt,
+      verified: latestRecord.verified,
+    };
   }
   
   /**
    * Get anchor chain (for verification)
    */
-  public getAnchorChain(limit: number = 10): AnchorRecord[] {
-    const anchors = Array.from(this.anchorRecords.values());
-    return anchors
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-      .slice(0, limit);
+  public async getAnchorChain(limit: number = 10): Promise<AnchorRecord[]> {
+    const dbRecords = await AuditAnchor.find()
+      .sort({ createdAt: -1 })
+      .limit(limit);
+
+    return dbRecords.map(record => ({
+      anchorId: record.anchorId,
+      anchorHash: record.anchorHash,
+      startPosition: record.startPosition,
+      endPosition: record.endPosition,
+      entryCount: record.entryCount,
+      createdAt: record.createdAt,
+      verified: record.verified,
+    }));
   }
   
   /**
@@ -393,7 +483,7 @@ class AuditAnchorService {
    * Get public anchor endpoint data
    * This is what would be exposed via the /aws/audit/anchor endpoint
    */
-  public getPublicAnchorData(): {
+  public async getPublicAnchorData(): Promise<{
     latestAnchor: {
       anchorId: string;
       anchorHash: string;
@@ -407,9 +497,12 @@ class AuditAnchorService {
     } | null;
     totalAnchors: number;
     chainPosition: number;
-  } {
-    const latest = this.getLatestAnchor();
-    
+  }> {
+    const [latest, totalCount] = await Promise.all([
+      this.getLatestAnchor(),
+      AuditAnchor.countDocuments(),
+    ]);
+
     return {
       latestAnchor: latest ? {
         anchorId: latest.anchorId,
@@ -422,7 +515,7 @@ class AuditAnchorService {
         hash: this.rootOfTrust.hash,
         createdAt: this.rootOfTrust.createdAt.toISOString(),
       } : null,
-      totalAnchors: this.anchorRecords.size,
+      totalAnchors: totalCount,
       chainPosition: auditLoggerService.getChainPosition(),
     };
   }
@@ -436,23 +529,22 @@ class AuditAnchorService {
     firstInvalidAnchor?: string;
     verifiedAt: Date;
   }> {
-    const anchors = Array.from(this.anchorRecords.values())
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-    
+    const dbRecords = await AuditAnchor.find().sort({ createdAt: 1 });
+
     let anchorsVerified = 0;
-    
-    for (const anchor of anchors) {
-      const result = await this.verifyAnchor(anchor.anchorId);
-      
+
+    for (const dbRecord of dbRecords) {
+      const result = await this.verifyAnchor(dbRecord.anchorId);
+
       if (!result.valid) {
         return {
           valid: false,
           anchorsVerified,
-          firstInvalidAnchor: anchor.anchorId,
+          firstInvalidAnchor: dbRecord.anchorId,
           verifiedAt: new Date(),
         };
       }
-      
+
       anchorsVerified++;
     }
     

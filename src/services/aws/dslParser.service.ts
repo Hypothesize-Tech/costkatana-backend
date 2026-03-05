@@ -374,10 +374,32 @@ class DSLParserService {
    * Sign the DSL for non-repudiation (optional)
    */
   private signDSL(dsl: ActionDefinition): string {
-    // In production, this would use a proper signing key
-    const signingKey = process.env.DSL_SIGNING_KEY ?? 'costkatana-dsl-signing-key';
+    // CRITICAL: DSL signing key must be properly configured for security
+    const signingKey = process.env.DSL_SIGNING_KEY?.trim();
+
+    if (!signingKey) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('DSL_SIGNING_KEY environment variable must be configured in production');
+      } else {
+        // Development fallback with warning
+        loggingService.warn('DSL_SIGNING_KEY not configured; using development fallback (NOT SECURE)');
+        const fallbackKey = crypto.randomBytes(32).toString('hex');
+        const canonicalJson = JSON.stringify(dsl, Object.keys(dsl).sort());
+
+        return crypto
+          .createHmac('sha256', fallbackKey)
+          .update(canonicalJson)
+          .digest('hex');
+      }
+    }
+
+    // Validate key strength (minimum 32 characters for HMAC-SHA256)
+    if (signingKey.length < 32) {
+      throw new Error('DSL_SIGNING_KEY must be at least 32 characters long');
+    }
+
     const canonicalJson = JSON.stringify(dsl, Object.keys(dsl).sort());
-    
+
     return crypto
       .createHmac('sha256', signingKey)
       .update(canonicalJson)

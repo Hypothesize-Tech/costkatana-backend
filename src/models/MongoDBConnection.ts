@@ -106,7 +106,7 @@ const MongoDBConnectionSchema = new Schema<IMongoDBConnection>(
     },
     {
         timestamps: true,
-        collection: 'mongodbconnections'
+        collection: 'mongodb_connections'
     }
 );
 

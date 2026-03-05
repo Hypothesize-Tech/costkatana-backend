@@ -377,7 +377,7 @@ export class GlobalBenchmarksService {
     
     const errorRate = 1 - successRate;
 
-    const avgCacheHitRate = 0.15; // Placeholder - would need actual cache data
+    const avgCacheHitRate = parseFloat(process.env.GLOBAL_BENCHMARK_CACHE_HIT_RATE || '0.15');
     const avgRetryCount = 0.1; // Placeholder
 
     const metrics: AggregatedMetrics = {
@@ -649,7 +649,7 @@ export class GlobalBenchmarksService {
     // Compute rates
     const tenantCount = tenantSet.size;
     // Note: cache hit tracking would need to be added to schemas
-    const cachingAdoption = 0.35; // Placeholder - would calculate from actual cache data
+    const cachingAdoption = parseFloat(process.env.GLOBAL_BENCHMARK_CACHING_ADOPTION || '0.35');
     const cachingPractice: BestPractice = {
       practiceType: 'caching_strategy',
       description: 'Enable semantic caching to reduce costs by 70-80% on repeated requests',

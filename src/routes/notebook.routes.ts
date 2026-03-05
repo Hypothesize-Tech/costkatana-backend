@@ -16,15 +16,15 @@ const aiRateLimit = rateLimitMiddleware({
 });
 
 // Notebook Management
-router.get('/notebooks', NotebookController.getNotebooks);
-router.get('/notebooks/templates', NotebookController.getTemplates);
-router.get('/notebooks/:id', NotebookController.getNotebook);
-router.post('/notebooks', NotebookController.createNotebook);
-router.put('/notebooks/:id', NotebookController.updateNotebook);
-router.delete('/notebooks/:id', NotebookController.deleteNotebook);
+router.get('/', NotebookController.getNotebooks);
+router.get('/templates', NotebookController.getTemplates);
+router.get('/:id', NotebookController.getNotebook);
+router.post('/', NotebookController.createNotebook);
+router.put('/:id', NotebookController.updateNotebook);
+router.delete('/:id', NotebookController.deleteNotebook);
 
 // Notebook Execution
-router.post('/notebooks/:id/execute', aiRateLimit, NotebookController.executeNotebook);
+router.post('/:id/execute', aiRateLimit, NotebookController.executeNotebook);
 router.get('/executions/:executionId', NotebookController.getExecution);
 
 // AI Insights

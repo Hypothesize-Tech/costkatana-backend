@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express';
 import { agentService, AgentQuery } from '../services/agent.service';
-import { validationResult } from 'express-validator';
+import { ChatService } from '../services/chat.service';
 import { loggingService } from '../services/logging.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
 
@@ -266,11 +266,21 @@ export class AgentController {
         ControllerHelper.logRequestStart('getConversationHistory', req);
 
         try {
-            // This would integrate with your existing conversation service
-            // For now, we'll return a placeholder response
+            if (!conversationId || typeof conversationId !== 'string') {
+                res.status(400).json({ success: false, error: 'conversationId is required' });
+                return;
+            }
+
+            const { messages, total, conversation } = await ChatService.getConversationHistory(
+                conversationId,
+                userId,
+                50,
+                0
+            );
 
             ControllerHelper.logRequestSuccess('getConversationHistory', req, startTime, {
-                conversationId: conversationId as string
+                conversationId,
+                totalMessages: total,
             });
 
             ControllerHelper.logBusinessEvent(
@@ -278,19 +288,17 @@ export class AgentController {
                 'data_access',
                 userId,
                 Date.now() - startTime,
-                {
-                    conversationId: conversationId as string
-                }
+                { conversationId, totalMessages: total }
             );
 
             res.json({
                 success: true,
                 data: {
                     conversationId,
-                    messages: [],
-                    totalMessages: 0
+                    messages,
+                    totalMessages: total,
+                    conversation,
                 },
-                message: 'Conversation history integration pending'
             });
 
         } catch (error) {

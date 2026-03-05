@@ -161,11 +161,6 @@ export class CloudWatchService {
         });
     }
 
-    static async createDashboard(userId: string): Promise<void> {
-        // Implementation for creating custom CloudWatch dashboards
-        // This would use PutDashboardCommand from AWS SDK
-        loggingService.info('Dashboard creation not implemented yet', { value:  {  userId  } });
-    }
     
     /**
      * ============ AI-SPECIFIC CLOUDWATCH FEATURES ============

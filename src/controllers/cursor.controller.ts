@@ -1,10 +1,9 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { loggingService } from '../services/logging.service';
 import { AICostTrackerService } from '../services/aiCostTracker.service';
 import { UsageService } from '../services/usage.service';
 import { RealtimeUpdateService } from '../services/realtime-update.service';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
-import { ServiceHelper } from '@utils/serviceHelper';
 
 interface CursorRequest extends AuthenticatedRequest {
     body: {
@@ -69,9 +68,45 @@ export class CursorController {
                 return;
             }
 
-            let userId: string = user_id || 'mock-user-id';
+            let userId: string | undefined = user_id ?? (req as AuthenticatedRequest).userId;
             if (!userId && api_key) {
-                userId = 'mock-user-id-from-api-key';
+                // Implement API key authentication
+                try {
+                    const { User } = await import('../models/User');
+                    const user = await User.findOne({
+                        'apiKeys.key': api_key,
+                        'apiKeys.isActive': true,
+                    });
+
+                    if (user) {
+                        userId = user._id.toString();
+                        loggingService.info('Cursor API key authentication successful', {
+                            userId,
+                            apiKeyPrefix: api_key.substring(0, 8) + '...',
+                            requestId: req.headers['x-request-id'] as string
+                        });
+                    } else {
+                        loggingService.warn('Cursor API key authentication failed - invalid key', {
+                            apiKeyPrefix: api_key.substring(0, 8) + '...',
+                            requestId: req.headers['x-request-id'] as string
+                        });
+                        res.status(401).json({
+                            error: 'Invalid API key',
+                            message: 'The provided API key is not valid or inactive'
+                        });
+                        return;
+                    }
+                } catch (error) {
+                    loggingService.error('Cursor API key authentication error', {
+                        error: error instanceof Error ? error.message : String(error),
+                        requestId: req.headers['x-request-id'] as string
+                    });
+                    res.status(500).json({
+                        error: 'Authentication service unavailable',
+                        message: 'Unable to verify API key at this time'
+                    });
+                    return;
+                }
             }
             if (!userId) {
                 loggingService.warn('Cursor action failed - authentication required', {
@@ -120,16 +155,16 @@ export class CursorController {
                     await CursorController.analyzeCode(req, res);
                     break;
                 case 'create_project':
-                    await CursorController.createProject(req, res);
+                    await CursorController.createProject(req, res, userId);
                     break;
                 case 'get_projects':
-                    await CursorController.getProjects(res);
+                    await CursorController.getProjects(req, res, userId);
                     break;
                 case 'get_analytics':
-                    await CursorController.getAnalytics(res);
+                    await CursorController.getAnalytics(req, res, userId);
                     break;
                 case 'workspace_setup':
-                    await CursorController.setupWorkspace(req, res);
+                    await CursorController.setupWorkspace(req, res, userId);
                     break;
                 default:
                     loggingService.warn('Cursor action failed - invalid action', {
@@ -178,14 +213,78 @@ export class CursorController {
             
             ControllerHelper.logRequestSuccess('generateMagicLink', req, startTime, { hasMagicLink: !!magicLink });
 
-            res.json({
-                success: true,
-                data: {
-                    magic_link: magicLink,
-                    user_id: 'mock-user-id',
-                    message: 'Magic link generated successfully! Check your email to complete setup.'
+            // Create or find user by email
+            try {
+                const { User } = await import('../models/User');
+                let user = await User.findOne({ email: email.toLowerCase().trim() });
+
+                if (!user) {
+                    // Create new user
+                    user = new User({
+                        email: email.toLowerCase().trim(),
+                        name: email.split('@')[0], // Use email prefix as name initially
+                        source: 'cursor_extension',
+                        isActive: true,
+                        emailVerified: false, // Will be verified when magic link is used
+                        subscription: {
+                            plan: 'free',
+                            status: 'trialing',
+                            limits: {
+                                tokensPerMonth: 1000000, // 1M tokens for trial
+                                apiCalls: 5000,
+                                logsPerMonth: 5000,
+                                agentTraces: 10,
+                                seats: 1,
+                            },
+                            usage: {
+                                totalTokens: 0,
+                                apiCallsUsed: 0,
+                                logsUsed: 0,
+                                agentTracesUsed: 0,
+                                lastReset: new Date(),
+                            },
+                        },
+                        preferences: {
+                            theme: 'system',
+                            notifications: {
+                                email: true,
+                                browser: true,
+                            },
+                        },
+                    });
+
+                    await user.save();
+                    loggingService.info('Created new user via cursor magic link', {
+                        userId: user._id.toString(),
+                        email: user.email,
+                        requestId: req.headers['x-request-id'] as string
+                    });
                 }
-            });
+
+                res.json({
+                    success: true,
+                    data: {
+                        magic_link: magicLink,
+                        user_id: user._id.toString(),
+                        user_name: user.name,
+                        is_new_user: !user.emailVerified,
+                        message: user.emailVerified
+                            ? 'Magic link sent! Check your email to continue.'
+                            : 'Welcome! Check your email to complete your account setup.'
+                    }
+                });
+            } catch (error) {
+                loggingService.error('Failed to create/find user for magic link', {
+                    error: error instanceof Error ? error.message : String(error),
+                    email,
+                    requestId: req.headers['x-request-id'] as string
+                });
+                res.status(500).json({
+                    success: false,
+                    error: 'User creation failed',
+                    message: 'Unable to create user account. Please try again later.'
+                });
+            }
         } catch (error: any) {
             ControllerHelper.handleError('generateMagicLink', error, req, res, startTime, { email });
         }
@@ -464,17 +563,17 @@ export class CursorController {
         }
     }
 
-    private static async setupWorkspace(req: CursorRequest, res: Response): Promise<void> {
+    private static async setupWorkspace(req: CursorRequest, res: Response, userId?: string): Promise<void> {
         const startTime = Date.now();
         ControllerHelper.logRequestStart('setupWorkspace', req);
         const { workspace } = req.body;
 
         try {
-            if (!workspace) {
+            if (!workspace || !userId) {
                 res.status(400).json({
                     success: false,
-                    error: 'Workspace data is required',
-                    message: 'Please provide workspace information.'
+                    error: 'Workspace data and user identification are required',
+                    message: 'Please provide workspace information and ensure you are authenticated.'
                 });
                 return;
             }
@@ -487,14 +586,84 @@ export class CursorController {
                 framework: workspace.framework
             });
 
-            res.json({
-                success: true,
-                data: {
-                    project_id: 'mock-project-id',
-                    project_name: workspace.name || 'Cursor Workspace',
-                    message: `Workspace "${workspace.name}" connected successfully!`
+            // Create or find workspace in database
+            try {
+                const { Workspace } = await import('../models/Workspace');
+                const { User } = await import('../models/User');
+
+                // Check if workspace exists for this user
+                let existingWorkspace = await Workspace.findOne({
+                    name: workspace.name || 'Cursor Workspace',
+                    ownerId: userId,
+                    isActive: true,
+                });
+
+                if (!existingWorkspace) {
+                    // Generate unique slug
+                    const baseSlug = (workspace.name || 'cursor-workspace')
+                        .toLowerCase()
+                        .replace(/[^a-z0-9\s-]/g, '')
+                        .replace(/\s+/g, '-')
+                        .replace(/-+/g, '-')
+                        .trim();
+
+                    let slug = baseSlug;
+                    let counter = 1;
+                    while (await Workspace.findOne({ slug })) {
+                        slug = `${baseSlug}-${counter}`;
+                        counter++;
+                    }
+
+                    // Create new workspace
+                    existingWorkspace = await Workspace.create({
+                        name: workspace.name || 'Cursor Workspace',
+                        slug,
+                        ownerId: userId,
+                        settings: {
+                            allowMemberInvites: false,
+                            defaultProjectAccess: 'assigned',
+                            requireEmailVerification: false,
+                        },
+                        billing: {
+                            seatsIncluded: 1,
+                            additionalSeats: 0,
+                            pricePerSeat: 0, // Free for cursor integration
+                            billingCycle: 'monthly',
+                        },
+                        isActive: true,
+                    });
+
+                    loggingService.info('Created workspace for cursor integration', {
+                        workspaceId: existingWorkspace._id.toString(),
+                        userId,
+                        workspaceName: existingWorkspace.name,
+                        requestId: req.headers['x-request-id'] as string
+                    });
                 }
-            });
+
+                res.json({
+                    success: true,
+                    data: {
+                        project_id: existingWorkspace._id.toString(),
+                        project_name: existingWorkspace.name,
+                        workspace_id: existingWorkspace._id.toString(),
+                        workspace_slug: existingWorkspace.slug,
+                        message: `Workspace "${existingWorkspace.name}" connected successfully!`
+                    }
+                });
+            } catch (error) {
+                loggingService.error('Failed to setup workspace', {
+                    error: error instanceof Error ? error.message : String(error),
+                    userId,
+                    workspaceName: workspace.name,
+                    requestId: req.headers['x-request-id'] as string
+                });
+                res.status(500).json({
+                    success: false,
+                    error: 'Workspace setup failed',
+                    message: 'Unable to create or find workspace. Please try again.'
+                });
+            }
         } catch (error: any) {
             ControllerHelper.handleError('setupWorkspace', error, req, res, startTime, {
                 hasWorkspace: !!workspace
@@ -502,7 +671,7 @@ export class CursorController {
         }
     }
 
-    private static async createProject(req: CursorRequest, res: Response): Promise<void> {
+    private static async createProject(req: CursorRequest, res: Response, userId?: string): Promise<void> {
         const startTime = Date.now();
         ControllerHelper.logRequestStart('createProject', req);
         const { name } = req.body;
@@ -516,39 +685,171 @@ export class CursorController {
                 });
                 return;
             }
+            if (!userId) {
+                res.status(401).json({
+                    success: false,
+                    error: 'Authentication required',
+                    message: 'Please provide user_id or a valid API key.'
+                });
+                return;
+            }
 
             ControllerHelper.logRequestSuccess('createProject', req, startTime, { projectName: name });
 
-            res.json({
-                success: true,
-                data: {
-                    project_id: 'mock-project-id',
-                    project_name: name,
-                    message: `Project "${name}" created successfully!`
+            // Create project in database
+            try {
+                const { Project } = await import('../models/Project');
+
+                // Get user's default workspace or first active workspace
+                let workspaceId = null;
+                try {
+                    const { Workspace } = await import('../models/Workspace');
+                    const workspace = await Workspace.findOne({
+                        ownerId: userId,
+                        isActive: true,
+                    }).sort({ createdAt: -1 });
+
+                    workspaceId = workspace?._id;
+                } catch (workspaceError) {
+                    loggingService.warn('Could not find workspace for project creation', {
+                        userId,
+                        error: workspaceError instanceof Error ? workspaceError.message : String(workspaceError)
+                    });
                 }
-            });
+
+                // Check if project with this name already exists for this user
+                const existingProject = await Project.findOne({
+                    name: name,
+                    ownerId: userId,
+                    isActive: true,
+                });
+
+                if (existingProject) {
+                    res.json({
+                        success: true,
+                        data: {
+                            project_id: existingProject._id.toString(),
+                            project_name: existingProject.name,
+                            message: `Project "${name}" already exists!`,
+                        }
+                    });
+                    return;
+                }
+
+                // Create new project
+                const project = await Project.create({
+                    name: name,
+                    description: `Project created via Cursor IDE integration`,
+                    ownerId: userId,
+                    workspaceId: workspaceId,
+                    budget: {
+                        amount: 50, // $50 monthly budget
+                        period: 'monthly',
+                        startDate: new Date(),
+                        currency: 'USD',
+                        alerts: [],
+                    },
+                    spending: {
+                        current: 0,
+                        lastUpdated: new Date(),
+                        history: [],
+                    },
+                    settings: {
+                        requireApprovalAbove: 10, // Require approval for requests over $10
+                        allowedModels: ['gpt-4o-mini', 'gpt-3.5-turbo', 'claude-3-haiku'],
+                        maxTokensPerRequest: 2000,
+                        enablePromptLibrary: true,
+                        enableCostAllocation: true,
+                    },
+                    tags: ['cursor', 'ide-integration'],
+                    isActive: true,
+                });
+
+                loggingService.info('Created project via cursor integration', {
+                    projectId: project._id.toString(),
+                    userId,
+                    projectName: project.name,
+                    workspaceId: workspaceId?.toString(),
+                    requestId: req.headers['x-request-id'] as string
+                });
+
+                res.json({
+                    success: true,
+                    data: {
+                        project_id: project._id.toString(),
+                        project_name: project.name,
+                        workspace_id: workspaceId?.toString(),
+                        message: `Project "${name}" created successfully!`
+                    }
+                });
+            } catch (error) {
+                loggingService.error('Failed to create project', {
+                    error: error instanceof Error ? error.message : String(error),
+                    userId,
+                    projectName: name,
+                    requestId: req.headers['x-request-id'] as string
+                });
+                res.status(500).json({
+                    success: false,
+                    error: 'Project creation failed',
+                    message: 'Unable to create project. Please try again.'
+                });
+            }
         } catch (error: any) {
             ControllerHelper.handleError('createProject', error, req, res, startTime, { projectName: name });
         }
     }
 
-    private static async getProjects(res: Response): Promise<void> {
+    private static async getProjects(req: CursorRequest, res: Response, userId?: string): Promise<void> {
         const startTime = Date.now();
-        // Note: No req parameter, so we can't use ControllerHelper.logRequestStart
         try {
+            const { Project } = await import('../models/Project');
+            const filter: Record<string, unknown> = { isActive: true };
+            if (userId) {
+                (filter as { ownerId: string }).ownerId = userId;
+            }
+            const projects = await Project.find(filter)
+            .populate('workspaceId', 'name slug')
+            .sort({ updatedAt: -1 })
+            .limit(50) // Limit results to prevent excessive data
+            .lean();
+
+            const formattedProjects = projects.map(project => ({
+                id: project._id.toString(),
+                name: project.name,
+                description: project.description,
+                workspace: project.workspaceId ? {
+                    id: (project.workspaceId as any)._id?.toString(),
+                    name: (project.workspaceId as any).name,
+                    slug: (project.workspaceId as any).slug,
+                } : undefined,
+                budget: {
+                    amount: project.budget?.amount,
+                    currency: project.budget?.currency,
+                    period: project.budget?.period,
+                },
+                spending: {
+                    current: project.spending?.current || 0,
+                    lastUpdated: project.spending?.lastUpdated,
+                },
+                settings: {
+                    allowedModels: project.settings?.allowedModels,
+                    maxTokensPerRequest: project.settings?.maxTokensPerRequest,
+                },
+                tags: project.tags || [],
+                created_at: project.createdAt,
+                updated_at: project.updatedAt,
+            }));
+
+            loggingService.info('Retrieved projects for cursor integration', {
+                count: formattedProjects.length,
+                duration: Date.now() - startTime
+            });
 
             res.json({
                 success: true,
                 data: {
-                    projects: [
-                        {
-                            id: 'mock-project-id',
-                            name: 'Sample Project',
-                            description: 'A sample project',
-                            created_at: new Date().toISOString(),
-                            updated_at: new Date().toISOString()
-                        }
-                    ]
+                    projects: formattedProjects
                 }
             });
         } catch (error: any) {
@@ -566,7 +867,7 @@ export class CursorController {
         }
     }
 
-    private static async getAnalytics(res: Response): Promise<void> {
+    private static async getAnalytics(req: CursorRequest, res: Response, _userId?: string): Promise<void> {
         const startTime = Date.now();
         // Note: No req parameter, so we can't use ControllerHelper.logRequestStart
         try {

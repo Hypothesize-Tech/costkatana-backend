@@ -32,6 +32,7 @@ import { TelemetryService } from './services/telemetry.service';
 import { TelemetryCleanupService } from './services/telemetryCleanup.service';
 import { loggingService } from './services/logging.service';
 import { loggerMiddleware } from './middleware/logger.middleware';
+import { authenticate } from './middleware/auth.middleware';
 import { sentryContextMiddleware, sentryPerformanceMiddleware, sentryBusinessErrorMiddleware } from './middleware/sentry.middleware';
 import { healthService } from './services/vectorization/health.service';
 import { recoveryService } from './services/vectorization/recovery.service';
@@ -239,24 +240,42 @@ app.get('/sentry-status', (_req, res): void => {
 });
 
 // Security monitoring dashboard (protected endpoint)
-app.get('/security-dashboard', (req, res) => {
-    // Simple IP-based protection for security dashboard
-    const allowedIPs = ['*'];
-    const clientIP = req.ip ?? 'unknown';
+app.get('/security-dashboard', authenticate, (req, res) => {
+    // Authentication is now required for all environments
+    const userId = req.user?.id;
+    if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+    }
 
-    // For production, you should implement proper authentication
-    if (process.env.NODE_ENV === 'production') {
-        // In production, require authentication or IP whitelisting
-        const isInternalIP = allowedIPs.some(range => {
+    // Check if user has admin or security monitoring permissions
+    const user = req.user as { role?: string; permissions?: string[] } | undefined;
+    const hasAccess = user?.role === 'admin' ||
+                     user?.permissions?.includes('security_monitoring') ||
+                     user?.permissions?.includes('admin');
+
+    if (!hasAccess) {
+        return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+
+    // Additional IP-based protection for extra security
+    const allowedIPs = process.env.SECURITY_DASHBOARD_ALLOWED_IPS?.split(',') || [];
+    const clientIP = req.ip ?? req.connection?.remoteAddress ?? 'unknown';
+
+    if (allowedIPs.length > 0 && !allowedIPs.includes('*')) {
+        const isAllowedIP = allowedIPs.some((range: string) => {
             if (range.includes('/')) {
-                // CIDR notation check would go here
-                return false;
+                // Proper CIDR notation check
+                return isIPInCIDR(clientIP, range);
             }
             return clientIP === range;
         });
 
-        if (!isInternalIP) {
-            return res.status(403).json({ error: 'Access denied' });
+        if (!isAllowedIP) {
+            loggingService.warn('Security dashboard access denied for IP', {
+                ip: clientIP,
+                userId
+            });
+            return res.status(403).json({ error: 'Access denied from this IP' });
         }
     }
 
@@ -267,6 +286,42 @@ app.get('/security-dashboard', (req, res) => {
     });
     return;
 });
+
+/**
+ * Check if an IP address is within a CIDR range
+ */
+function isIPInCIDR(ip: string, cidr: string): boolean {
+    try {
+        const [network, prefixLengthStr] = cidr.split('/');
+        const prefixLength = parseInt(prefixLengthStr);
+
+        // Convert IP and network to numbers
+        const ipNum = ipToNumber(ip);
+        const networkNum = ipToNumber(network);
+
+        // Create subnet mask
+        const mask = ~(0xFFFFFFFF >>> prefixLength);
+
+        // Check if IP is in the subnet
+        return (ipNum & mask) === (networkNum & mask);
+    } catch (error) {
+        loggingService.error('Error checking CIDR range', {
+            ip,
+            cidr,
+            error: error instanceof Error ? error.message : String(error)
+        });
+        return false;
+    }
+}
+
+/**
+ * Convert IPv4 address to number
+ */
+function ipToNumber(ip: string): number {
+    return ip.split('.')
+        .map(part => parseInt(part))
+        .reduce((acc, octet) => (acc << 8) + octet, 0) >>> 0;
+}
 
 // Sentry business error middleware - capture business logic errors
 app.use(sentryBusinessErrorMiddleware);
