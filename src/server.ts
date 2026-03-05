@@ -240,7 +240,7 @@ app.get('/sentry-status', (_req, res): void => {
 });
 
 // Security monitoring dashboard (protected endpoint)
-app.get('/security-dashboard', authenticate, (req, res) => {
+app.get('/security-dashboard', authenticate, (req: any, res: any) => {
     // Authentication is now required for all environments
     const userId = req.user?.id;
     if (!userId) {
