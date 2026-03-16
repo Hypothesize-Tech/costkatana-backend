@@ -8,6 +8,8 @@
   "scripts": {
     "prebuild": "rm -rf dist",
     "build": "NODE_OPTIONS='--max-old-space-size=4096' nest build",
+    "build:docker": "NODE_OPTIONS='--max-old-space-size=6144' nest build -c nest-cli.docker.json",
+    "typecheck": "tsc --noEmit -p tsconfig.build.json",
     "build:high-memory": "NODE_OPTIONS='--max-old-space-size=8192' nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
