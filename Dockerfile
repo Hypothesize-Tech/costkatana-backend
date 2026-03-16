@@ -54,7 +54,9 @@ COPY --chown=nodejs:nodejs knowledge-base/ ./knowledge-base/
 ENV NODE_ENV=production
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 
-RUN mkdir -p logs && chown nodejs:nodejs logs
+# Create writable directories for runtime (nodejs user needs write access)
+RUN mkdir -p logs uploads uploads/templates uploads/temp context-files data/faiss && \
+    chown -R nodejs:nodejs logs uploads context-files data
 
 USER nodejs
 EXPOSE 8000
