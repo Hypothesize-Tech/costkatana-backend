@@ -147,7 +147,7 @@ import { ComprehensiveTrackingMiddleware } from './modules/usage/middleware/comp
       useFactory: () => {
         const uri =
           process.env.NODE_ENV === 'production'
-            ? process.env.MONGODB_URI_PROD
+            ? (process.env.MONGODB_URI_PROD ?? process.env.MONGODB_URI)
             : process.env.MONGODB_URI;
         if (!uri)
           throw new Error('MONGODB_URI (or MONGODB_URI_PROD) is required');

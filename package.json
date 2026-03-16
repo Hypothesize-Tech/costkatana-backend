@@ -7,7 +7,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "prebuild": "rm -rf dist",
-    "build": "NODE_OPTIONS='--max-old-space-size=4096' nest build",
+    "build": "NODE_OPTIONS='--max-old-space-size=6144' nest build",
     "build:docker": "NODE_OPTIONS='--max-old-space-size=6144' nest build -c nest-cli.docker.json",
     "typecheck": "tsc --noEmit -p tsconfig.build.json",
     "build:high-memory": "NODE_OPTIONS='--max-old-space-size=8192' nest build",
@@ -15,7 +15,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "node --max-old-space-size=4096 --expose-gc dist/main",
+    "start:prod": "node --max-old-space-size=6144 --expose-gc dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",
