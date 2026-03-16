@@ -14,10 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 
-# Install dependencies
-COPY package*.json ./
-RUN npm ci --prefer-offline --no-audit || \
-    (echo "npm ci failed, trying npm install..." && npm install --prefer-offline --no-audit)
+# Install dependencies (--legacy-peer-deps for @langchain/community pdf-parse peer conflict)
+COPY package*.json .npmrc ./
+RUN npm ci --prefer-offline --no-audit --legacy-peer-deps || \
+    (echo "npm ci failed, trying npm install..." && npm install --prefer-offline --no-audit --legacy-peer-deps)
 
 # Copy source and build
 COPY . .
