@@ -2,6 +2,13 @@ import { estimateTokens, estimateTokensForMessages } from './tokenCounter';
 
 export class TokenEstimator {
   /**
+   * Estimate tokens for plain text (alias for estimatePrompt)
+   */
+  static estimate(text: string): number {
+    return estimateTokens(text);
+  }
+
+  /**
    * Estimate tokens for a simple text prompt
    */
   static estimatePrompt(prompt: string): number {

@@ -136,7 +136,7 @@ export class GatewayController {
                             req.headers['x-request-id'] as string
                         );
                     } else {
-                        throw new Error(`All ${failoverResult.providersAttempted} providers failed: ${failoverResult.finalError?.message || 'Unknown error'}`);
+                        throw new Error(`All ${failoverResult.providersAttempted} providers failed: ${(failoverResult.finalError as Error)?.message || 'Unknown error'}`);
                     }
                 } catch (error: any) {
                     GatewayAnalyticsService.logFailoverError(

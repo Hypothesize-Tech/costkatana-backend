@@ -320,4 +320,19 @@ function sanitizeObject(obj: any): any {
   return obj;
 }
 
-bootstrap();
+bootstrap().catch((error) => {
+  const logger = new Logger('Bootstrap');
+  logger.error(
+    'Application failed to start. This error will cause the process to exit.',
+    {
+      name: error?.name,
+      message: error?.message,
+      stack: error?.stack,
+      code: error?.code,
+    },
+  );
+  // Ensure stderr gets the error for ECS/CloudWatch log capture
+  console.error('[Cost Katana] Bootstrap failed:', error?.message || error);
+  if (error?.stack) console.error(error.stack);
+  process.exit(1);
+});

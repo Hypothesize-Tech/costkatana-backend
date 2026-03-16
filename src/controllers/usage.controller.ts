@@ -1165,7 +1165,7 @@ export class UsageController {
             if (format === 'csv') {
                 const csv = [
                     'Date,Service,Model,Prompt,Tokens,Cost,Response Time,Template Name,Template Category,Template Context',
-                    ...result.data.map(u => {
+                    ...result.data.map((u: { createdAt: unknown; service: string; model: string; prompt: string; totalTokens: number; cost: number; responseTime?: number; templateUsage?: { templateName?: string; templateCategory?: string; context?: string } }) => {
                         const templateName = (u as any).templateUsage?.templateName || '';
                         const templateCategory = (u as any).templateUsage?.templateCategory || '';
                         const templateContext = (u as any).templateUsage?.context || '';
