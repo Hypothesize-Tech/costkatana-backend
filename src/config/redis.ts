@@ -1,10 +1,43 @@
 /**
  * Redis Configuration Module
- * 
+ *
  * Provides centralized Redis URL resolution and connection options
  */
 
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
+
+/**
+ * Single source of truth for whether Redis should be used.
+ * Returns false when REDIS_ENABLED=false or when in NODE_ENV=development
+ * with no Redis configuration (REDIS_HOST/REDIS_URL/FORCE_REDIS) set.
+ */
+export function isRedisEnabled(): boolean {
+  // Explicit disable takes precedence
+  if (process.env.REDIS_ENABLED === 'false') {
+    return false;
+  }
+
+  // Explicit enable
+  if (
+    process.env.REDIS_ENABLED === 'true' ||
+    process.env.FORCE_REDIS === 'true'
+  ) {
+    return true;
+  }
+
+  // In development without explicit Redis config, disable
+  if (process.env.NODE_ENV === 'development') {
+    const hasRedisConfig =
+      !!process.env.REDIS_HOST ||
+      !!process.env.REDIS_URL ||
+      !!process.env.ELASTICACHE_URL;
+    if (!hasRedisConfig) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 /**
  * Resolves the Redis URL based on environment configuration
@@ -23,20 +56,23 @@ export function resolveRedisUrl(): string {
       component: 'RedisConfig',
       operation: 'resolveRedisUrl',
       type: 'redis',
-      configuration: 'explicit_url'
+      configuration: 'explicit_url',
     });
     return process.env.REDIS_URL;
   }
 
   // If running in AWS, prefer ElastiCache URL (must be reachable inside VPC)
   if (inAws && process.env.ELASTICACHE_URL) {
-    loggingService.info('🔧 Redis: AWS environment detected, using ELASTICACHE_URL', {
-      component: 'RedisConfig',
-      operation: 'resolveRedisUrl',
-      type: 'redis',
-      configuration: 'elasticache_url',
-      environment: 'aws'
-    });
+    loggingService.info(
+      '🔧 Redis: AWS environment detected, using ELASTICACHE_URL',
+      {
+        component: 'RedisConfig',
+        operation: 'resolveRedisUrl',
+        type: 'redis',
+        configuration: 'elasticache_url',
+        environment: 'aws',
+      },
+    );
     return process.env.ELASTICACHE_URL;
   }
 
@@ -45,14 +81,17 @@ export function resolveRedisUrl(): string {
     const redisHost = process.env.REDIS_HOST;
     const redisPort = process.env.REDIS_PORT || '6379';
     const url = `redis://${redisHost}:${redisPort}`;
-    loggingService.info(`🔧 Redis: Using host configuration: ${redisHost}:${redisPort}`, {
-      component: 'RedisConfig',
-      operation: 'resolveRedisUrl',
-      type: 'redis',
-      configuration: 'host_port',
-      host: redisHost,
-      port: redisPort
-    });
+    loggingService.info(
+      `🔧 Redis: Using host configuration: ${redisHost}:${redisPort}`,
+      {
+        component: 'RedisConfig',
+        operation: 'resolveRedisUrl',
+        type: 'redis',
+        configuration: 'host_port',
+        host: redisHost,
+        port: redisPort,
+      },
+    );
     return url;
   }
 
@@ -61,7 +100,7 @@ export function resolveRedisUrl(): string {
     component: 'RedisConfig',
     operation: 'resolveRedisUrl',
     type: 'redis',
-    configuration: 'local_default'
+    configuration: 'local_default',
   });
   return process.env.REDIS_LOCAL_URL || 'redis://127.0.0.1:6379';
 }
@@ -70,34 +109,38 @@ export function resolveRedisUrl(): string {
  * Get Redis connection options with appropriate security settings
  */
 export function getRedisOptions(isBullMQ: boolean = false): any {
-  const useTLS = process.env.REDIS_TLS === '1' || process.env.REDIS_TLS === 'true';
+  const useTLS =
+    process.env.REDIS_TLS === '1' || process.env.REDIS_TLS === 'true';
   const username = process.env.REDIS_USERNAME;
   const password = process.env.REDIS_PASSWORD;
 
   // Log connection details (masking sensitive parts)
   const redisUrl = resolveRedisUrl();
   const maskedUrl = redisUrl.replace(/\/\/([^@]*@)?/, '//');
-  loggingService.info(`🔧 Redis: Connecting to ${maskedUrl} ${useTLS ? 'with TLS' : 'without TLS'}${password ? ' using AUTH' : ''}`, {
-    component: 'RedisConfig',
-    operation: 'getRedisOptions',
-    type: 'redis',
-    maskedUrl,
-    useTLS,
-    hasPassword: !!password,
-    hasUsername: !!username
-  });
+  loggingService.info(
+    `🔧 Redis: Connecting to ${maskedUrl} ${useTLS ? 'with TLS' : 'without TLS'}${password ? ' using AUTH' : ''}`,
+    {
+      component: 'RedisConfig',
+      operation: 'getRedisOptions',
+      type: 'redis',
+      maskedUrl,
+      useTLS,
+      hasPassword: !!password,
+      hasUsername: !!username,
+    },
+  );
 
   // Common options for all Redis clients
   const commonOptions = {
     // Connection settings
     connectTimeout: 10000, // 10 seconds for AWS
-    
+
     // Retry strategy for AWS ElastiCache
     retryStrategy: (times: number) => {
       if (times > 5) return null; // Stop after 5 attempts
       return Math.min(times * 1000, 10000); // Longer delays, up to 10 seconds
     },
-    
+
     // Error handling
     reconnectOnError: (err: Error) => {
       // Only reconnect on specific errors
@@ -107,16 +150,16 @@ export function getRedisOptions(isBullMQ: boolean = false): any {
       }
       return false;
     },
-    
+
     // Queue behavior
     enableOfflineQueue: true,
-    
+
     // Authentication
     username,
     password,
-    
+
     // TLS settings if enabled
-    ...(useTLS ? { tls: {} } : {})
+    ...(useTLS ? { tls: {} } : {}),
   };
 
   // BullMQ specific options
@@ -124,7 +167,7 @@ export function getRedisOptions(isBullMQ: boolean = false): any {
     return {
       ...commonOptions,
       maxRetriesPerRequest: null, // BullMQ requirement
-      enableReadyCheck: false,    // BullMQ requirement
+      enableReadyCheck: false, // BullMQ requirement
     };
   }
 
@@ -136,22 +179,25 @@ export function getRedisOptions(isBullMQ: boolean = false): any {
  */
 export function getRedisErrorDiagnostic(error: any): string {
   const errorMessage = error?.message || String(error);
-  
+
   // Network connectivity issues
-  if (errorMessage.includes('ETIMEDOUT') || errorMessage.includes('ECONNREFUSED')) {
-    return "Network unreachable to Redis (likely VPC/private network issue). For local development, ensure Redis is running locally or use in-memory fallback.";
+  if (
+    errorMessage.includes('ETIMEDOUT') ||
+    errorMessage.includes('ECONNREFUSED')
+  ) {
+    return 'Network unreachable to Redis (likely VPC/private network issue). For local development, ensure Redis is running locally or use in-memory fallback.';
   }
-  
+
   // Authentication issues
   if (errorMessage.includes('NOAUTH') || errorMessage.includes('AUTH')) {
-    return "Redis authentication required — set REDIS_PASSWORD and REDIS_USERNAME (if using ACL).";
+    return 'Redis authentication required — set REDIS_PASSWORD and REDIS_USERNAME (if using ACL).';
   }
-  
+
   // TLS issues
   if (errorMessage.includes('SSL') || errorMessage.includes('TLS')) {
-    return "TLS connection issue — set REDIS_TLS=1 or use rediss:// protocol in your URL.";
+    return 'TLS connection issue — set REDIS_TLS=1 or use rediss:// protocol in your URL.';
   }
-  
+
   // Default message
   return `Redis connection error: ${errorMessage}`;
 }

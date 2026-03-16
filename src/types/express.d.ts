@@ -1,79 +1,27 @@
-import { UserRole } from './models';
-
+// Extend Express Request interface for Cortex functionality
 declare global {
-    namespace Express {
-        interface UserPayload {
-            id: string;
-            email: string;
-            role: UserRole;
-        }
-        interface Request {
-            user?: UserPayload;
-            userId?: string;
-            traceContext?: {
-                traceId?: string;
-                sessionId?: string;
-            };
-            gatewayContext?: {
-                startTime: number;
-                requestId?: string;
-                targetUrl?: string;
-                projectId?: string;
-                authMethodOverride?: "standard" | "gateway";
-                cacheEnabled?: boolean;
-                retryEnabled?: boolean;
-                cacheUserScope?: boolean;
-                cacheTTL?: number;
-                cacheBucketMaxSize?: number;
-                retryCount?: number;
-                retryFactor?: number;
-                retryMinTimeout?: number;
-                retryMaxTimeout?: number;
-                userId?: string;
-                provider?: string;
-                budgetId?: string;
-                modelOverride?: string;
-                stream?: boolean;
-                // New cache-related properties
-                semanticCacheEnabled?: boolean;
-                deduplicationEnabled?: boolean;
-                similarityThreshold?: number;
-                inputTokens?: number;
-                outputTokens?: number;
-                cost?: number;
-                isFailoverRequest?: boolean;
-                workspaceId?: string;
-                simulationId?: string;
-                estimatedCost?: number;
-                budgetReservationId?: string;
-                // CPI system properties
-                availableProviders?: string[];
-                selectedModel?: string;
-                routingDecision?: any;
-
-                // 🚀 CORTEX PROCESSING PROPERTIES
-                cortexEnabled?: boolean;
-                cortexCoreModel?: string;
-                cortexEncodingModel?: string;
-                cortexDecodingModel?: string;
-                cortexOperation?: 'optimize' | 'compress' | 'analyze' | 'transform' | 'sast';
-                cortexOutputStyle?: 'formal' | 'casual' | 'technical' | 'conversational';
-                cortexOutputFormat?: 'plain' | 'markdown' | 'structured';
-                cortexPreserveSemantics?: boolean;
-                cortexSemanticCache?: boolean;
-                cortexPriority?: 'cost' | 'speed' | 'quality' | 'balanced';
-                cortexBinaryEnabled?: boolean;
-                cortexBinaryCompression?: 'basic' | 'standard' | 'aggressive';
-                cortexSchemaValidation?: boolean;
-                cortexStrictValidation?: boolean;
-                cortexControlFlowEnabled?: boolean;
-                cortexHybridExecution?: boolean;
-                cortexFragmentCache?: boolean;
-                cortexContextManagement?: boolean;
-                cortexSessionId?: string;
-                cortexContextCompression?: boolean;
-                cortexMetadata?: any;
-            };
-        }
+  namespace Express {
+    interface Request {
+      cortex?: {
+        enabled: boolean;
+        options?: {
+          modelOverride?: string;
+          coreModel?: string;
+          encoderModel?: string;
+          decoderModel?: string;
+          useCache?: boolean;
+          compressionLevel?: 'none' | 'basic' | 'aggressive' | 'neural';
+          format?: 'plain' | 'markdown' | 'html' | 'json';
+          style?: 'formal' | 'casual' | 'technical' | 'simple';
+        };
+        process?: (input: string) => Promise<{
+          response: string;
+          metrics: any;
+          optimized: boolean;
+        }>;
+      };
     }
+  }
 }
+
+export {};

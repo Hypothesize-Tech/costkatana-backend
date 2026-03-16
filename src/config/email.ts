@@ -1,63 +1,65 @@
 import * as nodemailer from 'nodemailer';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 
 /**
  * Creates and returns a Nodemailer transporter using SMTP.
  * Validates credentials on startup to fail fast if misconfigured.
  */
 const createTransporter = async () => {
-    // Create transporter with SMTP configuration
-    const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || 'smtp.gmail.com',
-        port: parseInt(process.env.SMTP_PORT || '587'),
-        secure: false, // true for 465, false for other ports
-        auth: {
-            user: process.env.FROM_EMAIL,
-            pass: process.env.SMTP_PASS
-        },
-        tls: {
-            // do not fail on invalid certs
-            rejectUnauthorized: false
-        }
+  // Create transporter with SMTP configuration
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT || '587'),
+    secure: false, // true for 465, false for other ports
+    auth: {
+      user: process.env.FROM_EMAIL,
+      pass: process.env.SMTP_PASS,
+    },
+    tls: {
+      // do not fail on invalid certs
+      rejectUnauthorized: false,
+    },
+  });
+
+  // Verify connection configuration
+  try {
+    await transporter.verify();
+    loggingService.info('SMTP server connection verified successfully', {
+      component: 'EmailConfig',
+      operation: 'createTransporter',
+      type: 'email',
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.SMTP_PORT || '587'),
     });
+  } catch (error) {
+    loggingService.error('SMTP server connection failed', {
+      component: 'EmailConfig',
+      operation: 'createTransporter',
+      type: 'email',
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw new Error(
+      'Failed to connect to SMTP server. Please check your configuration.',
+    );
+  }
 
-    // Verify connection configuration
-    try {
-        await transporter.verify();
-        loggingService.info('SMTP server connection verified successfully', {
-            component: 'EmailConfig',
-            operation: 'createTransporter',
-            type: 'email',
-            host: process.env.SMTP_HOST || 'smtp.gmail.com',
-            port: parseInt(process.env.SMTP_PORT || '587')
-        });
-    } catch (error) {
-        loggingService.error('SMTP server connection failed', {
-            component: 'EmailConfig',
-            operation: 'createTransporter',
-            type: 'email',
-            host: process.env.SMTP_HOST || 'smtp.gmail.com',
-            port: parseInt(process.env.SMTP_PORT || '587'),
-            error: error instanceof Error ? error.message : String(error)
-        });
-        throw new Error('Failed to connect to SMTP server. Please check your configuration.');
-    }
-
-    return transporter;
+  return transporter;
 };
 
 // Export a promise that resolves to the transporter
 export const emailTransporter = createTransporter();
 
 export const EMAIL_CONFIG = {
-    from: process.env.FROM_EMAIL || 'abdul@hypothesize.tech',
-    alertThreshold: parseFloat(process.env.EMAIL_ALERT_THRESHOLD || '100'),
-    templates: {
-        costAlert: {
-            subject: 'Cost Alert: Your AI API usage has exceeded the threshold',
-        },
-        optimizationAvailable: {
-            subject: 'Optimization Opportunity: Save on your AI API costs',
-        },
+  from: process.env.FROM_EMAIL || 'abdul@hypothesize.tech',
+  alertThreshold: parseFloat(process.env.EMAIL_ALERT_THRESHOLD || '100'),
+  templates: {
+    costAlert: {
+      subject: 'Cost Alert: Your AI API usage has exceeded the threshold',
     },
-}; 
+    optimizationAvailable: {
+      subject: 'Optimization Opportunity: Save on your AI API costs',
+    },
+  },
+};

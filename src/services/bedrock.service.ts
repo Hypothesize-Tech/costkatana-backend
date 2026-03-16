@@ -1,1728 +1,1650 @@
-import { InvokeModelCommand, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
-import { bedrockClient, AWS_CONFIG } from '../config/aws';
-import { ServiceHelper } from '@utils/serviceHelper';
-import { recordGenAIUsage } from '@utils/genaiTelemetry';
-import { calculateCost } from '@utils/pricing';
-import { estimateTokens } from '@utils/tokenCounter';
-import { TokenEstimator } from '@utils/tokenEstimator';
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  InvokeModelCommand,
+  ConverseStreamCommand,
+  Message,
+} from '@aws-sdk/client-bedrock-runtime';
+import { ListInferenceProfilesCommand } from '@aws-sdk/client-bedrock';
+import { bedrockClient, bedrockControlClient, AWS_CONFIG } from '../config/aws';
+import { ServiceHelper } from '../utils/serviceHelper';
+import {
+  GenAITelemetryService,
+  recordGenAIUsage,
+} from '../utils/genaiTelemetry';
+import { calculateCost } from '../modules/visual-compliance/utils/pricing';
+import { estimateTokens } from '../utils/tokenCounter';
 import { AIProvider } from '../types/aiCostTracker.types';
-import { loggingService } from './logging.service';
-import { AICostTrackingService } from './aiCostTracking.service';
-import { decodeFromTOON } from '@utils/toon.utils';
-import { S3Service } from './s3.service';
-import { RawPricingData, LLMExtractionResult } from '../types/modelDiscovery.types';
-import sharp from 'sharp';
+import { decodeFromTOON } from '../utils/toon.utils';
+import {
+  RawPricingData,
+  LLMExtractionResult,
+} from '../types/modelDiscovery.types';
+import { getMaxTokensForModel } from '../utils/model-tokens';
 
 interface PromptOptimizationRequest {
-    prompt: string;
-    model: string;
-    service: string;
-    context?: string;
-    targetReduction?: number;
-    preserveIntent?: boolean;
+  prompt: string;
+  model: string;
+  service: string;
+  context?: string;
+  targetReduction?: number;
+  preserveIntent?: boolean;
 }
 
 interface PromptOptimizationResponse {
-    optimizedPrompt: string;
-    techniques: string[];
-    estimatedTokenReduction: number;
-    suggestions: string[];
-    alternatives?: string[];
+  optimizedPrompt: string;
+  techniques: string[];
+  estimatedTokenReduction: number;
+  suggestions: string[];
+  alternatives?: string[];
 }
 
 interface UsageAnalysisRequest {
-    usageData: Array<{
-        prompt: string;
-        tokens: number;
-        cost: number;
-        timestamp: Date;
-    }>;
-    timeframe: 'daily' | 'weekly' | 'monthly';
+  usageData: Array<{
+    prompt: string;
+    tokens: number;
+    cost: number;
+    timestamp: Date;
+  }>;
+  timeframe: 'daily' | 'weekly' | 'monthly';
 }
 
 interface UsageAnalysisResponse {
-    patterns: string[];
-    recommendations: string[];
-    potentialSavings: number;
-    optimizationOpportunities: Array<{
-        prompt: string;
-        reason: string;
-        estimatedSaving: number;
-    }>;
+  patterns: string[];
+  recommendations: string[];
+  potentialSavings: number;
+  optimizationOpportunities: Array<{
+    prompt: string;
+    reason: string;
+    estimatedSaving: number;
+  }>;
 }
 
+@Injectable()
 export class BedrockService {
-    
-    /**
-     * Check if model should use Converse API (newer Claude 4.x and Sonnet 4.5 models)
-     */
-    private static shouldUseConverseAPI(model: string): boolean {
-        // Global inference profile models MUST use Converse API
-        if (model.startsWith('global.')) {
-            return true;
-        }
-        
-        // Claude 4.6, 4.5, Opus 4, and newer models should use Converse API for better support
-        const converseModels = [
-            'claude-opus-4-6',
-            'claude-sonnet-4-6',
-            'claude-sonnet-4-5',
-            'claude-opus-4-5',
-            'claude-haiku-4-5',
-            'claude-opus-4'
-        ];
-        
-        return converseModels.some(name => model.includes(name));
+  private readonly logger = new Logger(BedrockService.name);
+  private static staticLogger = new Logger(BedrockService.name);
+
+  constructor(private readonly telemetryService: GenAITelemetryService) {}
+
+  /**
+   * Extract JSON from text response
+   */
+  static async extractJson(text: string): Promise<string> {
+    ServiceHelper.logMethodEntry('BedrockService.extractJson', {
+      textLength: text?.length,
+    });
+
+    // Edge case: null/undefined/empty input
+    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+      return '';
     }
 
-    /**
-     * Invoke model using Converse API (for newer Claude models)
-     */
-    private static async invokeWithConverseAPI(
-        model: string,
-        prompt: string,
-        context?: { 
-            recentMessages?: Array<{ role: string; content: string; metadata?: any }>;
-            useSystemPrompt?: boolean;
-        }
-    ): Promise<{result: string, inputTokens: number, outputTokens: number}> {
-        const messages: Array<{role: 'user' | 'assistant', content: Array<{text: string}>}> = [];
-        
-        // Build messages array if context provided
-        if (context?.recentMessages && context.recentMessages.length > 0) {
-            const msgArray = this.buildMessagesArray(context.recentMessages, prompt);
-            msgArray.forEach(msg => {
-                messages.push({
-                    role: msg.role,
-                    content: [{ text: msg.content }]
-                });
-            });
-        } else {
-            // Single user message
-            messages.push({
-                role: 'user',
-                content: [{ text: prompt }]
-            });
-        }
+    // Edge case: very large text (potential DoS)
+    const MAX_EXTRACT_SIZE = 5 * 1024 * 1024; // 5MB limit
+    if (text.length > MAX_EXTRACT_SIZE) {
+      BedrockService.staticLogger.warn(
+        'Text too large for extraction, truncating',
+        {
+          size: text.length,
+          maxSize: MAX_EXTRACT_SIZE,
+        },
+      );
+      text = text.substring(0, MAX_EXTRACT_SIZE);
+    }
 
-        // Build system prompts
-        const systemPrompts: Array<{text: string}> = [];
-        if (context?.useSystemPrompt !== false) {
-            systemPrompts.push({
-                text: 'You are a helpful AI assistant specializing in AI cost optimization and cloud infrastructure. Remember context from previous messages and provide actionable, cost-effective recommendations.'
-            });
-        }
+    // First, try to extract TOON format (for Cortex responses)
+    // Enhanced pattern matching for malformed TOON
+    const toonPatterns = [
+      /(\w+\[\d+\]\{[^}]+\}:[\s\S]*?)(?=\n\n|\n\w+\[|$)/,
+      /(\w+\s*\[\s*\d+\s*\]\s*\{[^}]+\}\s*:[\s\S]*?)(?=\n\n|\n\w+\s*\[|$)/,
+    ];
 
-        const command = new ConverseCommand({
-            modelId: model,
-            messages,
-            system: systemPrompts.length > 0 ? systemPrompts : undefined,
-            inferenceConfig: {
-                maxTokens: this.getMaxTokensForModel(model),
-                temperature: 0.7
-            }
+    for (const pattern of toonPatterns) {
+      const toonMatch = text.match(pattern);
+      if (toonMatch) {
+        const toonText = toonMatch[1].trim();
+        try {
+          const decoded = decodeFromTOON(JSON.parse(toonText));
+          return JSON.stringify(decoded.original);
+        } catch (toonError) {
+          BedrockService.staticLogger.warn('Failed to decode TOON format', {
+            toonError,
+            toonText,
+          });
+        }
+      }
+    }
+
+    const tryParseWithRecovery = (candidate: string): string | null => {
+      try {
+        JSON.parse(candidate);
+        return candidate;
+      } catch (parseError: unknown) {
+        const msg = String((parseError as Error)?.message ?? '');
+        const posMatch = msg.match(/position\s+(\d+)/i);
+        if (posMatch) {
+          const pos = parseInt(posMatch[1], 10);
+          const truncated = candidate.substring(0, pos).trim();
+          try {
+            JSON.parse(truncated);
+            return truncated;
+          } catch {
+            // ignore
+          }
+        }
+        return null;
+      }
+    };
+
+    // First try: extract from markdown code block (```json ... ``` or ``` ... ```)
+    // Non-greedy regex fails on nested JSON; extract full block content then parse
+    const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      const blockContent = codeBlockMatch[1].trim();
+      const blockResult = tryParseWithRecovery(blockContent);
+      if (blockResult) return blockResult;
+      const innerMatch = blockContent.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+      if (innerMatch) {
+        const candidate = innerMatch[1];
+        const innerResult = tryParseWithRecovery(candidate);
+        if (innerResult) return innerResult;
+      }
+    }
+
+    // Fallback to standard JSON extraction
+    const jsonPatterns = [
+      // Standard JSON object/array (greedy - match full extent)
+      /(\{[\s\S]*\}|\[[\s\S]*\])/,
+
+      // JSON after colon (common in API responses)
+      /:\s*(\{[\s\S]*\}|\[[\s\S]*\])/,
+
+      // JSON in quotes
+      /"(\{[\s\S]*\})"|'(\{[\s\S]*\})'/,
+
+      // Last resort: find anything that looks like JSON
+      /(\{[^{}]*\{[^{}]*\}[^{}]*\}|\[[^\[\]]*\[[^\[\]]*\][^\[\]]*\])/,
+    ];
+
+    for (const pattern of jsonPatterns) {
+      const match = text.match(pattern);
+      if (match) {
+        const jsonCandidate = match[1] || match[0];
+        const result = tryParseWithRecovery(jsonCandidate);
+        if (result) return result;
+        BedrockService.staticLogger.debug('JSON candidate failed to parse', {
+          candidate: match[0]?.substring(0, 200),
         });
+        continue;
+      }
+    }
 
-        const response = await ServiceHelper.withRetry(
-            () => bedrockClient.send(command),
-            {
-                maxRetries: 4,
-                delayMs: 2000,
-                backoffMultiplier: 2
-            }
+    // If no valid JSON found, return empty string
+    BedrockService.staticLogger.warn('No valid JSON found in text', {
+      textPreview: text.substring(0, 200),
+    });
+    ServiceHelper.logMethodExit('BedrockService.extractJson', 'empty');
+    return '';
+  }
+
+  /**
+   * Get appropriate max tokens based on model capability
+   */
+  private static getMaxTokensForModel(modelId: string): number {
+    return getMaxTokensForModel(modelId, AWS_CONFIG.bedrock.maxTokens);
+  }
+
+  /**
+   * Find an ACTIVE inference profile ARN that contains the given foundation model ID.
+   * Used when a model is only available via inference profiles (not on-demand).
+   */
+  static async findInferenceProfileArnForModel(
+    foundationModelId: string,
+  ): Promise<string | null> {
+    try {
+      let nextToken: string | undefined;
+      const normalizedId = foundationModelId.trim().toLowerCase();
+      do {
+        const response = await bedrockControlClient.send(
+          new ListInferenceProfilesCommand({
+            maxResults: 50,
+            nextToken,
+          }),
         );
-
-        // Extract text from response
-        const result = response.output?.message?.content?.[0]?.text || '';
-        const inputTokens = response.usage?.inputTokens || TokenEstimator.estimate(prompt);
-        const outputTokens = response.usage?.outputTokens || Math.ceil(result.length / 4);
-
-        return { result, inputTokens, outputTokens };
-    }
-    
-    /**
-     * Build messages array from recent conversation history (ChatGPT-style)
-     */
-    private static buildMessagesArray(
-        recentMessages: Array<{ role: string; content: string; metadata?: any }>,
-        newMessage: string
-    ): Array<{ role: 'user' | 'assistant'; content: string }> {
-        const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
-        
-        // Convert recent messages to chronological order
-        const chronological = [...recentMessages].reverse();
-        
-        // Add each message
-        chronological.forEach(msg => {
-            if ((msg.role === 'user' || msg.role === 'assistant') && msg.content) {
-                let messageContent = msg.content;
-                
-                // Only include document content metadata if the new message is asking about documents/files
-                // This prevents old document context from polluting new queries about integrations (Vercel, GitHub, etc.)
-                const isDocumentQuery = newMessage.toLowerCase().includes('document') || 
-                                       newMessage.toLowerCase().includes('file') ||
-                                       newMessage.toLowerCase().includes('pdf') ||
-                                       newMessage.toLowerCase().includes('what does it say') ||
-                                       newMessage.toLowerCase().includes('what did') ||
-                                       newMessage.toLowerCase().includes('analyze');
-                
-                if (msg.role === 'assistant' && msg.metadata?.type === 'document_content' && msg.metadata?.content && isDocumentQuery) {
-                    // Add document content as context (truncate if too long to avoid token limits)
-                    const maxContentLength = 10000; // Limit to ~2500 tokens
-                    const docContent = msg.metadata.content.length > maxContentLength 
-                        ? msg.metadata.content.substring(0, maxContentLength) + '... [content truncated]'
-                        : msg.metadata.content;
-                    
-                    messageContent = `${msg.content}\n\n[Document Content Retrieved]:\n${docContent}`;
-                }
-                
-                messages.push({
-                    role: msg.role as 'user' | 'assistant',
-                    content: messageContent
-                });
-            }
-        });
-        
-        // Add the new user message
-        messages.push({
-            role: 'user',
-            content: newMessage
-        });
-        
-        return messages;
-    }
-
-    /**
-     * Get appropriate max tokens based on model capability
-     */
-    private static getMaxTokensForModel(modelId: string): number {
-        // AWS Bedrock output token limits per model
-        // Reference: https://docs.anthropic.com/en/docs/about-claude/models
-        if (modelId.includes('claude-opus-4-6')) {
-            return 65536; // Claude Opus 4.6 - 1M context (beta), use 64K output for safety
-        } else if (modelId.includes('claude-sonnet-4-6')) {
-            return 65536; // Claude Sonnet 4.6 - 64K output, 1M context (beta)
-        } else if (modelId.includes('claude-sonnet-4-5') || modelId.includes('claude-opus-4-5')) {
-            return 32768; // Claude Sonnet 4.5 / Opus 4.5 - supports up to 64K, using 32K for safety
-        } else if (modelId.includes('claude-opus-4')) {
-            return 16384; // Claude Opus 4 - increased for large outputs
-        } else if (modelId.includes('claude-haiku-4-5') || modelId.includes('claude-haiku-4')) {
-            return 16384; // Claude Haiku 4.5 - supports large outputs
-        } else if (modelId.includes('claude-3-5-sonnet')) {
-            return 8192; // Claude 3.5 Sonnet - standard limit
-        } else if (modelId.includes('claude-3-5-haiku')) {
-            return 8192; // Claude 3.5 Haiku - standard limit
-        } else if (modelId.includes('nova-pro')) {
-            return 5000; // Nova Pro actual limit
-        } else if (modelId.includes('nova')) {
-            return 5000; // Other Nova models actual limit
-        } else {
-            return AWS_CONFIG.bedrock.maxTokens; // Default fallback
+        for (const summary of response.inferenceProfileSummaries ?? []) {
+          if (summary.status !== 'ACTIVE' || !summary.inferenceProfileArn)
+            continue;
+          const hasModel = (summary.models ?? []).some((m) => {
+            const arn = (m.modelArn ?? '').toLowerCase();
+            return (
+              arn.includes(normalizedId) || arn.endsWith('/' + normalizedId)
+            );
+          });
+          if (hasModel) return summary.inferenceProfileArn;
         }
+        nextToken = response.nextToken;
+      } while (nextToken);
+      return null;
+    } catch (err) {
+      BedrockService.staticLogger.warn(
+        'ListInferenceProfiles failed when resolving profile for model',
+        {
+          foundationModelId,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      );
+      return null;
     }
+  }
 
-    /**
-     * Convert model ID to inference profile ARN if needed
-     */
-    private static convertToInferenceProfile(modelId: string): string {
-        const region = process.env.AWS_BEDROCK_REGION || 'us-east-1';
-        const regionPrefix = region.split('-')[0]; // us, eu, ap, etc.
-        
-        // Map of model IDs that need inference profile conversion
-        const modelMappings: Record<string, string> = {
-            // Anthropic Claude 3.5 models require inference profiles
-            'global.anthropic.claude-haiku-4-5-20251001-v1:0': `${regionPrefix}.global.anthropic.claude-haiku-4-5-20251001-v1:0`,
-            'anthropic.claude-3-5-sonnet-20240620-v1:0': `${regionPrefix}.anthropic.claude-3-5-sonnet-20240620-v1:0`,
-            'anthropic.claude-3-5-sonnet-20241022-v2:0': `${regionPrefix}.anthropic.claude-3-5-sonnet-20241022-v2:0`,
-            
-            // Legacy Claude 3 models removed - use Claude 3.5+ only
-            'anthropic.claude-3-haiku-20240307-v1:0': `${regionPrefix}.anthropic.claude-3-haiku-20240307-v1:0`,
-            
-            // Claude Opus 4.6, Sonnet 4.6, and Claude 4
-            'anthropic.claude-opus-4-6-v1': `${regionPrefix}.anthropic.claude-opus-4-6-v1`,
-            'anthropic.claude-sonnet-4-6-v1:0': `${regionPrefix}.anthropic.claude-sonnet-4-6-v1:0`,
-            'anthropic.claude-opus-4-1-20250805-v1:0': `${regionPrefix}.anthropic.claude-opus-4-1-20250805-v1:0`,
-            
-            // Add Nova Pro
-            'amazon.nova-pro-v1:0': `amazon.nova-pro-v1:0`, // Nova models don't need inference profiles
-        };
+  /**
+   * Chat-style invoke for RAG/LLM callers: accepts messages and returns { content }.
+   */
+  async invoke(
+    messages: Array<{ role: string; content: string }>,
+  ): Promise<{ content: string }> {
+    const lastUser = messages.filter((m) => m.role === 'user').pop();
+    const prompt = lastUser?.content ?? '';
+    const result = await this.invokeModel(prompt);
+    return { content: result.response };
+  }
 
-        return modelMappings[modelId] || modelId;
-    }
+  /**
+   * Invoke model with text prompt (instance method for DI; delegates to static).
+   */
+  async invokeModel(
+    prompt: string,
+    model: string = AWS_CONFIG.bedrock.modelId,
+    options: {
+      maxTokens?: number;
+      temperature?: number;
+      userId?: string;
+      sessionId?: string;
+      metadata?: Record<string, any>;
+      useSystemPrompt?: boolean;
+      recentMessages?: Array<{ role: string; content: string }>;
+    } = {},
+  ): Promise<{
+    response: string;
+    inputTokens: number;
+    outputTokens: number;
+    cost: number;
+  }> {
+    const { useSystemPrompt: _u, recentMessages: _r, ...rest } = options;
+    return BedrockService.invokeModel(prompt, model, rest);
+  }
 
-    public static async extractJson(text: string): Promise<string> {
-        // Edge case: null/undefined/empty input
-        if (!text || typeof text !== 'string' || text.trim().length === 0) {
-            return '';
-        }
+  /**
+   * Invoke model with text prompt
+   */
+  static async invokeModel(
+    prompt: string,
+    model: string = AWS_CONFIG.bedrock.modelId,
+    options: {
+      maxTokens?: number;
+      temperature?: number;
+      userId?: string;
+      sessionId?: string;
+      metadata?: Record<string, any>;
+      useSystemPrompt?: boolean;
+      recentMessages?: Array<{ role: string; content: string }>;
+    } = {},
+  ): Promise<{
+    response: string;
+    inputTokens: number;
+    outputTokens: number;
+    cost: number;
+  }> {
+    const startTime = Date.now();
+    ServiceHelper.logMethodEntry('BedrockService.invokeModel', {
+      model,
+      promptLength: prompt?.length,
+      options,
+    });
 
-        // Edge case: very large text (potential DoS)
-        const MAX_EXTRACT_SIZE = 5 * 1024 * 1024; // 5MB limit
-        if (text.length > MAX_EXTRACT_SIZE) {
-            loggingService.warn('Text too large for extraction, truncating', {
-                size: text.length,
-                maxSize: MAX_EXTRACT_SIZE
-            });
-            text = text.substring(0, MAX_EXTRACT_SIZE);
-        }
+    const {
+      maxTokens = BedrockService.getMaxTokensForModel(model),
+      temperature = AWS_CONFIG.bedrock.temperature,
+      userId,
+      sessionId,
+      metadata,
+    } = options;
 
-        // First, try to extract TOON format (for Cortex responses)
-        // Enhanced pattern matching for malformed TOON
-        const toonPatterns = [
-            /(\w+\[\d+\]\{[^}]+\}:[\s\S]*?)(?=\n\n|\n\w+\[|$)/,
-            /(\w+\s*\[\s*\d+\s*\]\s*\{[^}]+\}\s*:[\s\S]*?)(?=\n\n|\n\w+\s*\[|$)/
-        ];
+    // Estimate input tokens
+    const inputTokens = estimateTokens(prompt);
 
-        for (const pattern of toonPatterns) {
-            const toonMatch = text.match(pattern);
-            if (toonMatch && toonMatch[1]) {
-                try {
-                    // Validate TOON can be decoded (with timeout)
-                    const decodePromise = decodeFromTOON(toonMatch[1]);
-                    const timeoutPromise = new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('TOON validation timeout')), 2000)
-                    );
-                    await Promise.race([decodePromise, timeoutPromise]);
-                    // Return as TOON string (caller will handle decoding)
-                    return toonMatch[1];
-                } catch (e) {
-                    // Not valid TOON, continue to next pattern or JSON extraction
-                    loggingService.debug('TOON validation failed, trying next method', {
-                        error: e instanceof Error ? e.message : String(e)
-                    });
-                }
-            }
-        }
-
-        // Try to find JSON within code blocks
-        const jsonBlockRegex = /```(?:json|toon)?\s*([\s\S]*?)\s*```/;
-        const jsonBlockMatch = text.match(jsonBlockRegex);
-        
-        if (jsonBlockMatch && jsonBlockMatch[1]) {
-            const extracted = jsonBlockMatch[1].trim();
-            // Try TOON first, then JSON
-            try {
-                await decodeFromTOON(extracted);
-                return extracted;
-            } catch {
-                try {
-                    JSON.parse(extracted);
-                    return extracted;
-                } catch (e) {
-                    // Continue to other methods
-                }
-            }
-        }
-
-        // Try to find JSON object in the text
-        const jsonObjectRegex = /\{[\s\S]*\}/;
-        const jsonObjectMatch = text.match(jsonObjectRegex);
-        
-        if (jsonObjectMatch) {
-            const extracted = jsonObjectMatch[0];
-            // Validate that it's actually JSON
-            try {
-                JSON.parse(extracted);
-                return extracted;
-            } catch (e) {
-                // If it's not valid JSON, continue to other methods
-            }
-        }
-
-        // Try to find JSON array in the text
-        const jsonArrayRegex = /\[[\s\S]*\]/;
-        const jsonArrayMatch = text.match(jsonArrayRegex);
-        
-        if (jsonArrayMatch) {
-            const extracted = jsonArrayMatch[0];
-            // Validate that it's actually JSON
-            try {
-                JSON.parse(extracted);
-                return extracted;
-            } catch (e) {
-                // If it's not valid JSON, continue to other methods
-            }
-        }
-
-        // If no valid JSON is found, return the original text
-        // but try to clean it up first
-        const cleanedText = text.trim();
-        
-        // Remove common prefixes/suffixes that might be added by AI models
-        const withoutPrefix = cleanedText.replace(/^(Here's the|The|Here is the|JSON:?|Response:?|Answer:?)\s*/i, '');
-        const withoutSuffix = withoutPrefix.replace(/\s*(\.|$)/, '');
-        
-        return withoutSuffix;
-    }
-
-    private static createMessagesPayload(prompt: string, model?: string) {
-        // Dynamic token limits based on model capability
-        const maxTokens = this.getMaxTokensForModel(model || '');
-        
-        return {
-            anthropic_version: "bedrock-2023-05-31",
-            max_tokens: maxTokens,
-            temperature: AWS_CONFIG.bedrock.temperature,
-            messages: [{ role: "user", content: prompt }],
-        };
-    }
-
-    private static createNovaPayload(prompt: string, model?: string) {
-        // Dynamic token limits based on model capability
-        const maxTokens = this.getMaxTokensForModel(model || '');
-        
-        return {
-            messages: [{ role: "user", content: [{ text: prompt }] }],
-            inferenceConfig: {
-                max_new_tokens: maxTokens,
-                temperature: AWS_CONFIG.bedrock.temperature,
-                top_p: 0.9,
-            }
-        };
-    }
-
-    private static createLegacyPayload(prompt: string) {
-        return {
-            prompt: `\n\nHuman: ${prompt}\n\nAssistant:`,
-            max_tokens_to_sample: AWS_CONFIG.bedrock.maxTokens,
-            temperature: AWS_CONFIG.bedrock.temperature,
-            stop_sequences: ["\n\nHuman:"],
-        };
-    }
-
-    private static createTitanPayload(prompt: string) {
-        return {
-            inputText: prompt,
-            textGenerationConfig: {
-                maxTokenCount: AWS_CONFIG.bedrock.maxTokens,
-                temperature: AWS_CONFIG.bedrock.temperature,
-            },
-        };
-    }
-
-    private static createLlamaPayload(prompt: string) {
-        return {
-            prompt: prompt,
-            max_gen_len: AWS_CONFIG.bedrock.maxTokens,
-            temperature: AWS_CONFIG.bedrock.temperature,
-            top_p: 0.9,
-        };
-    }
-
-    private static createCoherePayload(prompt: string) {
-        return {
-            message: prompt,
-            max_tokens: AWS_CONFIG.bedrock.maxTokens,
-            temperature: AWS_CONFIG.bedrock.temperature,
-            p: 0.9,
-            k: 0,
-            stop_sequences: [],
-            return_likelihoods: "NONE"
-        };
-    }
-
-    private static createAI21Payload(prompt: string) {
-        return {
-            prompt: prompt,
-            maxTokens: AWS_CONFIG.bedrock.maxTokens,
-            temperature: AWS_CONFIG.bedrock.temperature,
-            topP: 1,
-            stopSequences: [],
-            countPenalty: {
-                scale: 0
-            },
-            presencePenalty: {
-                scale: 0
-            },
-            frequencyPenalty: {
-                scale: 0
-            }
-        };
-    }
-
-    public static async invokeModel(
-        prompt: string, 
-        model: string, 
-        context?: { recentMessages?: Array<{ role: string; content: string }>; useSystemPrompt?: boolean }
-    ): Promise<any> {
-        const startTime = Date.now();
-        let payload: any;
-        let responsePath: string;
-        let inputTokens = 0;
-        let outputTokens = 0;
-        let result: string = '';
-
-        // Check if we should use Converse API (for newer Claude models and global profiles)
-        if (this.shouldUseConverseAPI(model)) {
-            try {
-                loggingService.info(`Using Converse API for model: ${model}`);
-                const converseResult = await this.invokeWithConverseAPI(model, prompt, context);
-                result = converseResult.result;
-                inputTokens = converseResult.inputTokens;
-                outputTokens = converseResult.outputTokens;
-                
-                // Track cost and usage
-                const costUSD = calculateCost(inputTokens, outputTokens, AIProvider.AWSBedrock, model);
-                await recordGenAIUsage({
-                    provider: AIProvider.AWSBedrock,
-                    operationName: 'converse',
-                    model: model,
-                    promptTokens: inputTokens,
-                    completionTokens: outputTokens,
-                    costUSD,
-                    latencyMs: Date.now() - startTime
-                });
-
-                return result;
-            } catch (error: any) {
-                loggingService.error('Converse API failed', {
-                    error: error.message,
-                    model
-                });
-                throw error;
-            }
-        }
-
-        // Fallback to InvokeModel API for older models
-        // Enhanced: Use messages array format for Claude/Nova if context provided
-        const useMessagesFormat = context?.recentMessages && context.recentMessages.length > 0 &&
-            (model.includes('claude-3') || model.includes('claude-4') || model.includes('nova'));
-
-        // Check model type and create appropriate payload
-        if (model.includes('claude-3') || model.includes('claude-4') || model.includes('claude-opus-4')) {
-            if (useMessagesFormat && context?.recentMessages) {
-                // Use messages array for better context
-                const messages = this.buildMessagesArray(context.recentMessages, prompt);
-                payload = {
-                    anthropic_version: 'bedrock-2023-05-31',
-                    max_tokens: this.getMaxTokensForModel(model),
-                    temperature: 0.7,
-                    messages: messages.map(msg => ({
-                        role: msg.role,
-                        content: msg.content
-                    }))
-                };
-                
-                // Add system prompt for conversational behavior
-                if (context?.useSystemPrompt !== false) {
-                    payload.system = 'You are a helpful AI assistant specializing in AI cost optimization and cloud infrastructure. Remember context from previous messages and provide actionable, cost-effective recommendations.';
-                }
-            } else {
-                // Modern Claude models (3.x) use messages format
-                payload = this.createMessagesPayload(prompt, model);
-            }
-            responsePath = 'content';
-        } else if (model.includes('nova')) {
-            if (useMessagesFormat && context?.recentMessages) {
-                // Use messages array for better context
-                const messages = this.buildMessagesArray(context.recentMessages, prompt);
-                payload = {
-                    messages: messages.map(msg => ({
-                        role: msg.role,
-                        content: [{ text: msg.content }]
-                    })),
-                    inferenceConfig: {
-                        max_new_tokens: this.getMaxTokensForModel(model),
-                        temperature: 0.7,
-                        top_p: 0.9
-                    }
-                };
-            } else {
-                // Amazon Nova models
-                payload = this.createNovaPayload(prompt, model);
-            }
-            responsePath = 'nova';
-        } else if (model.includes('amazon.titan')) {
-            // Amazon Titan models
-            payload = this.createTitanPayload(prompt);
-            responsePath = 'titan';
-        } else if (model.includes('meta.llama')) {
-            // Meta Llama models use messages format
-            payload = this.createLlamaPayload(prompt);
-            responsePath = 'llama';
-        } else if (model.includes('mistral')) {
-            // Mistral models use messages format
-            payload = this.createMessagesPayload(prompt, model);
-            responsePath = 'content';
-        } else if (model.includes('cohere.command')) {
-            // Cohere Command models
-            payload = this.createCoherePayload(prompt);
-            responsePath = 'cohere';
-        } else if (model.includes('ai21')) {
-            // AI21 models (Jurassic, Jamba)
-            payload = this.createAI21Payload(prompt);
-            responsePath = 'ai21';
-        } else if (model.includes('claude')) {
-            // Legacy Claude models
-            payload = this.createLegacyPayload(prompt);
-            responsePath = 'completion';
-        } else {
-            // Default to messages format for unknown models
-            payload = this.createMessagesPayload(prompt, model);
-            responsePath = 'content';
-        }
-
-        // Convert model ID to inference profile if needed
-        const actualModelId = this.convertToInferenceProfile(model);
-        
-        if (actualModelId !== model) {
-            loggingService.info(`Converting model ID: ${model} -> ${actualModelId}`);
-        }
-        
-        const command = new InvokeModelCommand({
-            modelId: actualModelId,
+    const buildCommand = (modelId: string) => {
+      const isNova = modelId.toLowerCase().includes('nova');
+      return isNova
+        ? new InvokeModelCommand({
+            modelId,
             contentType: 'application/json',
             accept: 'application/json',
-            body: JSON.stringify(payload),
+            body: JSON.stringify({
+              messages: [{ role: 'user', content: [{ text: prompt }] }],
+              inferenceConfig: {
+                max_new_tokens: maxTokens,
+                temperature: temperature,
+              },
+            }),
+          })
+        : new InvokeModelCommand({
+            modelId,
+            contentType: 'application/json',
+            accept: 'application/json',
+            body: JSON.stringify({
+              anthropic_version: 'bedrock-2023-05-31',
+              max_tokens: maxTokens,
+              temperature: temperature,
+              messages: [{ role: 'user', content: prompt }],
+            }),
+          });
+    };
+
+    const parseResponse = (
+      modelId: string,
+      responseBody: Record<string, unknown>,
+    ): string => {
+      if (modelId.toLowerCase().includes('nova')) {
+        const output = responseBody.output as
+          | Record<string, unknown>
+          | undefined;
+        const message = output?.message as Record<string, unknown> | undefined;
+        const content = message?.content as
+          | Array<Record<string, unknown>>
+          | undefined;
+        return (content?.[0]?.text as string) || '';
+      }
+      const content = responseBody.content as
+        | Array<Record<string, unknown>>
+        | undefined;
+      return (content?.[0]?.text as string) || '';
+    };
+
+    let command = buildCommand(model);
+    let activeModelId = model;
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await bedrockClient.send(command);
+        const responseBody = JSON.parse(
+          new TextDecoder().decode(response.body),
+        ) as Record<string, unknown>;
+
+        const responseText = parseResponse(activeModelId, responseBody);
+
+        const usage = responseBody.usage as Record<string, unknown> | undefined;
+        const outputTokens =
+          (usage?.output_tokens as number) ||
+          (usage?.completion_tokens as number) ||
+          estimateTokens(responseText);
+
+        // Calculate cost (use original model for pricing when we used profile)
+        const cost = calculateCost(
+          inputTokens,
+          outputTokens,
+          AIProvider.AWSBedrock,
+          model,
+        );
+
+        await recordGenAIUsage({
+          provider: AIProvider.AWSBedrock,
+          operationName: 'invokeModel',
+          model,
+          promptTokens: inputTokens,
+          completionTokens: outputTokens,
+          cost,
+          userId,
+          sessionId,
+          metadata,
         });
 
-        try {
-            // Calculate input tokens
-            try {
-                inputTokens = estimateTokens(prompt, AIProvider.AWSBedrock);
-            } catch (e) {
-                // Fallback to estimation
-                inputTokens = Math.ceil(prompt.length / 4);
-            }
+        const result = {
+          response: responseText,
+          inputTokens,
+          outputTokens,
+          cost,
+        };
 
-            // Use standardized retry logic with exponential backoff and jitter
-            const response = await ServiceHelper.withRetry(
-                () => bedrockClient.send(command),
-                {
-                    maxRetries: 4,
-                    delayMs: 2000,
-                    backoffMultiplier: 2
-                }
+        ServiceHelper.logMethodExit(
+          'BedrockService.invokeModel',
+          result,
+          Date.now() - startTime,
+        );
+        return result;
+      } catch (err) {
+        lastError = err as Error;
+        const msg = String(lastError.message ?? '');
+        const isInferenceProfileError =
+          attempt === 0 &&
+          msg.includes('on-demand') &&
+          msg.includes('inference profile') &&
+          msg.includes('supported');
+
+        if (isInferenceProfileError) {
+          const profileArn =
+            await BedrockService.findInferenceProfileArnForModel(model);
+          if (profileArn) {
+            BedrockService.staticLogger.log(
+              'Retrying with inference profile after on-demand not supported',
+              { model, profileArn: profileArn.substring(0, 60) + '...' },
             );
-            const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-
-            // Extract text based on response format
-            if (responsePath === 'content') {
-                result = responseBody.content[0].text;
-            } else if (responsePath === 'nova') {
-                result = responseBody.output?.message?.content?.[0]?.text || responseBody.message?.content?.[0]?.text || '';
-            } else if (responsePath === 'titan') {
-                result = responseBody.results?.[0]?.outputText || '';
-            } else if (responsePath === 'llama') {
-                result = responseBody.generation || responseBody.outputs?.[0]?.text || '';
-            } else if (responsePath === 'cohere') {
-                result = responseBody.text || responseBody.generations?.[0]?.text || '';
-            } else if (responsePath === 'ai21') {
-                result = responseBody.completions?.[0]?.data?.text || responseBody.outputs?.[0]?.text || '';
-            } else {
-                result = responseBody.completion || responseBody.text || '';
-            }
-
-            // Calculate output tokens
-            try {
-                outputTokens = estimateTokens(result, AIProvider.AWSBedrock);
-            } catch (e) {
-                // Fallback to estimation
-                outputTokens = Math.ceil(result.length / 4);
-            }
-
-            // Extract usage from response if available
-            if (responseBody.usage) {
-                inputTokens = responseBody.usage.input_tokens || inputTokens;
-                outputTokens = responseBody.usage.output_tokens || outputTokens;
-            } else if (responseBody.amazon_bedrock_invocationMetrics) {
-                inputTokens = responseBody.amazon_bedrock_invocationMetrics.inputTokenCount || inputTokens;
-                outputTokens = responseBody.amazon_bedrock_invocationMetrics.outputTokenCount || outputTokens;
-            }
-
-            // Calculate cost
-            const costUSD = calculateCost(inputTokens, outputTokens, 'aws-bedrock', model);
-
-            // Record telemetry
-            recordGenAIUsage({
-                provider: 'aws-bedrock',
-                operationName: 'chat.completions',
-                model: actualModelId,
-                promptTokens: inputTokens,
-                completionTokens: outputTokens,
-                costUSD,
-                prompt,
-                completion: result,
-                temperature: AWS_CONFIG.bedrock.temperature,
-                maxTokens: AWS_CONFIG.bedrock.maxTokens,
-                latencyMs: Date.now() - startTime,
-            });
-
-            // Track AI cost for monitoring
-            AICostTrackingService.trackCall({
-                service: 'bedrock',
-                operation: 'invoke_model',
-                model: actualModelId,
-                inputTokens,
-                outputTokens,
-                estimatedCost: costUSD,
-                latency: Date.now() - startTime,
-                success: true,
-                metadata: {
-                    promptLength: prompt.length,
-                    responseLength: result.length,
-                    hasContext: !!context?.recentMessages
-                }
-            });
-
-            return result;
-        } catch (error: any) {
-            loggingService.error('Error invoking Bedrock model:', { 
-                originalModel: model, 
-                actualModelId, 
-                error 
-            });
-
-            // Record error in telemetry
-            recordGenAIUsage({
-                provider: 'aws-bedrock',
-                operationName: 'chat.completions',
-                model: actualModelId,
-                promptTokens: inputTokens,
-                completionTokens: 0,
-                costUSD: 0,
-                error,
-                latencyMs: Date.now() - startTime,
-            });
-
-            // Track failed AI call for monitoring
-            AICostTrackingService.trackCall({
-                service: 'bedrock',
-                operation: 'invoke_model',
-                model: actualModelId,
-                inputTokens,
-                outputTokens: 0,
-                estimatedCost: 0,
-                latency: Date.now() - startTime,
-                success: false,
-                error: error.message || String(error),
-                metadata: {
-                    promptLength: prompt.length,
-                    errorType: error.name || 'UnknownError'
-                }
-            });
-
-            throw error;
+            command = buildCommand(profileArn);
+            activeModelId = profileArn;
+            continue;
+          }
+          // No inference profile found: retry with a known on-demand Claude model
+          const onDemandFallback = 'anthropic.claude-3-5-sonnet-20241022-v2:0';
+          BedrockService.staticLogger.log(
+            'No inference profile for model, retrying with on-demand fallback',
+            { model, fallback: onDemandFallback },
+          );
+          command = buildCommand(onDemandFallback);
+          activeModelId = onDemandFallback;
+          continue;
         }
+        ServiceHelper.logMethodError('BedrockService.invokeModel', lastError, {
+          model,
+          promptLength: prompt?.length,
+        });
+        throw lastError;
+      }
     }
 
-    static async optimizePrompt(request: PromptOptimizationRequest): Promise<PromptOptimizationResponse> {
-        try {
-            const systemPrompt = `You are an AI prompt optimization expert. Your task is to optimize the given prompt to reduce token usage while maintaining its intent and effectiveness. The prompt is intended for the '${request.service}' service and the '${request.model}' model.
+    ServiceHelper.logMethodError('BedrockService.invokeModel', lastError!, {
+      model,
+      promptLength: prompt?.length,
+    });
+    throw lastError;
+  }
 
-Original Prompt: ${request.prompt}
-${request.context ? `Context: ${request.context}` : ''}
-${request.targetReduction ? `Target Token Reduction: ${request.targetReduction}%` : ''}
-${request.preserveIntent ? 'Requirement: Preserve the exact intent and expected output format' : ''}
+  /**
+   * Optimize prompt for better performance/cost
+   */
+  static async optimizePrompt(
+    request: PromptOptimizationRequest,
+  ): Promise<PromptOptimizationResponse> {
+    ServiceHelper.logMethodEntry('BedrockService.optimizePrompt', request);
+
+    try {
+      const {
+        prompt,
+        model,
+        context,
+        targetReduction = 0.3,
+        preserveIntent = true,
+      } = request;
+
+      // Create optimization prompt
+      const optimizationPrompt = `
+You are an AI prompt optimization expert. Your task is to optimize the following prompt for better performance and cost efficiency.
+
+Original Prompt:
+${prompt}
+
+Context (if any):
+${context || 'None'}
+
+Requirements:
+- Target token reduction: ${Math.round(targetReduction * 100)}%
+- Preserve original intent: ${preserveIntent ? 'Yes' : 'No'}
+- Make it more efficient and clear
 
 Please provide:
-1. An optimized version of the prompt
-2. List of optimization techniques used
+1. Optimized prompt
+2. Techniques used (be specific)
 3. Estimated token reduction percentage
-4. Specific suggestions for further optimization
-5. Alternative prompt variations (if applicable)
+4. Additional suggestions
 
-Format your response as a single valid JSON object:
-{
-  "optimizedPrompt": "...",
-  "techniques": ["...", "..."],
-  "estimatedTokenReduction": 30,
-  "suggestions": ["...", "..."],
-  "alternatives": ["...", "..."]
-}`;
+Format your response as JSON with keys: optimizedPrompt, techniques, estimatedTokenReduction, suggestions
+`;
 
-            const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const cleanedResponse = await this.extractJson(response);
-            const result = JSON.parse(cleanedResponse);
+      const result = await this.invokeModel(optimizationPrompt, model);
 
-            loggingService.info('Prompt optimization completed', { value:  { 
-                originalLength: request.prompt.length,
-                optimizedLength: result.optimizedPrompt.length,
-                reduction: result.estimatedTokenReduction,
-             } });
+      // Try to extract JSON from response
+      const jsonStr = await this.extractJson(result.response);
+      if (jsonStr) {
+        const optimization = JSON.parse(jsonStr);
+        const response: PromptOptimizationResponse = {
+          optimizedPrompt: optimization.optimizedPrompt || prompt,
+          techniques: optimization.techniques || ['general_optimization'],
+          estimatedTokenReduction: optimization.estimatedTokenReduction || 0,
+          suggestions: optimization.suggestions || [],
+          alternatives: optimization.alternatives,
+        };
 
-            return result;
-        } catch (error) {
-            loggingService.error('Error optimizing prompt:', { error: error instanceof Error ? error.message : String(error) });
-            throw error;
-        }
+        ServiceHelper.logMethodExit('BedrockService.optimizePrompt', response);
+        return response;
+      }
+
+      // Fallback response
+      const fallback: PromptOptimizationResponse = {
+        optimizedPrompt: prompt,
+        techniques: ['fallback'],
+        estimatedTokenReduction: 0,
+        suggestions: ['Unable to optimize automatically'],
+      };
+
+      ServiceHelper.logMethodExit('BedrockService.optimizePrompt', fallback);
+      return fallback;
+    } catch (error) {
+      ServiceHelper.logMethodError(
+        'BedrockService.optimizePrompt',
+        error as Error,
+        request,
+      );
+      throw error;
     }
+  }
 
-    static async analyzeUsagePatterns(request: UsageAnalysisRequest): Promise<UsageAnalysisResponse> {
-        try {
-            const systemPrompt = `You are an AI usage analyst. Analyze the following usage data and provide insights and recommendations for cost optimization.
+  /**
+   * Analyze usage patterns and provide recommendations
+   */
+  static async analyzeUsagePatterns(
+    request: UsageAnalysisRequest,
+  ): Promise<UsageAnalysisResponse> {
+    ServiceHelper.logMethodEntry('BedrockService.analyzeUsagePatterns', {
+      dataPoints: request.usageData?.length,
+      timeframe: request.timeframe,
+    });
 
-Usage Data Summary:
-- Total prompts: ${request.usageData.length}
-- Timeframe: ${request.timeframe}
-- Total tokens: ${request.usageData.reduce((sum, d) => sum + d.tokens, 0)}
-- Total cost: $${request.usageData.reduce((sum, d) => sum + d.cost, 0).toFixed(2)}
+    try {
+      const { usageData, timeframe } = request;
 
-Top 10 Most Expensive Prompts:
-${request.usageData
-                    .sort((a, b) => b.cost - a.cost)
-                    .slice(0, 10)
-                    .map((d, i) => `${i + 1}. Cost: $${d.cost.toFixed(4)}, Tokens: ${d.tokens}, Prompt: "${d.prompt.substring(0, 100)}..."`)
-                    .join('\n')}
+      if (!usageData || usageData.length === 0) {
+        return {
+          patterns: [],
+          recommendations: ['No usage data available'],
+          potentialSavings: 0,
+          optimizationOpportunities: [],
+        };
+      }
 
-Please analyze and provide:
-1. Usage patterns (repeated prompts, inefficient structures, etc.)
-2. Specific recommendations for cost reduction
-3. Estimated potential savings in dollars
-            4. Optimization opportunities with specific prompts and reasons
+      // Create analysis prompt
+      const analysisPrompt = `
+Analyze the following AI usage data and provide insights:
 
-Format your response as JSON:
-            {
-                "patterns": ["...", "..."],
-                    "recommendations": ["...", "..."],
-                        "potentialSavings": 25.50,
-                            "optimizationOpportunities": [
-                                {
-                                    "prompt": "...",
-                                    "reason": "...",
-                                    "estimatedSaving": 5.00
-                                }
-                            ]
-            } `;
+Usage Data (${timeframe}):
+${JSON.stringify(usageData, null, 2)}
 
-            const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const cleanedResponse = await this.extractJson(response);
-            const result = JSON.parse(cleanedResponse);
+Please provide:
+1. Usage patterns identified
+2. Specific recommendations for optimization
+3. Estimated potential savings
+4. High-impact optimization opportunities
 
-            loggingService.info('Usage analysis completed', { value:  { 
-                timeframe: request.timeframe,
-                promptsAnalyzed: request.usageData.length,
-                potentialSavings: result.potentialSavings,
-             } });
+Format your response as JSON with keys: patterns, recommendations, potentialSavings, optimizationOpportunities
+`;
 
-            return result;
-        } catch (error) {
-            loggingService.error('Error analyzing usage patterns:', { error: error instanceof Error ? error.message : String(error) });
-            throw error;
-        }
+      const result = await this.invokeModel(
+        analysisPrompt,
+        AWS_CONFIG.bedrock.modelId,
+      );
+
+      // Try to extract JSON from response
+      const jsonStr = await this.extractJson(result.response);
+      if (jsonStr) {
+        const analysis = JSON.parse(jsonStr);
+        const response: UsageAnalysisResponse = {
+          patterns: analysis.patterns || [],
+          recommendations: analysis.recommendations || [],
+          potentialSavings: analysis.potentialSavings || 0,
+          optimizationOpportunities: analysis.optimizationOpportunities || [],
+        };
+
+        ServiceHelper.logMethodExit(
+          'BedrockService.analyzeUsagePatterns',
+          response,
+        );
+        return response;
+      }
+
+      // Fallback response
+      const fallback: UsageAnalysisResponse = {
+        patterns: ['Unable to analyze patterns automatically'],
+        recommendations: ['Consider manual review of usage data'],
+        potentialSavings: 0,
+        optimizationOpportunities: [],
+      };
+
+      ServiceHelper.logMethodExit(
+        'BedrockService.analyzeUsagePatterns',
+        fallback,
+      );
+      return fallback;
+    } catch (error) {
+      ServiceHelper.logMethodError(
+        'BedrockService.analyzeUsagePatterns',
+        error as Error,
+        request,
+      );
+      throw error;
     }
+  }
 
-    static async suggestModelAlternatives(
-        currentModel: string,
-        useCase: string,
-        requirements: string[]
-    ): Promise<{
-        recommendations: Array<{
-            model: string;
-            provider: string;
-            estimatedCostReduction: number;
-            tradeoffs: string[];
-        }>;
-    }> {
-        try {
-            const systemPrompt = `You are an AI model selection expert.Based on the current model usage and requirements, suggest alternative models that could reduce costs.
+  /**
+   * Suggest alternative models for cost/performance optimization
+   */
+  static async suggestModelAlternatives(
+    currentModel: string,
+    requirements: {
+      useCase?: string;
+      priority?: 'cost' | 'quality' | 'speed' | 'balanced';
+      maxCost?: number;
+      minQuality?: number;
+    } = {},
+  ): Promise<
+    Array<{
+      model: string;
+      reasoning: string;
+      costComparison: number;
+      qualityComparison: number;
+      recommended: boolean;
+    }>
+  > {
+    ServiceHelper.logMethodEntry('BedrockService.suggestModelAlternatives', {
+      currentModel,
+      requirements,
+    });
 
-Current Model: ${currentModel}
-Use Case: ${useCase}
-            Requirements: ${requirements.join(', ')}
+    try {
+      const {
+        useCase = 'general',
+        priority = 'balanced',
+        maxCost,
+        minQuality,
+      } = requirements;
 
-Suggest alternative models that could:
-            1. Reduce costs while meeting the requirements
-            2. Provide similar or acceptable performance
-            3. Be easily integrated
+      type ModelProfile = {
+        model: string;
+        relativeCost: number;
+        quality: number;
+        speed: number;
+        useCases: string[];
+      };
 
-Format your response as JSON:
-            {
-                "recommendations": [
-                    {
-                        "model": "model-name",
-                        "provider": "provider-name",
-                        "estimatedCostReduction": 40,
-                        "tradeoffs": ["...", "..."]
-                    }
+      const MODEL_PROFILES: ModelProfile[] = [
+        {
+          model: 'us.anthropic.claude-3-5-haiku-20241022-v1:0',
+          relativeCost: 0.25,
+          quality: 0.72,
+          speed: 0.95,
+          useCases: ['general', 'chat', 'classification', 'support'],
+        },
+        {
+          model: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0',
+          relativeCost: 1.0,
+          quality: 0.9,
+          speed: 0.74,
+          useCases: ['general', 'analysis', 'coding', 'creative'],
+        },
+        {
+          model: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+          relativeCost: 1.0,
+          quality: 0.89,
+          speed: 0.72,
+          useCases: ['general', 'analysis', 'coding', 'creative'],
+        },
+        {
+          model: 'amazon.nova-lite-v1:0',
+          relativeCost: 0.18,
+          quality: 0.68,
+          speed: 0.96,
+          useCases: ['general', 'chat', 'extraction', 'summarization'],
+        },
+        {
+          model: 'amazon.nova-pro-v1:0',
+          relativeCost: 0.5,
+          quality: 0.81,
+          speed: 0.84,
+          useCases: ['general', 'analysis', 'coding', 'multimodal'],
+        },
+      ];
+
+      const normalizedUseCase = useCase.trim().toLowerCase();
+      const currentProfile = MODEL_PROFILES.find(
+        (profile) => profile.model === currentModel,
+      ) || {
+        model: currentModel,
+        relativeCost: 1.0,
+        quality: 0.8,
+        speed: 0.75,
+        useCases: ['general'],
+      };
+
+      const candidates = MODEL_PROFILES.filter(
+        (profile) => profile.model !== currentProfile.model,
+      )
+        .filter(
+          (profile) =>
+            minQuality === undefined || profile.quality * 100 >= minQuality,
+        )
+        .filter(
+          (profile) => maxCost === undefined || profile.relativeCost <= maxCost,
+        );
+
+      const scoreProfile = (profile: ModelProfile): number => {
+        const useCaseBoost = profile.useCases.includes(normalizedUseCase)
+          ? 0.12
+          : 0;
+
+        switch (priority) {
+          case 'cost':
+            return (
+              (1 - profile.relativeCost) * 0.7 +
+              profile.quality * 0.2 +
+              useCaseBoost
+            );
+          case 'quality':
+            return profile.quality * 0.7 + profile.speed * 0.1 + useCaseBoost;
+          case 'speed':
+            return profile.speed * 0.65 + profile.quality * 0.2 + useCaseBoost;
+          case 'balanced':
+          default:
+            return (
+              (1 - profile.relativeCost) * 0.35 +
+              profile.quality * 0.35 +
+              profile.speed * 0.3 +
+              useCaseBoost
+            );
+        }
+      };
+
+      const ranked = [...candidates]
+        .map((profile) => ({
+          profile,
+          score: scoreProfile(profile),
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 4);
+
+      const suggestions = [
+        {
+          model: currentProfile.model,
+          reasoning: 'Current model baseline',
+          costComparison: 0,
+          qualityComparison: 0,
+          recommended: false,
+        },
+        ...ranked.map(({ profile }, index) => {
+          const costComparison =
+            currentProfile.relativeCost > 0
+              ? ((profile.relativeCost - currentProfile.relativeCost) /
+                  currentProfile.relativeCost) *
+                100
+              : 0;
+          const qualityComparison =
+            currentProfile.quality > 0
+              ? ((profile.quality - currentProfile.quality) /
+                  currentProfile.quality) *
+                100
+              : 0;
+
+          const reasoningParts: string[] = [];
+          if (costComparison < 0) {
+            reasoningParts.push(
+              `${Math.abs(costComparison).toFixed(0)}% lower estimated cost`,
+            );
+          } else if (costComparison > 0) {
+            reasoningParts.push(
+              `${Math.abs(costComparison).toFixed(0)}% higher estimated cost`,
+            );
+          }
+          if (qualityComparison > 0) {
+            reasoningParts.push(
+              `${qualityComparison.toFixed(0)}% higher quality score`,
+            );
+          } else if (qualityComparison < 0) {
+            reasoningParts.push(
+              `${Math.abs(qualityComparison).toFixed(0)}% lower quality score`,
+            );
+          }
+          if (profile.useCases.includes(normalizedUseCase)) {
+            reasoningParts.push(`optimized for ${normalizedUseCase} workloads`);
+          }
+
+          return {
+            model: profile.model,
+            reasoning:
+              reasoningParts.length > 0
+                ? reasoningParts.join('; ')
+                : 'Alternative model option',
+            costComparison: Math.round(costComparison),
+            qualityComparison: Math.round(qualityComparison),
+            recommended: index === 0,
+          };
+        }),
+      ];
+
+      ServiceHelper.logMethodExit(
+        'BedrockService.suggestModelAlternatives',
+        suggestions,
+      );
+      return suggestions;
+    } catch (error) {
+      ServiceHelper.logMethodError(
+        'BedrockService.suggestModelAlternatives',
+        error as Error,
+        {
+          currentModel,
+          requirements,
+        },
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Generate prompt templates for specific use cases
+   */
+  static async generatePromptTemplate(
+    objective: string,
+    context: {
+      domain?: string;
+      complexity?: 'simple' | 'medium' | 'complex';
+      outputFormat?: string;
+      constraints?: string[];
+    } = {},
+  ): Promise<{
+    template: string;
+    variables: string[];
+    estimatedTokens: number;
+    suggestions: string[];
+  }> {
+    ServiceHelper.logMethodEntry('BedrockService.generatePromptTemplate', {
+      objective,
+      context,
+    });
+
+    try {
+      const {
+        domain,
+        complexity = 'medium',
+        outputFormat,
+        constraints,
+      } = context;
+
+      const templatePrompt = `
+Generate a high-quality prompt template for the following objective:
+
+Objective: ${objective}
+Domain: ${domain || 'General'}
+Complexity: ${complexity}
+Output Format: ${outputFormat || 'Natural language'}
+Constraints: ${constraints?.join(', ') || 'None'}
+
+Please provide:
+1. Complete prompt template with variables
+2. List of variables used
+3. Estimated token count
+4. Usage suggestions
+
+Format your response as JSON with keys: template, variables, estimatedTokens, suggestions
+`;
+
+      const result = await this.invokeModel(
+        templatePrompt,
+        AWS_CONFIG.bedrock.modelId,
+      );
+
+      // Try to extract JSON from response
+      const jsonStr = await this.extractJson(result.response);
+      if (jsonStr) {
+        const templateData = JSON.parse(jsonStr);
+        const response = {
+          template: templateData.template || `Please ${objective}`,
+          variables: templateData.variables || [],
+          estimatedTokens:
+            templateData.estimatedTokens ||
+            estimateTokens(templateData.template || ''),
+          suggestions: templateData.suggestions || [],
+        };
+
+        ServiceHelper.logMethodExit(
+          'BedrockService.generatePromptTemplate',
+          response,
+        );
+        return response;
+      }
+
+      // Fallback response
+      const fallback = {
+        template: `Please ${objective}`,
+        variables: [],
+        estimatedTokens: estimateTokens(`Please ${objective}`),
+        suggestions: ['Generated basic template'],
+      };
+
+      ServiceHelper.logMethodExit(
+        'BedrockService.generatePromptTemplate',
+        fallback,
+      );
+      return fallback;
+    } catch (error) {
+      ServiceHelper.logMethodError(
+        'BedrockService.generatePromptTemplate',
+        error as Error,
+        {
+          objective,
+          context,
+        },
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Detect anomalies in usage patterns
+   */
+  static async detectAnomalies(
+    recentUsage: Array<{ timestamp: Date; cost: number; tokens: number }>,
+    thresholds: {
+      costThreshold?: number;
+      tokenThreshold?: number;
+      timeWindow?: number; // hours
+    } = {},
+  ): Promise<{
+    anomalies: Array<{
+      timestamp: Date;
+      type: 'cost' | 'tokens';
+      severity: 'low' | 'medium' | 'high';
+      description: string;
+      value: number;
+      threshold: number;
+    }>;
+    summary: {
+      totalAnomalies: number;
+      highestSeverity: string;
+      recommendations: string[];
+    };
+  }> {
+    ServiceHelper.logMethodEntry('BedrockService.detectAnomalies', {
+      dataPoints: recentUsage?.length,
+      thresholds,
+    });
+
+    try {
+      const {
+        costThreshold = 0.1,
+        tokenThreshold = 1000,
+        timeWindow = 24,
+      } = thresholds;
+
+      if (!recentUsage || recentUsage.length === 0) {
+        return {
+          anomalies: [],
+          summary: {
+            totalAnomalies: 0,
+            highestSeverity: 'none',
+            recommendations: ['No usage data to analyze'],
+          },
+        };
+      }
+
+      // Statistical anomaly detection using z-score analysis
+      const anomalies = BedrockService.detectStatisticalAnomalies(
+        recentUsage,
+        costThreshold,
+        tokenThreshold,
+      );
+
+      const response = {
+        anomalies,
+        summary: {
+          totalAnomalies: anomalies.length,
+          highestSeverity:
+            anomalies.length > 0
+              ? (['high', 'medium', 'low'] as const).find((sev) =>
+                  anomalies.some(
+                    (a: { severity: 'low' | 'medium' | 'high' }) =>
+                      a.severity === sev,
+                  ),
+                ) || 'low'
+              : 'none',
+          recommendations:
+            anomalies.length > 0
+              ? [
+                  'Review high-cost requests',
+                  'Consider model optimization',
+                  'Implement usage limits',
                 ]
-            } `;
+              : ['Usage patterns are within normal ranges'],
+        },
+      };
 
-            const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const cleanedResponse = await this.extractJson(response);
-            const result = JSON.parse(cleanedResponse);
-
-            loggingService.info('Model alternatives suggested', { value:  { 
-                currentModel,
-                alternativesCount: result.recommendations.length,
-             } });
-
-            return result;
-        } catch (error) {
-            loggingService.error('Error suggesting model alternatives:', { error: error instanceof Error ? error.message : String(error) });
-            throw error;
-        }
+      ServiceHelper.logMethodExit('BedrockService.detectAnomalies', response);
+      return response;
+    } catch (error) {
+      ServiceHelper.logMethodError(
+        'BedrockService.detectAnomalies',
+        error as Error,
+        {
+          dataPoints: recentUsage?.length,
+          thresholds,
+        },
+      );
+      throw error;
     }
+  }
 
-    static async generatePromptTemplate(
-        objective: string,
-        examples: string[],
-        constraints?: string[]
-    ): Promise<{
-        template: string;
-        variables: string[];
-        estimatedTokens: number;
-        bestPractices: string[];
-    }> {
-        try {
-            const systemPrompt = `You are a prompt engineering expert.Create an optimized prompt template for the given objective.
+  /**
+   * Invoke model with image (vision capabilities)
+   */
+  static async invokeWithImage(
+    prompt: string,
+    imageBase64: string,
+    userId?: string,
+    modelId: string = AWS_CONFIG.bedrock.modelId,
+  ): Promise<{
+    response: string;
+    inputTokens: number;
+    outputTokens: number;
+    cost: number;
+  }> {
+    const startTime = Date.now();
+    ServiceHelper.logMethodEntry('BedrockService.invokeWithImage', {
+      promptLength: prompt?.length,
+      imageSize: imageBase64?.length,
+      modelId,
+      userId,
+    });
 
-                Objective: ${objective}
-Example Inputs: ${examples.join(', ')}
-${constraints ? `Constraints: ${constraints.join(', ')}` : ''}
+    try {
+      // Process base64 image data
+      const imageData = imageBase64.includes('base64,')
+        ? imageBase64.split('base64,')[1]
+        : imageBase64;
 
-Create a reusable prompt template that:
-            1. Minimizes token usage
-            2. Maximizes clarity and effectiveness
-            3. Uses variables for dynamic content
-4. Follows prompt engineering best practices
+      // Validate base64 data
+      if (!imageData || imageData.length === 0) {
+        throw new Error('Empty base64 data');
+      }
 
-Format your response as JSON:
-            {
-                "template": "...",
-                    "variables": ["var1", "var2"],
-                        "estimatedTokens": 150,
-                            "bestPractices": ["...", "..."]
-            } `;
+      // Test if base64 is valid
+      try {
+        Buffer.from(imageData, 'base64');
+      } catch (error) {
+        throw new Error(`Invalid base64 data: ${(error as Error).message}`);
+      }
 
-            const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const cleanedResponse = await this.extractJson(response);
-            const result = JSON.parse(cleanedResponse);
+      // Determine media type from base64 prefix if available
+      let mediaType = 'image/jpeg';
+      if (imageBase64.includes('image/png')) {
+        mediaType = 'image/png';
+      } else if (imageBase64.includes('image/webp')) {
+        mediaType = 'image/webp';
+      } else if (imageBase64.includes('image/gif')) {
+        mediaType = 'image/gif';
+      }
 
-            loggingService.info('Prompt template generated', { value:  {  objective  } });
+      // Convert model ID to inference profile if needed
+      const region = process.env.AWS_BEDROCK_REGION || 'us-east-1';
+      const regionPrefix = region.split('-')[0]; // us, eu, ap, etc.
 
-            return result;
-        } catch (error) {
-            loggingService.error('Error generating prompt template:', { error: error instanceof Error ? error.message : String(error) });
-            throw error;
-        }
-    }
+      // Map of model IDs that need inference profile conversion
+      const modelMappings: Record<string, string> = {
+        // Anthropic Claude 3.5 models require inference profiles
+        'global.anthropic.claude-haiku-4-5-20251001-v1:0': `${regionPrefix}.global.anthropic.claude-haiku-4-5-20251001-v1:0`,
+        'anthropic.claude-3-5-sonnet-20240620-v1:0': `${regionPrefix}.anthropic.claude-3-5-sonnet-20240620-v1:0`,
+        'anthropic.claude-3-5-sonnet-20241022-v2:0': `${regionPrefix}.anthropic.claude-3-5-sonnet-20241022-v2:0`,
 
-    static async detectAnomalies(
-        recentUsage: Array<{ timestamp: Date; cost: number; tokens: number }>,
-        historicalAverage: { cost: number; tokens: number }
-    ): Promise<{
-        anomalies: Array<{
-            timestamp: Date;
-            type: 'cost_spike' | 'token_spike' | 'unusual_pattern';
-            severity: 'low' | 'medium' | 'high';
-            description: string;
-        }>;
-        recommendations: string[];
-    }> {
-        try {
-            const systemPrompt = `You are an AI-powered security and cost anomaly detection system.Analyze the following data to identify any anomalies.
+        // Legacy Claude 3 models removed - use Claude 3.5+ only
+        'anthropic.claude-3-haiku-20240307-v1:0': `${regionPrefix}.anthropic.claude-3-haiku-20240307-v1:0`,
 
-Historical Daily Average:
-            - Cost: $${historicalAverage.cost.toFixed(2)}
-            - Tokens: ${historicalAverage.tokens}
+        // Claude Opus 4.6, Sonnet 4.6 — require cross-region inference profiles
+        'anthropic.claude-opus-4-6-v1': `${regionPrefix}.anthropic.claude-opus-4-6-v1`,
+        'anthropic.claude-sonnet-4-6': `${regionPrefix}.anthropic.claude-sonnet-4-6`,
+        'anthropic.claude-sonnet-4-6-v1:0': `${regionPrefix}.anthropic.claude-sonnet-4-6`, // legacy alias
+        // Already-prefixed profiles — pass through unchanged
+        'us.anthropic.claude-sonnet-4-6': 'us.anthropic.claude-sonnet-4-6',
+        'global.anthropic.claude-sonnet-4-6': 'global.anthropic.claude-sonnet-4-6',
+        'anthropic.claude-opus-4-1-20250805-v1:0': `${regionPrefix}.anthropic.claude-opus-4-1-20250805-v1:0`,
 
-Recent Usage (last 7 entries):
-${recentUsage
-                    .slice(-7)
-                    .map(u => `- ${u.timestamp.toISOString()}: Cost: $${u.cost.toFixed(2)}, Tokens: ${u.tokens}`)
-                    .join('\n')}
+        // Add Nova Pro
+        'amazon.nova-pro-v1:0': `amazon.nova-pro-v1:0`, // Nova models don't need inference profiles
+      };
 
-Identify:
-1. Any anomalies or unusual patterns
-2. Severity of each anomaly
-3. Recommendations to prevent future anomalies
+      const actualModelId = modelMappings[modelId] || modelId;
 
-Format your response as JSON:
-                    {
-                        "anomalies": [
-                            {
-                                "timestamp": "ISO-8601-timestamp",
-                                "type": "cost_spike",
-                                "severity": "high",
-                                "description": "..."
-                            }
-                        ],
-                        "recommendations": ["..."]
-                    }`;
+      if (actualModelId !== modelId) {
+        BedrockService.staticLogger.log(
+          `Converting model ID: ${modelId} -> ${actualModelId}`,
+        );
+      }
 
-            const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const cleanedResponse = await this.extractJson(response);
-            const result = JSON.parse(cleanedResponse);
-
-            // Convert timestamp strings back to Date objects
-            result.anomalies = result.anomalies.map((a: any) => ({
-                ...a,
-                timestamp: new Date(a.timestamp),
-            }));
-
-            loggingService.info('Anomaly detection completed', { value:  { 
-                anomaliesFound: result.anomalies.length,
-             } });
-
-            return result;
-        } catch (error) {
-            loggingService.error('Error detecting anomalies:', { error: error instanceof Error ? error.message : String(error) });
-            throw error;
-        }
-    }
-
-    /**
-     * Invoke Claude model with image support
-     */
-    public     static async invokeWithImage(
-        prompt: string,
-        imageUrl: string,
-        userId: string,
-        modelId: string = 'us.anthropic.claude-3-5-sonnet-20241022-v2:0'
-    ): Promise<{ response: string; inputTokens: number; outputTokens: number; cost: number }> {
-        // ABSOLUTE FIRST THING: Log that this function was called
-        loggingService.info('='.repeat(80));
-        loggingService.info('🚨 BEDROCK SERVICE invokeWithImage CALLED - ABSOLUTE FIRST LOG');
-        loggingService.info('imageUrl type:', { value: typeof imageUrl });
-        loggingService.info('imageUrl length:', { value: imageUrl?.length });
-        loggingService.info('imageUrl first 100 chars:', { value: imageUrl?.substring(0, 100) });
-        loggingService.info('='.repeat(80));
-        
-        // CRITICAL DEBUG: Log exactly what we receive
-        loggingService.info('🔍 BEDROCK SERVICE invokeWithImage CALLED', {
-            component: 'BedrockService',
-            imageUrlType: typeof imageUrl,
-            imageUrlLength: imageUrl?.length || 0,
-            imageUrlPrefix: imageUrl?.substring(0, 100) || '',
-            imageUrlStarts: {
-                isS3: imageUrl?.startsWith('s3://') || false,
-                isHttp: imageUrl?.startsWith('http://') || false,
-                isHttps: imageUrl?.startsWith('https://') || false,
-                isDataUri: imageUrl?.startsWith('data:') || false
-            }
-        });
-        
-        const startTime = Date.now();
-        
-        // CRITICAL DEBUG: Log the exact parameters at function entry
-        loggingService.info('=== invokeWithImage CALLED ===', {
-            component: 'BedrockService',
-            operation: 'invokeWithImage',
-            imageUrlType: typeof imageUrl,
-            imageUrlLength: typeof imageUrl === 'string' ? imageUrl.length : 'N/A',
-            imageUrlPrefix: typeof imageUrl === 'string' ? imageUrl.substring(0, 100) : 'NOT_A_STRING',
-            imageUrlStartsWith: {
-                dataImage: typeof imageUrl === 'string' && imageUrl.startsWith('data:image'),
-                http: typeof imageUrl === 'string' && imageUrl.startsWith('http'),
-                https: typeof imageUrl === 'string' && imageUrl.startsWith('https'),
-                s3: typeof imageUrl === 'string' && imageUrl.startsWith('s3://')
-            },
-            promptLength: prompt.length,
-            userId,
-            modelId
-        });
-        
-        // EARLY VALIDATION: Check base64 size for data URLs
-        if (imageUrl.startsWith('data:image')) {
-            const maxBase64Size = 5 * 1024 * 1024; // 5MB limit for base64 (AWS Bedrock Messages API limit)
-            
-            if (imageUrl.length > maxBase64Size) {
-                const sizeMB = (imageUrl.length / (1024 * 1024)).toFixed(2);
-                const maxSizeMB = (maxBase64Size / (1024 * 1024)).toFixed(2);
-                
-                loggingService.error('Image base64 exceeds AWS Bedrock limit', {
-                    component: 'BedrockService',
-                    operation: 'invokeWithImage',
-                    base64Size: imageUrl.length,
-                    sizeMB,
-                    maxSizeMB,
-                    userId
-                });
-                
-                throw new Error(
-                    `Image too large (${sizeMB}MB). AWS Bedrock limit is ${maxSizeMB}MB. Please compress the image before uploading.`
-                );
-            }
-            
-            loggingService.info('Base64 size validation passed', {
-                component: 'BedrockService',
-                base64Size: imageUrl.length,
-                sizeMB: (imageUrl.length / (1024 * 1024)).toFixed(2),
-                maxSizeMB: (maxBase64Size / (1024 * 1024)).toFixed(2)
-            });
-        }
-        
-        try {
-            // Fetch the image
-            let imageBuffer: Buffer;
-            let imageType: string;
-            let imageBase64: string = ''; // Initialize to empty string // Store base64 directly for data URLs
-
-            if (imageUrl.startsWith('data:image')) {
-                // Handle base64 data URL
-                loggingService.info('Processing base64 data URL', {
-                    component: 'BedrockService',
-                    urlLength: imageUrl.length,
-                    urlPrefix: imageUrl.substring(0, 100)
-                });
-                
-                const matches = imageUrl.match(/^data:image\/([a-zA-Z]+);base64,(.+)$/s);
-                if (!matches) {
-                    loggingService.error('Failed to match base64 data URL pattern', {
-                        component: 'BedrockService',
-                        urlPrefix: imageUrl.substring(0, 200)
-                    });
-                    throw new Error('Invalid base64 data URL format');
-                }
-                const [, format, base64Data] = matches;
-                
-                loggingService.info('Extracted base64 data from URL', {
-                    component: 'BedrockService',
-                    format,
-                    rawBase64Length: base64Data.length,
-                    rawBase64Prefix: base64Data.substring(0, 100),
-                    hasWhitespace: /\s/.test(base64Data)
-                });
-                
-                // CRITICAL FIX: Remove ALL non-base64 characters
-                // Only keep: A-Z, a-z, 0-9, +, /, = (padding)
-                imageBase64 = base64Data.replace(/[^A-Za-z0-9+/=]/g, '');
-                
-                loggingService.info('Cleaned base64 data (strict RFC 4648)', {
-                    component: 'BedrockService',
-                    originalLength: base64Data.length,
-                    cleanedLength: imageBase64.length,
-                    removedChars: base64Data.length - imageBase64.length,
-                    cleanedPrefix: imageBase64.substring(0, 100),
-                    cleanedSuffix: imageBase64.substring(imageBase64.length - 20)
-                });
-                
-                // Validate base64 data
-                if (!imageBase64 || imageBase64.length === 0) {
-                    throw new Error('Empty base64 data after cleaning');
-                }
-                
-                // Test if base64 is valid by trying to decode it
-                try {
-                    const testBuffer = Buffer.from(imageBase64, 'base64');
-                    if (testBuffer.length === 0) {
-                        throw new Error('Base64 decoded to empty buffer');
-                    }
-                    imageBuffer = testBuffer; // Store for size calculation
-                    
-                    loggingService.info('Successfully decoded base64 to buffer', {
-                        component: 'BedrockService',
-                        bufferLength: testBuffer.length,
-                        base64Length: imageBase64.length
-                    });
-                } catch (error) {
-                    loggingService.error('Failed to decode base64 data', {
-                        component: 'BedrockService',
-                        error: error instanceof Error ? error.message : String(error),
-                        base64Length: imageBase64.length,
-                        base64Prefix: imageBase64.substring(0, 100),
-                        base64Suffix: imageBase64.substring(imageBase64.length - 100)
-                    });
-                    throw new Error(`Invalid base64 data: ${error instanceof Error ? error.message : 'Unknown error'}`);
-                }
-                
-                imageType = `image/${format}`;
-            } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-                // Download from URL
-                const response = await fetch(imageUrl);
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch image: ${response.statusText}`);
-                }
-                imageBuffer = Buffer.from(await response.arrayBuffer());
-                imageType = response.headers.get('content-type') || 'image/jpeg';
-                // Convert to base64
-                imageBase64 = imageBuffer.toString('base64');
-            } else if (imageUrl.startsWith('s3://')) {
-                // Generate presigned URL and fetch via HTTP (produces cleaner buffer)
-                const s3Key = S3Service.s3UrlToKey(imageUrl);
-                const presignedUrl = await S3Service.generatePresignedUrl(s3Key, 3600);
-                
-                loggingService.info('Fetching image from S3 via HTTP presigned URL', {
-                    component: 'BedrockService',
-                    s3Key,
-                    operation: 'invokeWithImage'
-                });
-                
-                const response = await fetch(presignedUrl);
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch image from S3: ${response.statusText}`);
-                }
-                
-                // Get clean buffer from HTTP response
-                imageBuffer = Buffer.from(await response.arrayBuffer());
-                
-                loggingService.info('Image fetched successfully via HTTP', {
-                    component: 'BedrockService',
-                    bufferSize: imageBuffer.length,
-                    contentType: response.headers.get('content-type')
-                });
-                
-                // Set image type from content-type header or default to JPEG
-                const contentType = response.headers.get('content-type');
-                if (contentType) {
-                    if (contentType.includes('png')) {
-                        imageType = 'image/png';
-                    } else if (contentType.includes('jpeg') || contentType.includes('jpg')) {
-                        imageType = 'image/jpeg';
-                    } else if (contentType.includes('webp')) {
-                        imageType = 'image/webp';
-                    } else if (contentType.includes('gif')) {
-                        imageType = 'image/gif';
-                    } else {
-                        imageType = 'image/jpeg'; // Default for unknown types
-                    }
-                } else {
-                    imageType = 'image/jpeg'; // Default if no content-type header
-                }
-                
-                // imageBase64 will be set after sharp processing below
-            } else {
-                throw new Error('Invalid image URL format');
-            }
-
-            // Determine image media type
-            let mediaType = 'image/jpeg';
-            if (imageType.includes('png')) {
-                mediaType = 'image/png';
-            } else if (imageType.includes('webp')) {
-                mediaType = 'image/webp';
-            } else if (imageType.includes('gif')) {
-                mediaType = 'image/gif';
-            }
-
-            // Process image with Sharp for consistent format/size (required for Bedrock API reliability)
-            let processedBuffer: Buffer;
-            let outputMediaType = mediaType;
-            try {
-                processedBuffer = await sharp(imageBuffer)
-                    .resize(2048, 2048, { fit: 'inside', withoutEnlargement: true })
-                    .jpeg({ quality: 90 })
-                    .toBuffer();
-                outputMediaType = 'image/jpeg';
-                loggingService.info('Image processed with Sharp', {
-                    component: 'BedrockService',
-                    originalSize: imageBuffer.length,
-                    processedSize: processedBuffer.length,
-                    mediaType: outputMediaType,
-                });
-            } catch (sharpError) {
-                loggingService.warn('Sharp processing failed, using raw buffer', {
-                    component: 'BedrockService',
-                    error: sharpError instanceof Error ? sharpError.message : String(sharpError),
-                });
-                processedBuffer = imageBuffer;
-            }
-
-            mediaType = outputMediaType;
-
-            // Convert processed buffer to base64
-            // IMPORTANT: For data URIs, imageBase64 is already cleaned and validated (line 862)
-            // For other sources (HTTP, S3), we need to encode the buffer
-            const finalBase64 = imageBase64 || processedBuffer.toString('base64');
-            
-            // Validate the base64 string
-            if (!finalBase64 || finalBase64.length === 0) {
-                throw new Error('Base64 encoding resulted in empty string');
-            }
-            
-            // Verify it can be decoded back (validation test)
-            try {
-                const testDecode = Buffer.from(finalBase64, 'base64');
-                if (testDecode.length !== processedBuffer.length) {
-                    throw new Error('Base64 round-trip validation failed');
-                }
-            } catch (error) {
-                loggingService.error('Base64 validation failed', {
-                    component: 'BedrockService',
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    base64Length: finalBase64.length,
-                    bufferLength: processedBuffer.length
-                });
-                throw new Error('Invalid base64 encoding');
-            }
-            
-            loggingService.info('Base64 encoding validated successfully', {
-                component: 'BedrockService',
-                base64Length: finalBase64.length,
-                bufferLength: processedBuffer.length,
-                mediaType
-            });
-
-            // Build the Bedrock API payload
-            // AWS Bedrock Anthropic Messages API ONLY supports base64 images
-            // URL-based images are NOT supported
-            
-            // CRITICAL FIX: AWS Bedrock requires STRICTLY RFC 4648 compliant base64
-            // Step 1: Remove ALL whitespace characters
-            const cleanedBase64 = finalBase64
-                .replace(/[\r\n\s\t]/g, '');  // Remove all whitespace characters
-            
-            // Step 2: Remove any existing padding
-            const base64WithoutPadding = cleanedBase64.replace(/=+$/, '');
-            
-            // Step 3: Calculate correct padding
-            const paddingNeeded = (4 - (base64WithoutPadding.length % 4)) % 4;
-            
-            // Step 4: Add correct padding
-            const properlyPaddedBase64 = base64WithoutPadding + '='.repeat(paddingNeeded);
-            
-            // Validate: Final base64 string length must be multiple of 4
-            if (properlyPaddedBase64.length % 4 !== 0) {
-                throw new Error(`Invalid base64 padding: length ${properlyPaddedBase64.length} is not multiple of 4`);
-            }
-            
-            // Validate: Test that we can decode the base64 back to a buffer
-            try {
-                const testDecodeBuffer = Buffer.from(properlyPaddedBase64, 'base64');
-                if (testDecodeBuffer.length !== processedBuffer.length) {
-                    loggingService.warn('Base64 decode length mismatch after cleaning/padding', {
-                        component: 'BedrockService',
-                        originalBufferLength: processedBuffer.length,
-                        decodedBufferLength: testDecodeBuffer.length,
-                        difference: Math.abs(testDecodeBuffer.length - processedBuffer.length)
-                    });
-                }
-            } catch (decodeError) {
-                loggingService.error('Failed to validate cleaned base64', {
-                    component: 'BedrockService',
-                    error: decodeError instanceof Error ? decodeError.message : 'Unknown error',
-                    base64Length: properlyPaddedBase64.length,
-                    base64Sample: properlyPaddedBase64.substring(0, 50)
-                });
-                throw new Error('Base64 validation failed after cleaning/padding');
-            }
-            
-            // FINAL SIZE VALIDATION: Check if base64 is within AWS Bedrock limits
-            const maxBase64Size = 4.5 * 1024 * 1024; // 4.5MB safe limit for base64 content
-            if (properlyPaddedBase64.length > maxBase64Size) {
-                const sizeMB = (properlyPaddedBase64.length / (1024 * 1024)).toFixed(2);
-                const maxSizeMB = (maxBase64Size / (1024 * 1024)).toFixed(2);
-                
-                loggingService.error('Final base64 exceeds AWS Bedrock safe limit', {
-                    component: 'BedrockService',
-                    operation: 'invokeWithImage',
-                    base64Size: properlyPaddedBase64.length,
-                    sizeMB,
-                    maxSizeMB,
-                    userId
-                });
-                
-                throw new Error(
-                    `Processed image too large (${sizeMB}MB). AWS Bedrock safe limit is ${maxSizeMB}MB. Please use a smaller image.`
-                );
-            }
-            
-            loggingService.info('Building Bedrock payload with RFC 4648 compliant base64', {
-                component: 'BedrockService',
-                operation: 'invokeWithImage',
-                originalBase64Length: finalBase64.length,
-                cleanedBase64Length: cleanedBase64.length,
-                withoutPaddingLength: base64WithoutPadding.length,
-                paddedBase64Length: properlyPaddedBase64.length,
-                paddingAdded: paddingNeeded,
-                isMultipleOf4: properlyPaddedBase64.length % 4 === 0,
-                mediaType,
-                firstChars: properlyPaddedBase64.substring(0, 20),
-                lastChars: properlyPaddedBase64.substring(properlyPaddedBase64.length - 20),
-                sizeMB: (properlyPaddedBase64.length / (1024 * 1024)).toFixed(2)
-            });
-            
-            const payload: any = {
-                anthropic_version: 'bedrock-2023-05-31',
-                max_tokens: this.getMaxTokensForModel(modelId),
-                temperature: 0.7,
-                messages: [
-                    {
-                        role: 'user',
-                        content: [
-                            {
-                                type: 'image',
-                                source: {
-                                    type: 'base64',
-                                    media_type: mediaType,
-                                    data: properlyPaddedBase64  // Use properly padded base64
-                                }
-                            },
-                            {
-                                type: 'text',
-                                text: prompt
-                            }
-                        ]
-                    }
-                ]
-            };
-
-            // Convert model ID to inference profile if needed
-            const actualModelId = this.convertToInferenceProfile(modelId);
-
-            // Log the complete payload structure for debugging (without full base64)
-            loggingService.info('Bedrock payload prepared', {
-                component: 'BedrockService',
-                operation: 'invokeWithImage',
-                payloadStructure: {
-                    anthropic_version: payload.anthropic_version,
-                    max_tokens: payload.max_tokens,
-                    temperature: payload.temperature,
-                    messagesCount: payload.messages.length,
-                    message: {
-                        role: payload.messages[0].role,
-                        contentLength: payload.messages[0].content.length,
-                        contentTypes: payload.messages[0].content.map((c: any) => c.type),
-                        imageSource: {
-                            type: (payload.messages[0].content[0] as any).source?.type,
-                            media_type: (payload.messages[0].content[0] as any).source?.media_type,
-                            dataLength: (payload.messages[0].content[0] as any).source?.data?.length,
-                            dataType: typeof (payload.messages[0].content[0] as any).source?.data,
-                            dataPreview: (payload.messages[0].content[0] as any).source?.data?.substring(0, 50)
-                        },
-                        textContent: (payload.messages[0].content[1] as any).text?.substring(0, 100)
-                    }
+      // Build Bedrock payload
+      const payload = {
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 2000,
+        temperature: 0.7,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: mediaType,
+                  data: imageData,
                 },
-                modelId: actualModelId,
-                imageSize: processedBuffer.length,
-                mediaType,
-                base64Length: finalBase64.length
-            });
+              },
+              {
+                type: 'text',
+                text: prompt,
+              },
+            ],
+          },
+        ],
+      };
 
-            // Validate payload structure before sending (image at index 0, text at index 1)
-            const imageContent = payload.messages[0].content[0] as any;
-            if (!imageContent.source || !imageContent.source.data || typeof imageContent.source.data !== 'string') {
-                throw new Error('Invalid payload structure: image data must be a string');
-            }
+      const command = new InvokeModelCommand({
+        modelId: actualModelId,
+        contentType: 'application/json',
+        accept: 'application/json',
+        body: JSON.stringify(payload),
+      });
 
-            // Serialize payload - use standard JSON.stringify
-            // The AWS SDK will handle proper encoding
-            const payloadJson = JSON.stringify(payload);
-            
-            loggingService.info('Payload serialization for Bedrock', {
-                component: 'BedrockService',
-                operation: 'invokeWithImage',
-                payloadLength: payloadJson.length,
-                imageDataLength: (payload.messages[0].content[0] as any).source.data.length,
-                mediaType,
-                hasValidBase64: /^[A-Za-z0-9+/=]+$/.test((payload.messages[0].content[0] as any).source.data)
-            });
+      BedrockService.staticLogger.log('Invoking Claude with image', {
+        modelId: actualModelId,
+        payloadLength: JSON.stringify(payload).length,
+      });
 
-            // CRITICAL DEBUG: Log the exact base64 that will be sent to AWS
-            const imageData = (payload.messages[0].content[0] as any).source.data;
-            loggingService.info('FINAL BASE64 CHECK BEFORE AWS BEDROCK', {
-                component: 'BedrockService',
-                base64Length: imageData.length,
-                base64IsString: typeof imageData === 'string',
-                base64First100: imageData.substring(0, 100),
-                base64Last100: imageData.substring(Math.max(0, imageData.length - 100)),
-                isValidBase64Chars: /^[A-Za-z0-9+/=]+$/.test(imageData),
-                hasWhitespace: /\s/.test(imageData),
-                isMultipleOf4: imageData.length % 4 === 0,
-                mediaType
-            });
-            
-            // AWS SDK InvokeModelCommand - use string body, not Uint8Array
-            // The SDK handles encoding internally
-            const command = new InvokeModelCommand({
-                modelId: actualModelId,
-                contentType: 'application/json',
-                accept: 'application/json',
-                body: payloadJson  // Just use the JSON string
-            });
+      const response = await bedrockClient.send(command);
+      const responseBody = JSON.parse(new TextDecoder().decode(response.body));
 
-            loggingService.info('Invoking Claude with image', {
-                component: 'BedrockService',
-                operation: 'invokeWithImage',
-                modelId: actualModelId,
-                commandBodyLength: payloadJson.length
-            });
+      // Extract response text
+      let responseText = '';
+      if (responseBody.content && Array.isArray(responseBody.content)) {
+        const textContent = responseBody.content.find(
+          (c: any) => c.type === 'text',
+        );
+        responseText = textContent?.text || '';
+      }
 
-            // Use standardized retry logic
-            const response = await ServiceHelper.withRetry(
-                async () => await bedrockClient.send(command),
-                { maxRetries: 3, delayMs: 1000 }
-            );
+      // Get token usage
+      const inputTokens = responseBody.usage?.input_tokens || 3000; // Estimate for image + text
+      const outputTokens =
+        responseBody.usage?.output_tokens || estimateTokens(responseText);
 
-            const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+      // Calculate cost with the shared pricing utility.
+      const cost = calculateCost(
+        inputTokens,
+        outputTokens,
+        AIProvider.AWSBedrock,
+        modelId,
+      );
 
-            // Extract response text
-            let responseText = '';
-            if (responseBody.content && Array.isArray(responseBody.content)) {
-                const textContent = responseBody.content.find((c: any) => c.type === 'text');
-                responseText = textContent?.text || '';
-            }
+      // Record telemetry
+      await recordGenAIUsage({
+        provider: AIProvider.AWSBedrock,
+        operationName: 'invokeWithImage',
+        model: modelId,
+        promptTokens: inputTokens,
+        completionTokens: outputTokens,
+        cost,
+        userId,
+      });
 
-            // Get token usage
-            const inputTokens = responseBody.usage?.input_tokens || 0;
-            const outputTokens = responseBody.usage?.output_tokens || 0;
+      const result = {
+        response: responseText,
+        inputTokens,
+        outputTokens,
+        cost,
+      };
 
-            // Calculate cost
-            const cost = calculateCost(
-                inputTokens,
-                outputTokens,
-                AIProvider.AWSBedrock,
-                modelId
-            );
-
-            // Record usage
-            await recordGenAIUsage({
-                provider: AIProvider.AWSBedrock,
-                operationName: 'vision-analysis',
-                model: modelId,
-                promptTokens: inputTokens,
-                completionTokens: outputTokens,
-                costUSD: cost,
-                userId,
-                requestId: `vision-${Date.now()}`
-            });
-
-            // Track via AICostTrackingService
-            AICostTrackingService.trackCall({
-                userId,
-                service: AIProvider.AWSBedrock,
-                model: modelId,
-                operation: 'vision-analysis',
-                inputTokens,
-                outputTokens,
-                estimatedCost: cost,
-                latency: Date.now() - startTime,
-                success: true,
-                metadata: {
-                    imageSize: imageBuffer.length,
-                    mediaType
-                }
-            });
-
-            loggingService.info('Claude with image invocation completed', {
-                component: 'BedrockService',
-                operation: 'invokeWithImage',
-                inputTokens,
-                outputTokens,
-                cost,
-                latency: Date.now() - startTime
-            });
-
-            return {
-                response: responseText,
-                inputTokens,
-                outputTokens,
-                cost
-            };
-
-        } catch (error) {
-            loggingService.error('Error invoking Claude with image', {
-                component: 'BedrockService',
-                operation: 'invokeWithImage',
-                error: error instanceof Error ? error.message : String(error),
-                modelId
-            });
-
-            // Track failure
-            AICostTrackingService.trackCall({
-                userId,
-                service: AIProvider.AWSBedrock,
-                model: modelId,
-                operation: 'vision-analysis',
-                inputTokens: 0,
-                outputTokens: 0,
-                estimatedCost: 0,
-                latency: Date.now() - startTime,
-                success: false,
-                error: error instanceof Error ? error.message : String(error)
-            });
-
-            throw error;
-        }
+      ServiceHelper.logMethodExit(
+        'BedrockService.invokeWithImage',
+        result,
+        Date.now() - startTime,
+      );
+      return result;
+    } catch (error) {
+      ServiceHelper.logMethodError(
+        'BedrockService.invokeWithImage',
+        error as Error,
+        {
+          modelId,
+          imageSize: imageBase64?.length,
+          userId,
+        },
+      );
+      throw error;
     }
+  }
 
-    /**
-     * Extract model names from search results using Nova Pro
-     * Phase 1 of model discovery
-     */
-    static async extractModelsFromText(provider: string, searchText: string): Promise<LLMExtractionResult> {
-        try {
-            const prompt = `Analyze the following search results about ${provider} AI models and extract a list of all model names/IDs mentioned.
+  /**
+   * Extract models from search text
+   */
+  static async extractModelsFromText(
+    provider: string,
+    searchText: string,
+  ): Promise<LLMExtractionResult> {
+    ServiceHelper.logMethodEntry('BedrockService.extractModelsFromText', {
+      provider,
+      textLength: searchText?.length,
+    });
 
-Search Content:
+    try {
+      const extractionPrompt = `
+Extract all AI models mentioned in the following text for provider: ${provider}
+
+Text to analyze:
 ${searchText}
 
-Your task: Extract ONLY the model names or model IDs. Return a JSON array of strings.
+Please return a JSON array of model objects with:
+- modelId: The model identifier
+- modelName: Human readable name
+- inputPricePerMToken: Input price per million tokens
+- outputPricePerMToken: Output price per million tokens
+- contextWindow: Maximum context window
+- capabilities: Array of capabilities
+- category: text/multimodal/embedding/code
+- isLatest: boolean indicating if it's the latest version
 
-Example output format:
-["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "claude-3-5-sonnet", "gemini-1.5-pro"]
+Only include models that have pricing information available.
+Format: [{"modelId": "...", "modelName": "...", ...}]
+`;
 
-Rules:
-1. Include ONLY official model names/IDs, not marketing names
-2. Include version numbers if present (e.g., "gpt-4-turbo", "claude-3-5-sonnet-20241022")
-3. Do NOT include pricing information
-4. Do NOT include descriptions or explanations
-5. Return ONLY the JSON array, nothing else
+      const result = await this.invokeModel(
+        extractionPrompt,
+        AWS_CONFIG.bedrock.modelId,
+      );
 
-Return your response as a valid JSON array:`;
-
-            const result = await this.invokeModel(
-                prompt,
-                'us.amazon.nova-pro-v1:0'
-            );
-
-            // Parse the JSON response
-            let models: string[];
-            try {
-                const cleanResponse = result.trim()
-                    .replace(/^```json\n?/, '')
-                    .replace(/\n?```$/, '')
-                    .trim();
-                models = JSON.parse(cleanResponse);
-            } catch (parseError) {
-                loggingService.error('Failed to parse model names from LLM response', {
-                    response: result,
-                    error: parseError instanceof Error ? parseError.message : String(parseError)
-                });
-                return {
-                    success: false,
-                    error: 'Failed to parse JSON response',
-                    prompt,
-                    response: result
-                };
-            }
-
-            loggingService.info(`Extracted ${models.length} models for ${provider}`, {
-                provider,
-                modelsCount: models.length
-            });
-
-            return {
-                success: true,
-                data: models,
-                prompt,
-                response: result.result
-            };
-
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            loggingService.error('Error extracting models from text', {
-                provider,
-                error: errorMessage
-            });
-            return {
-                success: false,
-                error: errorMessage,
-                prompt: '',
-                response: ''
-            };
-        }
-    }
-
-    /**
-     * Extract pricing data from search results using Nova Pro
-     * Phase 2 of model discovery
-     */
-    static async extractPricingFromText(
-        provider: string,
-        modelName: string,
-        searchText: string
-    ): Promise<LLMExtractionResult> {
+      // Try to extract JSON from response
+      const jsonStr = await this.extractJson(result.response);
+      if (jsonStr) {
         try {
-            const prompt = `Analyze the following search results about ${provider}'s ${modelName} model and extract precise pricing information.
+          const models = JSON.parse(jsonStr);
+          ServiceHelper.logMethodExit('BedrockService.extractModelsFromText', {
+            success: true,
+            extractedModels: models?.length || 0,
+          });
+          return {
+            success: true,
+            data: models,
+            prompt: extractionPrompt,
+            response: result.response,
+          };
+        } catch (parseError) {
+          BedrockService.staticLogger.warn('Failed to parse extracted models', {
+            parseError,
+            jsonStr,
+          });
+        }
+      }
 
-Search Content:
+      ServiceHelper.logMethodExit('BedrockService.extractModelsFromText', {
+        success: false,
+        error: 'Failed to extract models',
+      });
+      return {
+        success: false,
+        error: 'Failed to extract models from text',
+        prompt: extractionPrompt,
+        response: result.response,
+      };
+    } catch (error) {
+      ServiceHelper.logMethodError(
+        'BedrockService.extractModelsFromText',
+        error as Error,
+        {
+          provider,
+          textLength: searchText?.length,
+        },
+      );
+
+      return {
+        success: false,
+        error: (error as Error).message,
+        prompt: '',
+        response: '',
+      };
+    }
+  }
+
+  /**
+   * Extract pricing from search text
+   */
+  static async extractPricingFromText(
+    provider: string,
+    searchText: string,
+  ): Promise<RawPricingData[]> {
+    ServiceHelper.logMethodEntry('BedrockService.extractPricingFromText', {
+      provider,
+      textLength: searchText?.length,
+    });
+
+    try {
+      const pricingPrompt = `
+Extract pricing information from the following text for provider: ${provider}
+
+Text to analyze:
 ${searchText}
 
-Return ONLY valid JSON with this exact structure:
-{
-  "modelId": "exact-model-identifier",
-  "modelName": "Human readable name",
-  "inputPricePerMToken": 2.50,
-  "outputPricePerMToken": 10.00,
-  "cachedInputPricePerMToken": 1.25,
-  "contextWindow": 128000,
-  "capabilities": ["text", "multimodal", "code"],
-  "category": "text",
-  "isLatest": true
-}
+Please return a JSON array of pricing data objects with:
+- modelId: The model identifier
+- modelName: Human readable name
+- inputPricePerMToken: Input price per million tokens (number)
+- outputPricePerMToken: Output price per million tokens (number)
+- cachedInputPricePerMToken: Optional cached input price
+- contextWindow: Maximum context window (number)
+- capabilities: Array of strings
+- category: text/multimodal/embedding/code
+- isLatest: boolean
 
-CRITICAL PRICING CONVERSION RULES:
-- Prices MUST be in dollars per MILLION tokens (not per 1K tokens)
-- If you see "$2.50 per 1M tokens" or "$2.50 per million tokens" → use 2.50
-- If you see "$0.50 per 1K tokens" or "$0.50 per thousand tokens" → convert to 500.0 (multiply by 1000)
-- If you see "$15 per 1M tokens" → use 15.0
-- DO NOT multiply prices that are already per million tokens!
+Only extract models with clear pricing information.
+Format: [{"modelId": "...", "modelName": "...", ...}]
+`;
 
-**CRITICAL DECIMAL HANDLING:**
-- When parsing numbers, ensure that decimal points are correctly interpreted
-- For example, "$1.750" means ONE dollar and 75 cents, NOT $1750!
-- Always treat a period (.) as a decimal separator
-- "$1.750 per 1M tokens" → 1.75 (NOT 1750)
-- "$0.075 per 1M tokens" → 0.075 (NOT 75)
+      const result = await this.invokeModel(
+        pricingPrompt,
+        AWS_CONFIG.bedrock.modelId,
+      );
 
-FIELD REQUIREMENTS:
-- modelId: Use the exact technical identifier (e.g., "gpt-4o", "claude-3-5-sonnet-20241022")
-- modelName: Human-readable name (e.g., "GPT-4o", "Claude 3.5 Sonnet")
-- inputPricePerMToken: MUST be a number in dollars per million tokens
-- outputPricePerMToken: MUST be a number in dollars per million tokens
-- cachedInputPricePerMToken: Optional, only if cached pricing exists
-- contextWindow: Maximum context window in tokens (e.g., 128000, 200000)
-- capabilities: Array of strings like "text", "multimodal", "code", "reasoning", "vision", "image"
-- category: ONE of: "text", "multimodal", "embedding", "code"
-- isLatest: true if this is the newest/recommended model, false otherwise
-
-EXAMPLES OF CORRECT CONVERSIONS:
-- "$2.50 per 1M tokens" → inputPricePerMToken: 2.50
-- "$10.00 per million tokens" → outputPricePerMToken: 10.00
-- "$0.15 per 1M tokens" → inputPricePerMToken: 0.15
-- "$0.50 per 1K tokens" → inputPricePerMToken: 500.0
-- "$30 per million tokens" → outputPricePerMToken: 30.0
-- "$1.750 per 1M tokens" → inputPricePerMToken: 1.75 (ONE dollar and 75 cents)
-- "$0.075 per 1M tokens" → inputPricePerMToken: 0.075 (7.5 cents)
-
-Return ONLY the JSON object, no markdown formatting, no additional text.`;
-
-            const result = await this.invokeModel(
-                prompt,
-                'us.anthropic.claude-3-5-sonnet-20241022-v2:0'
-            );
-
-            // Parse the JSON response
-            let pricingData: RawPricingData;
-            try {
-                const cleanResponse = result.trim()
-                    .replace(/^```json\n?/, '')
-                    .replace(/\n?```$/, '')
-                    .trim();
-                pricingData = JSON.parse(cleanResponse);
-            } catch (parseError) {
-                loggingService.error('Failed to parse pricing data from LLM response', {
-                    modelName,
-                    response: result,
-                    error: parseError instanceof Error ? parseError.message : String(parseError)
-                });
-                return {
-                    success: false,
-                    error: 'Failed to parse JSON response',
-                    prompt,
-                    response: result
-                };
-            }
-
-            loggingService.info(`Extracted pricing for ${provider} ${modelName}`, {
-                provider,
-                modelName,
-                inputPrice: pricingData.inputPricePerMToken,
-                outputPrice: pricingData.outputPricePerMToken
-            });
-
-            return {
-                success: true,
-                data: pricingData,
-                prompt,
-                response: result
-            };
-
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            loggingService.error('Error extracting pricing from text', {
-                provider,
-                modelName,
-                error: errorMessage
-            });
-            return {
-                success: false,
-                error: errorMessage,
-                prompt: '',
-                response: ''
-            };
+      // Try to extract JSON from response
+      const jsonStr = await this.extractJson(result.response);
+      if (jsonStr) {
+        try {
+          const pricingData = JSON.parse(jsonStr);
+          ServiceHelper.logMethodExit('BedrockService.extractPricingFromText', {
+            success: true,
+            extractedPricing: pricingData?.length || 0,
+          });
+          return pricingData || [];
+        } catch (parseError) {
+          BedrockService.staticLogger.warn(
+            'Failed to parse extracted pricing',
+            {
+              parseError,
+              jsonStr,
+            },
+          );
         }
+      }
+
+      ServiceHelper.logMethodExit('BedrockService.extractPricingFromText', {
+        success: false,
+        error: 'Failed to extract pricing',
+      });
+      return [];
+    } catch (error) {
+      ServiceHelper.logMethodError(
+        'BedrockService.extractPricingFromText',
+        error as Error,
+        {
+          provider,
+          textLength: searchText?.length,
+        },
+      );
+      return [];
     }
+  }
+
+  /**
+   * Invoke model directly with custom payload (instance method for DI).
+   */
+  async invokeModelDirectly(
+    modelId: string,
+    payload: any,
+  ): Promise<{ response: string; inputTokens: number; outputTokens: number }> {
+    return BedrockService.invokeModelDirectly(modelId, payload);
+  }
+
+  /**
+   * Invoke model directly with custom payload (static).
+   */
+  static async invokeModelDirectly(
+    modelId: string,
+    payload: any,
+  ): Promise<{ response: string; inputTokens: number; outputTokens: number }> {
+    const command = new InvokeModelCommand({
+      modelId,
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify(payload),
+    });
+
+    const response = await bedrockClient.send(command);
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+
+    const responseText =
+      responseBody.content?.[0]?.text ||
+      responseBody.output?.message?.content?.[0]?.text ||
+      responseBody.generation ||
+      responseBody.output?.text ||
+      responseBody.text ||
+      '';
+    const inputTokens =
+      responseBody.usage?.input_tokens ||
+      responseBody.usage?.inputTokens ||
+      4000;
+    const outputTokens =
+      responseBody.usage?.output_tokens ||
+      responseBody.usage?.outputTokens ||
+      Math.ceil(responseText.length / 4);
+
+    return {
+      response: responseText,
+      inputTokens,
+      outputTokens,
+    };
+  }
+
+  /**
+   * Stream model response with token-level updates
+   */
+  async streamModelResponse(
+    messages: Array<{ role: string; content: string }>,
+    modelId: string = AWS_CONFIG.bedrock.modelId,
+    options: {
+      maxTokens?: number;
+      temperature?: number;
+      onChunk?: (chunk: string, done: boolean) => void | Promise<void>;
+    } = {},
+  ): Promise<{
+    fullResponse: string;
+    inputTokens: number;
+    outputTokens: number;
+    cost: number;
+  }> {
+    const { maxTokens = 1000, temperature = 0.7, onChunk } = options;
+
+    const startTime = Date.now();
+
+    // Convert messages to Bedrock format
+    const bedrockMessages: Message[] = messages.map((msg) => ({
+      role: msg.role as 'user' | 'assistant',
+      content: [{ text: msg.content }],
+    }));
+
+    // Create inference config (ConverseStreamCommand accepts inferenceConfig with maxTokens, temperature)
+    const inferenceConfig = {
+      maxTokens,
+      temperature,
+    };
+
+    const command = new ConverseStreamCommand({
+      modelId,
+      messages: bedrockMessages,
+      inferenceConfig,
+    });
+
+    let fullResponse = '';
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    try {
+      const response = await bedrockClient.send(command);
+
+      if (response.stream) {
+        for await (const event of response.stream) {
+          if (event.metadata) {
+            // Handle metadata events (usage info)
+            if (event.metadata.usage) {
+              inputTokens = event.metadata.usage.inputTokens || 0;
+              outputTokens = event.metadata.usage.outputTokens || 0;
+            }
+          } else if (event.contentBlockDelta) {
+            // Handle text delta events
+            const delta = event.contentBlockDelta.delta;
+            if (delta?.text) {
+              fullResponse += delta.text;
+
+              // Call the chunk callback if provided
+              if (onChunk) {
+                await onChunk(delta.text, false);
+              }
+            }
+          }
+        }
+      }
+
+      // Call the final chunk callback to indicate completion
+      if (onChunk) {
+        await onChunk('', true);
+      }
+
+      // Calculate cost (signature: inputTokens, outputTokens, provider, model)
+      const cost = calculateCost(inputTokens, outputTokens, 'bedrock', modelId);
+
+      // Record telemetry
+      await recordGenAIUsage({
+        provider: 'bedrock',
+        operationName: 'streamConverse',
+        model: modelId,
+        prompt: messages[messages.length - 1]?.content || '',
+        promptTokens: inputTokens,
+        completionTokens: outputTokens,
+        completion: fullResponse,
+        cost,
+        latencyMs: Date.now() - startTime,
+      });
+
+      return {
+        fullResponse,
+        inputTokens,
+        outputTokens,
+        cost,
+      };
+    } catch (error) {
+      this.logger.error('Bedrock streaming error', {
+        error: error instanceof Error ? error.message : String(error),
+        modelId,
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Detect statistical anomalies using z-score analysis
+   */
+  private static detectStatisticalAnomalies(
+    usageData: Array<{
+      timestamp: Date;
+      cost: number;
+      tokens?: number;
+      totalTokens?: number;
+    }>,
+    costThreshold: number,
+    tokenThreshold: number,
+  ): Array<{
+    timestamp: Date;
+    type: 'cost' | 'tokens';
+    severity: 'low' | 'medium' | 'high';
+    description: string;
+    value: number;
+    threshold: number;
+    zScore: number;
+  }> {
+    const toTokens = (u: { tokens?: number; totalTokens?: number }): number =>
+      u.totalTokens ?? u.tokens ?? 0;
+
+    if (usageData.length < 5) {
+      return usageData
+        .filter(
+          (usage) =>
+            usage.cost > costThreshold || toTokens(usage) > tokenThreshold,
+        )
+        .map((usage) => ({
+          timestamp: usage.timestamp,
+          type: usage.cost > costThreshold ? 'cost' : 'tokens',
+          severity: (usage.cost > costThreshold * 2 ||
+          toTokens(usage) > tokenThreshold * 2
+            ? 'high'
+            : 'medium') as 'low' | 'medium' | 'high',
+          description: `${usage.cost > costThreshold ? 'High cost' : 'High token usage'} detected`,
+          value: usage.cost > costThreshold ? usage.cost : toTokens(usage),
+          threshold:
+            usage.cost > costThreshold ? costThreshold : tokenThreshold,
+          zScore: 0,
+        }));
+    }
+
+    const costs = usageData.map((u) => u.cost);
+    const costMean = costs.reduce((sum, val) => sum + val, 0) / costs.length;
+    const costStdDev = Math.sqrt(
+      costs.reduce((sum, val) => sum + Math.pow(val - costMean, 2), 0) /
+        costs.length,
+    );
+
+    const tokenValues = usageData.map((u) => u.totalTokens ?? u.tokens ?? 0);
+    const tokenMean =
+      tokenValues.reduce((sum, val) => sum + val, 0) / tokenValues.length;
+    const tokenStdDev = Math.sqrt(
+      tokenValues.reduce((sum, val) => sum + Math.pow(val - tokenMean, 2), 0) /
+        tokenValues.length,
+    );
+
+    const anomalies: Array<{
+      timestamp: Date;
+      type: 'cost' | 'tokens';
+      severity: 'low' | 'medium' | 'high';
+      description: string;
+      value: number;
+      threshold: number;
+      zScore: number;
+    }> = [];
+
+    for (const usage of usageData) {
+      const tok = usage.totalTokens ?? usage.tokens ?? 0;
+      if (costStdDev > 0) {
+        const costZScore = (usage.cost - costMean) / costStdDev;
+        if (costZScore > 2) {
+          anomalies.push({
+            timestamp: usage.timestamp,
+            type: 'cost',
+            severity:
+              costZScore > 3 ? 'high' : costZScore > 2.5 ? 'medium' : 'low',
+            description: `Cost anomaly detected (${costZScore.toFixed(2)}σ from mean)`,
+            value: usage.cost,
+            threshold: costMean + 2 * costStdDev,
+            zScore: costZScore,
+          });
+        }
+      }
+      if (tokenStdDev > 0) {
+        const tokenZScore = (tok - tokenMean) / tokenStdDev;
+        if (tokenZScore > 2) {
+          anomalies.push({
+            timestamp: usage.timestamp,
+            type: 'tokens',
+            severity:
+              tokenZScore > 3 ? 'high' : tokenZScore > 2.5 ? 'medium' : 'low',
+            description: `Token usage anomaly detected (${tokenZScore.toFixed(2)}σ from mean)`,
+            value: tok,
+            threshold: tokenMean + 2 * tokenStdDev,
+            zScore: tokenZScore,
+          });
+        }
+      }
+    }
+
+    return anomalies;
+  }
 }
+
+/** Alias for RAG/chat modules that need invoke(messages) -> { content } */
+export type ChatBedrock = BedrockService;

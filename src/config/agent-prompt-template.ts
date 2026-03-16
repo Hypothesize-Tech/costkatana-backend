@@ -322,35 +322,51 @@ Final Answer: I found your analytics data showing 100 total requests. The initia
 /**
  * Build the complete system prompt with user context
  */
-export function buildSystemPrompt(userContext: string, useMinimalContext: boolean = false): string {
-    const prompt = useMinimalContext ? AGENT_SYSTEM_PROMPT_MINIMAL : AGENT_SYSTEM_PROMPT;
-    return prompt.replace('{user_context}', userContext);
+export function buildSystemPrompt(
+  userContext: string,
+  useMinimalContext: boolean = false,
+): string {
+  const prompt = useMinimalContext
+    ? AGENT_SYSTEM_PROMPT_MINIMAL
+    : AGENT_SYSTEM_PROMPT;
+  return prompt.replace('{user_context}', userContext);
 }
 
 /**
  * Get optimized prompt template for specific query types
  */
-export function getOptimizedPromptForQueryType(queryType: 'cost' | 'token' | 'performance' | 'general'): string {
-    // Always use minimal prompts in ECS container environment
-    const basePrompt = AGENT_SYSTEM_PROMPT_MINIMAL;
-    
-    switch (queryType) {
-        case 'cost':
-            return basePrompt + '\n\nFOCUS: Prioritize cost-related operations and financial insights.';
-        case 'token':
-            return basePrompt + '\n\nFOCUS: Prioritize token usage analytics and consumption patterns.';
-        case 'performance':
-            return basePrompt + '\n\nFOCUS: Prioritize model performance metrics and efficiency analysis.';
-        default:
-            return basePrompt;
-    }
+export function getOptimizedPromptForQueryType(
+  queryType: 'cost' | 'token' | 'performance' | 'general',
+): string {
+  // Always use minimal prompts in ECS container environment
+  const basePrompt = AGENT_SYSTEM_PROMPT_MINIMAL;
+
+  switch (queryType) {
+    case 'cost':
+      return (
+        basePrompt +
+        '\n\nFOCUS: Prioritize cost-related operations and financial insights.'
+      );
+    case 'token':
+      return (
+        basePrompt +
+        '\n\nFOCUS: Prioritize token usage analytics and consumption patterns.'
+      );
+    case 'performance':
+      return (
+        basePrompt +
+        '\n\nFOCUS: Prioritize model performance metrics and efficiency analysis.'
+      );
+    default:
+      return basePrompt;
+  }
 }
 
 /**
  * Compress prompt by removing examples for production use
  */
 export function getCompressedPrompt(): string {
-    // Always use minimal prompts in ECS container environment
-    const prompt = AGENT_SYSTEM_PROMPT_MINIMAL;
-    return prompt.split('EXAMPLES FOR EACH OPERATION TYPE:')[0].trim();
+  // Always use minimal prompts in ECS container environment
+  const prompt = AGENT_SYSTEM_PROMPT_MINIMAL;
+  return prompt.split('EXAMPLES FOR EACH OPERATION TYPE:')[0].trim();
 }
