@@ -1,22 +1,33 @@
 import * as Sentry from '@sentry/node';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
+import { Logger } from '@nestjs/common';
+
+const logger = new Logger('SentryConfig');
 
 // Environment variables for Sentry configuration
 const SENTRY_DSN = process.env.SENTRY_DSN;
 const SENTRY_ENVIRONMENT = process.env.NODE_ENV || 'development';
-const SENTRY_RELEASE = process.env.SENTRY_RELEASE || process.env.npm_package_version;
+const SENTRY_RELEASE =
+  process.env.SENTRY_RELEASE || process.env.npm_package_version;
 const SENTRY_SAMPLE_RATE = parseFloat(process.env.SENTRY_SAMPLE_RATE || '1.0');
-const SENTRY_TRACES_SAMPLE_RATE = parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE || '0.1');
-const SENTRY_PROFILES_SAMPLE_RATE = parseFloat(process.env.SENTRY_PROFILES_SAMPLE_RATE || '0.1');
+const SENTRY_TRACES_SAMPLE_RATE = parseFloat(
+  process.env.SENTRY_TRACES_SAMPLE_RATE || '0.1',
+);
+const SENTRY_PROFILES_SAMPLE_RATE = parseFloat(
+  process.env.SENTRY_PROFILES_SAMPLE_RATE || '0.1',
+);
 const SENTRY_DEBUG = process.env.SENTRY_DEBUG === 'true';
-const SENTRY_SERVER_NAME = process.env.SENTRY_SERVER_NAME || 'cost-katana-backend';
+const SENTRY_SERVER_NAME =
+  process.env.SENTRY_SERVER_NAME || 'cost-katana-backend';
 
 // Performance monitoring configuration
-const SENTRY_ENABLE_PERFORMANCE_MONITORING = process.env.SENTRY_ENABLE_PERFORMANCE_MONITORING !== 'false';
+const SENTRY_ENABLE_PERFORMANCE_MONITORING =
+  process.env.SENTRY_ENABLE_PERFORMANCE_MONITORING !== 'false';
 const SENTRY_ENABLE_PROFILING = process.env.SENTRY_ENABLE_PROFILING !== 'false';
 
 // Error filtering and sampling
-const SENTRY_ENABLE_ERROR_FILTERING = process.env.SENTRY_ENABLE_ERROR_FILTERING !== 'false';
+const SENTRY_ENABLE_ERROR_FILTERING =
+  process.env.SENTRY_ENABLE_ERROR_FILTERING !== 'false';
 
 // Custom Sentry configuration
 export const sentryConfig = {
@@ -39,7 +50,7 @@ export const sentryConfig = {
 export function initializeSentry(): void {
   // Skip initialization if DSN is not provided
   if (!SENTRY_DSN) {
-    console.warn('Sentry DSN not provided. Skipping Sentry initialization.');
+    logger.warn('Sentry DSN not provided. Skipping Sentry initialization.');
     return;
   }
 
@@ -80,7 +91,10 @@ export function initializeSentry(): void {
       Sentry.contextLinesIntegration(),
     ],
     // Before sending events, filter and enrich them
-    beforeSend: (event: Sentry.ErrorEvent, _hint: Sentry.EventHint): Sentry.ErrorEvent | null => {
+    beforeSend: (
+      event: Sentry.ErrorEvent,
+      _hint: Sentry.EventHint,
+    ): Sentry.ErrorEvent | null => {
       return beforeSendHook(event);
     },
 
@@ -100,12 +114,14 @@ export function initializeSentry(): void {
           name: 'Cost Katana Backend',
           version: SENTRY_RELEASE,
           environment: SENTRY_ENVIRONMENT,
-        }
-      }
+        },
+      },
     },
 
     // Performance monitoring options
-    tracesSampleRate: SENTRY_ENABLE_PERFORMANCE_MONITORING ? SENTRY_TRACES_SAMPLE_RATE : 0,
+    tracesSampleRate: SENTRY_ENABLE_PERFORMANCE_MONITORING
+      ? SENTRY_TRACES_SAMPLE_RATE
+      : 0,
 
     // Error sampling and filtering
     ignoreErrors: [
@@ -147,7 +163,9 @@ export function initializeSentry(): void {
     maxValueLength: 1000,
   });
 
-  console.log(`✅ Sentry initialized for environment: ${SENTRY_ENVIRONMENT}, release: ${SENTRY_RELEASE}`);
+  logger.log(
+    `✅ Sentry initialized for environment: ${SENTRY_ENVIRONMENT}, release: ${SENTRY_RELEASE}`,
+  );
 }
 
 /**
@@ -178,7 +196,7 @@ function beforeSendHook(event: Sentry.ErrorEvent): Sentry.ErrorEvent | null {
     'service.name': 'cost-katana-backend',
     'service.version': SENTRY_RELEASE,
     'node.version': process.version,
-    'platform': process.platform,
+    platform: process.platform,
   };
 
   // Add custom fingerprinting for better error grouping
@@ -207,7 +225,10 @@ function generateCustomFingerprint(event: Sentry.Event): string[] {
   // Custom fingerprinting based on error patterns
   if (message.includes('ValidationError')) {
     fingerprint.push('validation-error');
-  } else if (message.includes('MongoError') || message.includes('MongoServerError')) {
+  } else if (
+    message.includes('MongoError') ||
+    message.includes('MongoServerError')
+  ) {
     fingerprint.push('database-error');
   } else if (message.includes('JWT') || message.includes('Unauthorized')) {
     fingerprint.push('authentication-error');
@@ -292,14 +313,21 @@ export function setBusinessContext(context: {
   if (context.component) Sentry.setTag('component', context.component);
   if (context.feature) Sentry.setTag('feature', context.feature);
   if (context.userId) Sentry.setTag('business.user_id', context.userId);
-  if (context.projectId) Sentry.setTag('business.project_id', context.projectId);
-  if (context.costOptimizationId) Sentry.setTag('business.optimization_id', context.costOptimizationId);
+  if (context.projectId)
+    Sentry.setTag('business.project_id', context.projectId);
+  if (context.costOptimizationId)
+    Sentry.setTag('business.optimization_id', context.costOptimizationId);
 }
 
 /**
  * Add custom breadcrumb for tracking user actions
  */
-export function addBreadcrumb(message: string, category: string, level: Sentry.SeverityLevel = 'info', data?: any): void {
+export function addBreadcrumb(
+  message: string,
+  category: string,
+  level: Sentry.SeverityLevel = 'info',
+  data?: any,
+): void {
   Sentry.addBreadcrumb({
     message,
     category,
@@ -312,13 +340,16 @@ export function addBreadcrumb(message: string, category: string, level: Sentry.S
 /**
  * Capture custom error with additional context
  */
-export function captureError(error: Error, context?: {
-  user?: any;
-  request?: any;
-  business?: any;
-  tags?: Record<string, string>;
-  extra?: Record<string, any>;
-}): void {
+export function captureError(
+  error: Error,
+  context?: {
+    user?: any;
+    request?: any;
+    business?: any;
+    tags?: Record<string, string>;
+    extra?: Record<string, any>;
+  },
+): void {
   // Set contexts before capturing
   if (context?.user) setUserContext(context.user);
   if (context?.request) setRequestContext(context.request);
@@ -350,24 +381,34 @@ export function captureError(error: Error, context?: {
  * Start a performance span
  */
 export function startSpan(name: string, op: string) {
-  return Sentry.startSpan({
-    name,
-    op,
-  }, (span) => {
-    return span;
-  });
+  return Sentry.startSpan(
+    {
+      name,
+      op,
+    },
+    (span) => {
+      return span;
+    },
+  );
 }
 
 /**
  * Sanitize headers to remove sensitive information
  */
-function sanitizeHeaders(headers?: Record<string, string>): Record<string, string> | undefined {
+function sanitizeHeaders(
+  headers?: Record<string, string>,
+): Record<string, string> | undefined {
   if (!headers) return undefined;
 
   const sanitized = { ...headers };
-  const sensitiveHeaders = ['authorization', 'cookie', 'x-api-key', 'x-auth-token'];
+  const sensitiveHeaders = [
+    'authorization',
+    'cookie',
+    'x-api-key',
+    'x-auth-token',
+  ];
 
-  sensitiveHeaders.forEach(header => {
+  sensitiveHeaders.forEach((header) => {
     if (sanitized[header]) {
       sanitized[header] = '[REDACTED]';
     }
@@ -386,7 +427,14 @@ function sanitizeRequestBody(body?: any): any {
   const sanitized = JSON.parse(JSON.stringify(body));
 
   // Remove sensitive fields
-  const sensitiveFields = ['password', 'token', 'secret', 'key', 'apiKey', 'authToken'];
+  const sensitiveFields = [
+    'password',
+    'token',
+    'secret',
+    'key',
+    'apiKey',
+    'authToken',
+  ];
 
   function sanitizeObject(obj: any): void {
     if (typeof obj === 'object' && obj !== null) {

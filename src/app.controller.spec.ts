@@ -1,0 +1,32 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+
+describe('AppController', () => {
+  let appController: AppController;
+
+  beforeEach(async () => {
+    const app: TestingModule = await Test.createTestingModule({
+      controllers: [AppController],
+      providers: [AppService],
+    }).compile();
+
+    appController = app.get<AppController>(AppController);
+  });
+
+  describe('health', () => {
+    it('should return API status', () => {
+      expect(appController.getHealth()).toEqual({
+        status: 'Cost Katana Backend API',
+      });
+    });
+  });
+
+  describe('version', () => {
+    it('should return version object', () => {
+      const result = appController.getVersion();
+      expect(result).toHaveProperty('version');
+      expect(typeof result.version).toBe('string');
+    });
+  });
+});

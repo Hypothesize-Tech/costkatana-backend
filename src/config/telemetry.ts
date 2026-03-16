@@ -1,4 +1,4 @@
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 import axios from 'axios';
 
 export interface TelemetryConfig {
@@ -30,14 +30,15 @@ export const telemetryConfig = {
       version: process.env.npm_package_version || '2.0.0',
       tracesEndpoint: process.env.OTLP_HTTP_TRACES_URL || '',
       metricsEndpoint: process.env.OTLP_HTTP_METRICS_URL || '',
-      headers: process.env.OTEL_EXPORTER_OTLP_HEADERS ? 
-        JSON.parse(process.env.OTEL_EXPORTER_OTLP_HEADERS) : undefined,
+      headers: process.env.OTEL_EXPORTER_OTLP_HEADERS
+        ? JSON.parse(process.env.OTEL_EXPORTER_OTLP_HEADERS)
+        : undefined,
       certificate: process.env.OTEL_EXPORTER_OTLP_CERTIFICATE,
       insecure: process.env.OTEL_EXPORTER_OTLP_INSECURE === 'true',
       region: process.env.CK_TELEMETRY_REGION || 'auto',
       captureModelText: process.env.CK_CAPTURE_MODEL_TEXT === 'true',
       collectorHealthEndpoint: this.getCollectorHealthEndpoint(),
-      enabled: process.env.TELEMETRY_ENABLED !== 'false' // Default to enabled
+      enabled: process.env.TELEMETRY_ENABLED !== 'false', // Default to enabled
     };
   },
 
@@ -50,11 +51,14 @@ export const telemetryConfig = {
 
     // Check if telemetry is disabled
     if (!config.enabled) {
-      loggingService.info('📊 Telemetry is disabled via TELEMETRY_ENABLED=false', {
-        component: 'TelemetryConfig',
-        operation: 'validate',
-        type: 'telemetry'
-      });
+      loggingService.info(
+        '📊 Telemetry is disabled via TELEMETRY_ENABLED=false',
+        {
+          component: 'TelemetryConfig',
+          operation: 'validate',
+          type: 'telemetry',
+        },
+      );
       return { valid: true, issues: [] };
     }
 
@@ -65,36 +69,66 @@ export const telemetryConfig = {
 
     // Validate endpoints
     if (!config.tracesEndpoint) {
-      issues.push('OTLP_HTTP_TRACES_URL not set - traces will be exported to console');
+      issues.push(
+        'OTLP_HTTP_TRACES_URL not set - traces will be exported to console',
+      );
     }
 
     if (!config.metricsEndpoint) {
-      issues.push('OTLP_HTTP_METRICS_URL not set - metrics will be exported to console');
+      issues.push(
+        'OTLP_HTTP_METRICS_URL not set - metrics will be exported to console',
+      );
     }
 
     // Validate vendor-specific configurations
-    if (config.tracesEndpoint && config.tracesEndpoint.includes('datadog') && !config.headers) {
-      issues.push('Datadog endpoint detected but no OTEL_EXPORTER_OTLP_HEADERS provided');
+    if (
+      config.tracesEndpoint &&
+      config.tracesEndpoint.includes('datadog') &&
+      !config.headers
+    ) {
+      issues.push(
+        'Datadog endpoint detected but no OTEL_EXPORTER_OTLP_HEADERS provided',
+      );
     }
 
-    if (config.tracesEndpoint && config.tracesEndpoint.includes('newrelic') && !config.headers) {
-      issues.push('New Relic endpoint detected but no OTEL_EXPORTER_OTLP_HEADERS provided');
+    if (
+      config.tracesEndpoint &&
+      config.tracesEndpoint.includes('newrelic') &&
+      !config.headers
+    ) {
+      issues.push(
+        'New Relic endpoint detected but no OTEL_EXPORTER_OTLP_HEADERS provided',
+      );
     }
 
-    if (config.tracesEndpoint && config.tracesEndpoint.includes('grafana') && !config.headers && !config.tracesEndpoint.includes('localhost')) {
-      issues.push('Grafana Cloud endpoint detected but no OTEL_EXPORTER_OTLP_HEADERS provided');
+    if (
+      config.tracesEndpoint &&
+      config.tracesEndpoint.includes('grafana') &&
+      !config.headers &&
+      !config.tracesEndpoint.includes('localhost')
+    ) {
+      issues.push(
+        'Grafana Cloud endpoint detected but no OTEL_EXPORTER_OTLP_HEADERS provided',
+      );
     }
 
     // Validate regional routing
     if (config.region && !['us', 'eu', 'ap', 'auto'].includes(config.region)) {
-      issues.push(`Invalid CK_TELEMETRY_REGION value: ${config.region}. Must be one of: us, eu, ap, auto`);
+      issues.push(
+        `Invalid CK_TELEMETRY_REGION value: ${config.region}. Must be one of: us, eu, ap, auto`,
+      );
     }
 
     // Check collector connectivity if using local mode
-    if (config.tracesEndpoint.includes('localhost') || config.tracesEndpoint.includes('127.0.0.1')) {
+    if (
+      config.tracesEndpoint.includes('localhost') ||
+      config.tracesEndpoint.includes('127.0.0.1')
+    ) {
       const isHealthy = await this.checkCollectorHealth();
       if (!isHealthy) {
-        issues.push('Local collector not running or unreachable. Run: npm run otel:run');
+        issues.push(
+          'Local collector not running or unreachable. Run: npm run otel:run',
+        );
       }
     }
 
@@ -103,7 +137,9 @@ export const telemetryConfig = {
       try {
         Buffer.from(config.certificate, 'base64');
       } catch (error) {
-        issues.push('Invalid OTEL_EXPORTER_OTLP_CERTIFICATE - must be base64 encoded');
+        issues.push(
+          'Invalid OTEL_EXPORTER_OTLP_CERTIFICATE - must be base64 encoded',
+        );
       }
     }
 
@@ -113,7 +149,7 @@ export const telemetryConfig = {
         component: 'TelemetryConfig',
         operation: 'validate',
         type: 'telemetry',
-        issues
+        issues,
       });
     } else {
       loggingService.info('✅ Telemetry Configuration Valid', {
@@ -123,13 +159,13 @@ export const telemetryConfig = {
         serviceName: config.serviceName,
         environment: config.environment,
         tracesEndpoint: config.tracesEndpoint,
-        metricsEndpoint: config.metricsEndpoint
+        metricsEndpoint: config.metricsEndpoint,
       });
     }
 
     return {
       valid: issues.length === 0,
-      issues
+      issues,
     };
   },
 
@@ -141,7 +177,7 @@ export const telemetryConfig = {
       const healthEndpoint = this.getCollectorHealthEndpoint();
       const response = await axios.get(healthEndpoint, {
         timeout: 5000,
-        validateStatus: () => true
+        validateStatus: () => true,
       });
       return response.status === 200;
     } catch (error) {
@@ -149,7 +185,7 @@ export const telemetryConfig = {
         component: 'TelemetryConfig',
         operation: 'checkCollectorHealth',
         type: 'telemetry',
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
       return false;
     }
@@ -160,15 +196,15 @@ export const telemetryConfig = {
    */
   getCollectorHealthEndpoint(): string {
     const tracesUrl = process.env.OTLP_HTTP_TRACES_URL;
-    
+
     // If no traces URL is configured, return empty string (no health check available)
     if (!tracesUrl || tracesUrl.trim() === '') {
       return '';
     }
-    
+
     // Extract base URL from traces endpoint
     const url = new URL(tracesUrl);
-    
+
     // Standard OpenTelemetry Collector health endpoint
     return `${url.protocol}//${url.hostname}:13133/health`;
   },
@@ -178,16 +214,18 @@ export const telemetryConfig = {
    */
   getVendorConfig(): { vendor: string; config: any } | null {
     const tracesEndpoint = process.env.OTLP_HTTP_TRACES_URL || '';
-    
+
     if (tracesEndpoint.includes('datadog')) {
       return {
         vendor: 'datadog',
         config: {
-          site: tracesEndpoint.includes('.eu') ? 'datadoghq.eu' : 'datadoghq.com',
+          site: tracesEndpoint.includes('.eu')
+            ? 'datadoghq.eu'
+            : 'datadoghq.com',
           apiKey: process.env.DD_API_KEY,
           service: process.env.OTEL_SERVICE_NAME || 'cost-katana-api',
-          env: process.env.NODE_ENV || 'development'
-        }
+          env: process.env.NODE_ENV || 'development',
+        },
       };
     }
 
@@ -197,8 +235,8 @@ export const telemetryConfig = {
         config: {
           accountId: process.env.NEW_RELIC_ACCOUNT_ID,
           apiKey: process.env.NEW_RELIC_API_KEY,
-          region: tracesEndpoint.includes('.eu') ? 'eu' : 'us'
-        }
+          region: tracesEndpoint.includes('.eu') ? 'eu' : 'us',
+        },
       };
     }
 
@@ -208,8 +246,8 @@ export const telemetryConfig = {
         config: {
           instanceId: process.env.GRAFANA_INSTANCE_ID,
           apiKey: process.env.GRAFANA_API_KEY,
-          zone: process.env.GRAFANA_ZONE || 'prod-us-central-0'
-        }
+          zone: process.env.GRAFANA_ZONE || 'prod-us-central-0',
+        },
       };
     }
 
@@ -218,8 +256,8 @@ export const telemetryConfig = {
         vendor: 'honeycomb',
         config: {
           apiKey: process.env.HONEYCOMB_API_KEY,
-          dataset: process.env.HONEYCOMB_DATASET || 'cost-katana'
-        }
+          dataset: process.env.HONEYCOMB_DATASET || 'cost-katana',
+        },
       };
     }
 
@@ -237,12 +275,12 @@ export const telemetryConfig = {
     issues?: string[];
   }> {
     const config = this.getConfig();
-    
+
     if (!config.enabled) {
       return {
         enabled: false,
         configured: false,
-        healthy: false
+        healthy: false,
       };
     }
 
@@ -255,9 +293,9 @@ export const telemetryConfig = {
       configured: validation.valid,
       healthy: collectorHealthy || !config.tracesEndpoint.includes('localhost'),
       vendor: vendorConfig?.vendor,
-      issues: validation.issues.length > 0 ? validation.issues : undefined
+      issues: validation.issues.length > 0 ? validation.issues : undefined,
     };
-  }
+  },
 };
 
 export default telemetryConfig;

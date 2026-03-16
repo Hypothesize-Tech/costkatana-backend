@@ -1,110 +1,109 @@
-/**
- * TokenEstimator
- * Global utility for token estimation across all controllers and services
- * Eliminates Math.ceil(length/4) duplication found in 125+ files
- */
+import { estimateTokens, estimateTokensForMessages } from './tokenCounter';
+
 export class TokenEstimator {
-    
-    /**
-     * Standard token estimation ratio
-     * Approximately 4 characters per token for English text
-     */
-    private static readonly CHARS_PER_TOKEN = 4;
+  /**
+   * Estimate tokens for a simple text prompt
+   */
+  static estimatePrompt(prompt: string): number {
+    return estimateTokens(prompt);
+  }
 
-    /**
-     * Estimate tokens from text length
-     * Standard method using 4 characters per token ratio
-     * 
-     * @param text - Text content or text length
-     * @returns Estimated token count
-     */
-    static estimate(text: string | number): number {
-        const length = typeof text === 'string' ? text.length : text;
-        return Math.ceil(length / this.CHARS_PER_TOKEN);
+  /**
+   * Estimate tokens for chat messages
+   */
+  static estimateChat(
+    messages: Array<{ role: string; content: string }>,
+  ): number {
+    return estimateTokensForMessages(messages);
+  }
+
+  /**
+   * Estimate tokens for text with context
+   */
+  static estimateWithContext(text: string, context?: string): number {
+    let tokens = estimateTokens(text);
+
+    if (context) {
+      tokens += estimateTokens(context);
+      // Add overhead for context switching
+      tokens += 50;
     }
 
-    /**
-     * Estimate total tokens for a conversation
-     * Combines input and output token estimates
-     * 
-     * @param inputText - Input message text
-     * @param outputTokens - Expected output tokens (default: 1000)
-     * @returns Total estimated tokens
-     */
-    static estimateTotal(inputText: string | number, outputTokens: number = 1000): number {
-        return this.estimate(inputText) + outputTokens;
+    return tokens;
+  }
+
+  /**
+   * Estimate completion tokens based on prompt tokens
+   */
+  static estimateCompletion(promptTokens: number, maxTokens?: number): number {
+    // Conservative estimate: completion is typically 25-50% of prompt length
+    const estimated = Math.ceil(promptTokens * 0.3);
+
+    if (maxTokens && estimated > maxTokens) {
+      return maxTokens;
     }
 
-    /**
-     * Estimate tokens from multiple messages
-     * Useful for conversation history
-     * 
-     * @param messages - Array of message strings
-     * @returns Total estimated tokens
-     */
-    static estimateMultiple(messages: string[]): number {
-        return messages.reduce((total, msg) => total + this.estimate(msg), 0);
+    return Math.max(estimated, 50); // Minimum 50 tokens
+  }
+
+  /**
+   * Estimate total tokens for a request
+   */
+  static estimateTotal(
+    prompt: string,
+    context?: string,
+    maxCompletionTokens?: number,
+  ): { promptTokens: number; completionTokens: number; totalTokens: number } {
+    const promptTokens = this.estimateWithContext(prompt, context);
+    const completionTokens = this.estimateCompletion(
+      promptTokens,
+      maxCompletionTokens,
+    );
+    const totalTokens = promptTokens + completionTokens;
+
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens,
+    };
+  }
+
+  /**
+   * Validate token counts against model limits
+   */
+  static validateLimits(
+    promptTokens: number,
+    completionTokens: number,
+    contextWindow: number,
+    maxOutputTokens?: number,
+  ): { isValid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    const totalTokens = promptTokens + completionTokens;
+
+    if (totalTokens > contextWindow) {
+      errors.push(
+        `Total tokens (${totalTokens}) exceed context window (${contextWindow})`,
+      );
     }
 
-    /**
-     * Estimate tokens from message array with roles
-     * Takes into account message structure overhead
-     * 
-     * @param messages - Array of messages with role and content
-     * @returns Total estimated tokens
-     */
-    static estimateConversation(messages: Array<{ role: string; content: string }>): number {
-        // Add 4 tokens per message for structure overhead (role, formatting, etc.)
-        const messageOverhead = messages.length * 4;
-        const contentTokens = messages.reduce((total, msg) => 
-            total + this.estimate(msg.content), 0
-        );
-        
-        return contentTokens + messageOverhead;
+    if (maxOutputTokens && completionTokens > maxOutputTokens) {
+      errors.push(
+        `Completion tokens (${completionTokens}) exceed maximum output (${maxOutputTokens})`,
+      );
     }
 
-    /**
-     * Check if text exceeds token limit
-     * 
-     * @param text - Text to check
-     * @param limit - Token limit
-     * @returns True if exceeds limit
-     */
-    static exceedsLimit(text: string | number, limit: number): boolean {
-        return this.estimate(text) > limit;
+    if (promptTokens < 1) {
+      errors.push('Prompt tokens must be at least 1');
     }
 
-    /**
-     * Truncate text to fit within token limit
-     * Adds ellipsis if truncated
-     * 
-     * @param text - Text to truncate
-     * @param tokenLimit - Maximum tokens allowed
-     * @returns Truncated text
-     */
-    static truncateToLimit(text: string, tokenLimit: number): string {
-        const estimatedTokens = this.estimate(text);
-        
-        if (estimatedTokens <= tokenLimit) {
-            return text;
-        }
-        
-        // Calculate characters to keep
-        const maxChars = tokenLimit * this.CHARS_PER_TOKEN;
-        const ellipsis = '...';
-        
-        if (maxChars <= ellipsis.length) {
-            return ellipsis;
-        }
-        
-        return text.substring(0, maxChars - ellipsis.length) + ellipsis;
+    if (completionTokens < 1) {
+      errors.push('Completion tokens must be at least 1');
     }
 
-    /**
-     * Get characters per token ratio
-     * Useful for custom calculations
-     */
-    static get charsPerToken(): number {
-        return this.CHARS_PER_TOKEN;
-    }
+    return {
+      isValid: errors.length === 0,
+      errors,
+    };
+  }
 }

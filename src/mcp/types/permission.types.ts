@@ -1,7 +1,6 @@
 /**
- * Permission System Types
+ * Permission System Types (for Mongoose schemas compatibility)
  */
-
 export type IntegrationType =
   | 'vercel'
   | 'github'
@@ -24,8 +23,8 @@ export interface ResourceRestrictions {
 }
 
 export interface ToolPermissions {
-  tools: string[]; // Allowed tool names
-  scopes: string[]; // OAuth scopes
+  tools: string[];
+  scopes: string[];
   httpMethods: HttpMethod[];
   resources?: ResourceRestrictions;
 }

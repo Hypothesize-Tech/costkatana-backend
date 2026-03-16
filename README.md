@@ -1,571 +1,103 @@
-# Cost Katana Backend 🥷
+<p align="center">
+  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
+</p>
 
-> **AI-powered cost intelligence that learns, predicts, and optimizes.**
+[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
+[circleci-url]: https://circleci.com/gh/nestjs/nest
 
-The backend powering Cost Katana—featuring intelligent monitoring, personalized coaching, predictive analytics, and seamless integrations.
+  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
+    <p align="center">
+<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
+<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
+<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
+<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
+<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
+<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
+<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
+  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
+    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
+  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
+</p>
+  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
+  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
 
----
+## Description
 
-## 🚀 Get Started in 5 Minutes
+**Cost Katana Backend (NestJS)** – Standalone NestJS application for migrating from the Express-based [costkatana-backend](../costkatana-backend). This repo is isolated so you can run both during migration and move features over one by one.
 
-### Step 1: Clone & Install
+- **Static foundation**: Config (env, app, CORS, JWT, Redis, logging), shared types, `LoggerService`, `EncryptionService`, MongoDB connection, `GET /health`, `GET /version`.
+- **Next**: Migrate features incrementally (auth → user → usage → projects → pricing → …). See [docs/MIGRATION.md](docs/MIGRATION.md).
 
-```bash
-git clone https://github.com/cost-katana/costkatana-backend.git
-cd costkatana-backend
-npm install
-```
+Requires: `MONGODB_URI`, `JWT_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`. Copy `.env.example` or [env.example](env.example) (full backend reference) to `.env` and fill in values. (`.env` is never committed.)
 
-### Step 2: Configure Environment
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your credentials:
-
-```bash
-# Database
-MONGODB_URI=mongodb://localhost:27017/cost-katana
-
-# Security
-JWT_SECRET=your-super-secure-jwt-secret-key-min-32-chars
-ENCRYPTION_KEY=your-32-char-encryption-key-here!!
-
-# AI Providers (at least one required)
-OPENAI_API_KEY=sk-...           # For GPT models
-GEMINI_API_KEY=...              # For Gemini models
-AWS_ACCESS_KEY_ID=...           # For Claude via Bedrock
-AWS_SECRET_ACCESS_KEY=...
-AWS_REGION=us-east-1
-```
-
-### Step 3: Run
+## Project setup
 
 ```bash
-npm run build
-npm run dev
+$ npm install
 ```
 
-Server starts at `http://localhost:8000` ✅
-
----
-
-## 📚 Documentation
-
-- **[Prompt Caching Guide](docs/PROMPT_CACHING.md)** - Complete guide to true KV-pair caching
-- **[API Documentation](API_DOCUMENTATION.md)** - Full API reference
-- **[Cost Performance Tradeoffs](docs/COST_PERFORMANCE_TRADEOFFS.md)** - Architecture decisions
-
----
-
-## 📖 What Makes This Special
-
-### 🧠 AI Intelligence Engine
-
-| Feature | Description |
-|---------|-------------|
-| **User Profiling** | Automatically learns usage patterns |
-| **Predictive Analytics** | Forecasts spending and limit hits |
-| **Personalized Coaching** | Tailored recommendations per user |
-| **Pattern Recognition** | Detects inefficient usage automatically |
-
-### 🔗 Seamless Integrations
-
-| Integration | Description |
-|-------------|-------------|
-| **ChatGPT Custom GPT** | Direct tips inside ChatGPT |
-| **Magic Link Onboarding** | 1-click zero-friction setup |
-| **Multi-Provider Support** | OpenAI, Gemini, Claude, Bedrock |
-| **Smart Routing** | Auto-selects optimal provider |
-
-### ⚡ True Prompt Caching
-
-| Feature | Description |
-|---------|-------------|
-| **KV-Pair Caching** | Cache LLM internal computations, not just responses |
-| **30-70% Cost Savings** | Automatic optimization for repeated static content |
-| **Multi-Provider Support** | Anthropic, OpenAI, Google Gemini implementations |
-| **Smart Structure Optimization** | Automatically reorder prompts for maximum cache hits |
-
-### 📊 Real-Time Analytics
-
-| Feature | Description |
-|---------|-------------|
-| **Live Dashboards** | Usage monitoring with AI insights |
-| **Cost Reports** | AI-generated savings opportunities |
-| **Efficiency Scoring** | AI-calculated scores with improvements |
-| **Cache Performance** | Real-time prompt caching metrics and savings |
-
----
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                   Cost Katana Backend                        │
-├─────────────────┬─────────────────┬─────────────────────────┤
-│   🤖 AI Layer   │  🌐 API Layer   │     📊 Data Layer       │
-├─────────────────┼─────────────────┼─────────────────────────┤
-│ • AWS Bedrock   │ • Express.js    │ • MongoDB               │
-│ • OpenAI SDK    │ • REST APIs     │ • Redis Cache           │
-│ • Gemini SDK    │ • WebSockets    │ • Usage Analytics       │
-│ • Forecasting   │ • Rate Limiting │ • User Profiles         │
-└─────────────────┴─────────────────┴─────────────────────────┘
-```
-
----
-
-## 🔑 Environment Setup
-
-### Required Variables
+## Compile and run the project
 
 ```bash
-# Database
-MONGODB_URI=mongodb://localhost:27017/cost-katana
+# development
+$ npm run start
 
-# Security
-JWT_SECRET=your-super-secure-jwt-secret-key-min-32-chars
-ENCRYPTION_KEY=your-32-char-encryption-key-here!!
+# watch mode
+$ npm run start:dev
 
-# Frontend
-FRONTEND_URL=http://localhost:3000
+# production mode
+$ npm run start:prod
 ```
 
-### AI Provider Keys
-
-> ⚠️ **You must provide your own API keys.** Cost Katana does not include OpenAI or Google keys.
+## Run tests
 
 ```bash
-# OpenAI (for GPT models)
-OPENAI_API_KEY=sk-...
+# unit tests
+$ npm run test
 
-# Google (for Gemini models)
-GEMINI_API_KEY=...
+# e2e tests
+$ npm run test:e2e
 
-# AWS Bedrock (for Claude, Nova)
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-AWS_REGION=us-east-1
-AWS_BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
+# test coverage
+$ npm run test:cov
 ```
 
-### Email (Optional)
+## Deployment
+
+When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+
+If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
 
 ```bash
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-app-specific-password
+$ npm install -g @nestjs/mau
+$ mau deploy
 ```
 
----
+With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
 
-## 🛣️ API Endpoints
+## Resources
 
-### AI Intelligence
+Check out a few resources that may come in handy when working with NestJS:
 
-```http
-POST /api/monitoring/analyze           # Trigger AI analysis
-GET  /api/monitoring/status            # Usage status & predictions
-GET  /api/monitoring/recommendations   # Personalized recommendations
-```
+- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
+- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
+- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
+- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
+- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
+- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
+- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
+- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
 
-### ChatGPT Integration
+## Support
 
-```http
-POST /api/chatgpt/action               # Custom GPT actions
-GET  /api/chatgpt/health               # Health check
-```
+Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
 
-### Magic Link Onboarding
+## Stay in touch
 
-```http
-POST /api/onboarding/generate-magic-link   # Generate link
-GET  /api/onboarding/verify/:token         # Verify & complete
-```
+- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
+- Website - [https://nestjs.com](https://nestjs.com/)
+- Twitter - [@nestframework](https://twitter.com/nestframework)
 
-### Core Features
+## License
 
-```http
-POST /api/usage/track                  # Track usage with AI analysis
-GET  /api/projects                     # Projects with AI insights
-GET  /api/analytics/intelligent        # AI-powered analytics
-```
-
-### Prompt Caching
-
-```http
-# Automatic prompt caching (enabled by default for supported providers)
-POST /v1/chat/completions               # Claude, GPT, Gemini with KV caching
-POST /v1/completions                   # OpenAI completions with caching
-
-# Headers for prompt caching control
-CostKatana-Prompt-Caching: true        # Enable prompt caching
-CostKatana-Prompt-Caching: false       # Disable prompt caching
-
-# Response headers with cache metrics
-CostKatana-Prompt-Caching-Enabled: true
-CostKatana-Prompt-Caching-Type: explicit
-CostKatana-Prompt-Caching-Estimated-Savings: 0.0027
-```
-
-### Telemetry & Observability
-
-```http
-GET  /api/telemetry                    # Query telemetry data
-GET  /api/telemetry/traces/:id         # Full trace details
-GET  /api/telemetry/metrics            # Aggregated metrics
-GET  /api/telemetry/dashboard          # Dashboard data
-GET  /api/telemetry/dependencies       # Service dependency map
-GET  /api/telemetry/health             # System health
-```
-
----
-
-## 📊 OpenTelemetry Integration
-
-### Quick Setup
-
-```bash
-# Install collector
-npm run otel:install
-
-# Configure in .env
-OTEL_SERVICE_NAME=cost-katana-api
-OTLP_HTTP_TRACES_URL=http://localhost:4318/v1/traces
-OTLP_HTTP_METRICS_URL=http://localhost:4318/v1/metrics
-
-# Start collector
-npm run otel:run
-
-# Verify
-npm run telemetry:verify
-```
-
-### Vendor Integrations
-
-**Grafana Cloud:**
-```bash
-OTLP_HTTP_TRACES_URL=https://otlp-gateway.grafana.net/otlp/v1/traces
-OTEL_EXPORTER_OTLP_HEADERS={"Authorization":"Basic base64_credentials"}
-```
-
-**Datadog:**
-```bash
-OTLP_HTTP_TRACES_URL=https://trace.agent.datadoghq.com:4318/v1/traces
-OTEL_EXPORTER_OTLP_HEADERS={"DD-API-KEY":"your_api_key"}
-```
-
-**New Relic:**
-```bash
-OTLP_HTTP_TRACES_URL=https://otlp.nr-data.net:4318/v1/traces
-OTEL_EXPORTER_OTLP_HEADERS={"Api-Key":"your_license_key"}
-```
-
-### What You Get
-
-- **Request Tracing** — End-to-end visibility (API → DB → AI → Response)
-- **Cost Attribution** — Exact cost per request, model, and user
-- **Performance Metrics** — RPM, latency percentiles, error rates
-- **Service Dependencies** — Auto-generated dependency maps
-
----
-
-## 🛠️ Development
-
-### Scripts
-
-```bash
-npm run dev          # Development server with hot reload
-npm run build        # Build TypeScript
-npm start            # Production server
-npm test             # Run tests
-npm run lint         # Check code style
-npm run lint:fix     # Fix code style
-```
-
-### Project Structure
-
-```
-src/
-├── services/
-│   ├── intelligentMonitoring.service.ts   # AI monitoring
-│   ├── aiRouter.service.ts                # Provider routing
-│   ├── providers/                         # Native SDKs
-│   │   ├── openai.provider.ts
-│   │   ├── gemini.provider.ts
-│   │   └── base.provider.ts
-│   ├── bedrock.service.ts                 # AWS Bedrock
-│   └── email.service.ts                   # AI-enhanced emails
-├── controllers/
-│   ├── chatgpt.controller.ts              # ChatGPT integration
-│   ├── onboarding.controller.ts           # Magic links
-│   └── monitoring.controller.ts           # AI monitoring
-├── models/
-│   ├── User.ts
-│   ├── Usage.ts
-│   └── Project.ts
-├── routes/
-│   └── monitoring.routes.ts
-└── utils/
-    ├── cronJobs.ts
-    └── logger.ts
-```
-
----
-
-## 🚨 Alert System
-
-| Threshold | Description |
-|-----------|-------------|
-| **50%** | Early warning with optimization tips |
-| **80%** | Detailed analysis with cost-saving recommendations |
-| **90%** | Urgent notification with immediate alternatives |
-| **Predictive** | AI forecasts problems before they occur |
-
----
-
-## 🐳 Docker Deployment
-
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-EXPOSE 8000
-CMD ["node", "dist/server.js"]
-```
-
-```bash
-# Production environment
-NODE_ENV=production
-MONGODB_URI=mongodb://your-production-db
-FRONTEND_URL=https://costkatana.com
-```
-
----
-
-## 🔒 Security
-
-| Feature | Description |
-|---------|-------------|
-| **JWT + Refresh Tokens** | Secure session management |
-| **Role-Based Access** | Different features per user type |
-| **API Key Encryption** | Secure storage of user keys |
-| **Rate Limiting** | Prevents abuse |
-| **Data Minimization** | Only necessary data sent to AI |
-| **Audit Logging** | Comprehensive interaction logs |
-
----
-
-## 🧪 Testing
-
-```bash
-# Test AI monitoring
-curl -X POST "http://localhost:8000/api/monitoring/analyze" \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"userId": "your-user-id"}'
-
-# Test ChatGPT integration
-curl -X POST "http://localhost:8000/api/chatgpt/action" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "track_usage",
-    "conversation_data": {
-      "prompt": "Help me debug this React component",
-      "response": "Here is how to debug...",
-      "model": "gpt-4"
-    }
-  }'
-
-# Test magic link
-curl -X POST "http://localhost:8000/api/onboarding/generate-magic-link" \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@example.com", "name": "Test User"}'
-```
-
----
-
-## 🔗 Google Integration
-
-Cost Katana integrates with Google Workspace using **non-sensitive OAuth scopes only**, avoiding the need for expensive CASA security assessments.
-
-### OAuth Scopes Used
-
-```typescript
-// Non-sensitive scopes (No CASA required)
-const SCOPES = [
-  'openid',
-  'https://www.googleapis.com/auth/userinfo.email',
-  'https://www.googleapis.com/auth/userinfo.profile',
-  'https://www.googleapis.com/auth/drive.file'  // Access only to files created by or selected via picker
-];
-```
-
-### What You Can Do
-
-| Feature | Description | Status |
-|---------|-------------|--------|
-| **File Picker** | Select any Docs/Sheets from Drive | ✅ Available |
-| **Create Documents** | Create new Google Docs | ✅ Available |
-| **Create Spreadsheets** | Create new Google Sheets | ✅ Available |
-| **Export Cost Data** | Export to new Sheets | ✅ Available |
-| **Access Selected Files** | Read/write files selected via picker | ✅ Available |
-| **Chat Integration** | Use @docs and @sheets mentions | ✅ Available |
-
-### Setup
-
-1. **Create Google OAuth 2.0 Credentials**:
-   - Go to [Google Cloud Console](https://console.cloud.google.com/)
-   - Create a new project or select existing
-   - Enable Google Drive API
-   - Create OAuth 2.0 credentials
-   - Add authorized redirect URIs
-
-2. **Configure Environment Variables**:
-
-```bash
-# Google OAuth
-GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=your-client-secret
-GOOGLE_REDIRECT_URI=http://localhost:3000/oauth/callback/google
-
-# Google API (for File Picker)
-GOOGLE_API_KEY=your-google-api-key
-
-   # Grounding Confidence Layer (GCL) - Hallucination Prevention
-   # Core Principle: "Generation is a privilege, not a default"
-   
-   # Phase 1: Shadow Mode (Observe only, no blocking)
-   # ENABLE_GCL_SHADOW=true
-   # ENABLE_GCL_BLOCKING=false
-   
-   # Phase 2: Partial Blocking (ASK_CLARIFY enforced, REFUSE still shadow) ← CURRENT
-   ENABLE_GCL_SHADOW=false
-   ENABLE_GCL_BLOCKING=true
-   
-   # Phase 3: Full Enforcement (All decisions enforced)
-   # ENABLE_GCL_STRICT_REFUSAL=false  # Set to true for Phase 3
-   
-   # Always enabled
-   ENABLE_GCL_LOGGING=true             # Always log for metrics
-   ENABLE_GCL_EMERGENCY_BYPASS=false   # Emergency override (use only in incidents)
-```
-
-### Grounding Confidence Layer (GCL)
-
-The GCL is a pre-generation decision gate that prevents hallucinations by evaluating whether the system has sufficient, fresh, and relevant information before generating responses.
-
-**Core Principle**: "Generation is a privilege, not a default."
-
-**Rollout Phases**:
-- **Phase 1 (Shadow)**: Logs decisions without affecting UX - safe to enable in production
-- **Phase 2 (Partial Blocking)**: Enables clarification requests only
-- **Phase 3 (Full Blocking)**: Enforces all decisions including refusals
-
-**Configuration Flags**:
-- `ENABLE_GCL_SHADOW`: Enable shadow mode (observe without blocking)
-- `ENABLE_GCL_BLOCKING`: Enable decision enforcement
-- `ENABLE_GCL_STRICT_REFUSAL`: Enable REFUSE decision enforcement
-- `ENABLE_GCL_LOGGING`: Enable decision logging for metrics
-- `ENABLE_GCL_EMERGENCY_BYPASS`: Emergency override (page on-call if used)
-
-**Safeguards**:
-- ✅ Loop breakers (max 2 clarifications, max 2 search retries)
-- ✅ Decision stickiness (prevents retry gaming)
-- ✅ Context drift detection (prevents hallucinations on topic shifts)
-- ✅ Domain risk multipliers (stricter thresholds for finance/security/legal)
-- ✅ Memory write gating (prevents poisoning long-term memory)
-- ✅ Redundant safety checks (fail-safe if GCL bypassed)
-
-3. **Configure Authorized Origins** (for Picker):
-   - Add `http://localhost:3000` to Authorized JavaScript origins
-   - Add `http://localhost:8000` to Authorized JavaScript origins
-
-### API Endpoints
-
-```typescript
-// OAuth Flow
-POST   /api/oauth/initiate/google          // Start OAuth flow
-GET    /api/oauth/callback/google          // OAuth callback
-POST   /api/oauth/refresh                  // Refresh access token
-
-// File Picker
-GET    /api/google/picker/token            // Get picker token
-POST   /api/google/picker/cache-selection  // Cache selected files
-GET    /api/google/accessible-files        // List accessible files
-
-// Documents & Sheets
-POST   /api/google/docs/create             // Create new Doc
-POST   /api/google/sheets/create           // Create new Sheet
-GET    /api/google/docs/list               // List accessible Docs
-GET    /api/google/sheets/list             // List accessible Sheets
-
-// Export
-POST   /api/google/export/cost-data        // Export cost data to Sheets
-POST   /api/google/export/cost-report      // Create cost report in Docs
-```
-
-### Frontend Integration
-
-```typescript
-import { useGooglePicker } from '@/hooks/useGooglePicker';
-
-// In your component
-const { openPicker, selectedFiles } = useGooglePicker({
-  viewType: 'DOCS',  // or 'SPREADSHEETS', 'DOCS_IMAGES_AND_VIDEOS'
-  multiselect: true,
-  callback: (data) => {
-    console.log('Files selected:', data.docs);
-  }
-});
-
-// Open picker
-<button onClick={() => openPicker(connectionId)}>
-  Select Files from Drive
-</button>
-```
-
-### File Access Model
-
-With `drive.file` scope, the app can only access:
-1. **Files created by the app** (e.g., exported cost reports)
-2. **Files explicitly selected by user via File Picker**
-
-This ensures maximum privacy while providing full functionality.
-
-### No CASA Assessment Needed
-
-By using only non-sensitive scopes, Cost Katana avoids:
-- ✅ $15,000 - $75,000+ CASA assessment fees
-- ✅ Lengthy security review process
-- ✅ Complex compliance requirements
-- ✅ Annual re-assessments
-
----
-
-## 📞 Support
-
-| Channel | Link |
-|---------|------|
-| **Email** | support@costkatana.com |
-| **GitHub Issues** | [github.com/cost-katana/costkatana-backend/issues](https://github.com/cost-katana/costkatana-backend/issues) |
-| **Discord** | [discord.gg/D8nDArmKbY](https://discord.gg/D8nDArmKbY) |
-
----
-
-## 📄 License
-
-MIT © Cost Katana
-
----
-
-<div align="center">
-
-**Transform your AI cost management with intelligent coaching** 🥷
-
-</div>
+Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).

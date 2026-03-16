@@ -1,39 +1,33 @@
 {
-    "compilerOptions": {
-      "target": "ES2022",
-      "module": "commonjs",
-      "lib": ["ES2022"],
-      "outDir": "./dist",
-      "rootDir": "./src",
-      "strict": true,
-      "esModuleInterop": true,
-      "skipLibCheck": true,
-      "forceConsistentCasingInFileNames": true,
-      "resolveJsonModule": true,
-      "moduleResolution": "node",
-      "allowSyntheticDefaultImports": true,
-      "emitDecoratorMetadata": true,
-      "experimentalDecorators": true,
-      "sourceMap": true,
-      "incremental": true,
-      "noUnusedLocals": false,
-      "noUnusedParameters": false,
-      "noImplicitReturns": true,
-      "noFallthroughCasesInSwitch": true,
-      "declaration": true,
-      "declarationMap": true,
-      "typeRoots": ["./node_modules/@types", "./src/types"],
-      "downlevelIteration": true,
-      "baseUrl": "./src",
-      "paths": {
-        "@services/*": ["services/*"],
-        "@models/*": ["models/*"],
-        "@middleware/*": ["middleware/*"],
-        "@utils/*": ["utils/*"],
-        "@mcp/*": ["mcp/*"],
-        "@types/*": ["types/*"]
-      }
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2023",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "paths": {
+      "@/*": ["src/*"],
+      "@/schemas/*": ["src/schemas/*"],
+      "@/utils/*": ["src/utils/*"],
+      "@/modules/*": ["src/modules/*"],
+      "@/common/*": ["src/common/*"]
     },
-    "include": ["src/**/*"],
-    "exclude": ["node_modules", "dist", "tests", "src/observability/selfHealingSpanProcessor.ts", "src/tests/**/*", "**/*.test.ts", "**/*.spec.ts"]
-  }
+    "incremental": true,
+    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": true,
+    "strictBindCallApply": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "test", "**/*spec.ts", "examples"]
+}
