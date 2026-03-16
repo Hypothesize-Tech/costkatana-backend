@@ -7,6 +7,7 @@ const REQUIRED_ENV_VARS = [
   'JWT_SECRET',
   'AWS_ACCESS_KEY_ID',
   'AWS_SECRET_ACCESS_KEY',
+  'INTERNAL_MFA_ENCRYPTION_KEY',
 ] as const;
 
 export function validateEnv(): void {
