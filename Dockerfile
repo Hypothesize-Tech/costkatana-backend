@@ -12,16 +12,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-ENV NODE_OPTIONS="--max-old-space-size=4096"
+# 6144 MB for build - GitHub ubuntu-latest has ~7GB; type-check disabled in build:docker
+ENV NODE_OPTIONS="--max-old-space-size=6144"
 
 # Install dependencies (--legacy-peer-deps for @langchain/community pdf-parse peer conflict)
 COPY package*.json .npmrc ./
 RUN npm ci --prefer-offline --no-audit --legacy-peer-deps || \
     (echo "npm ci failed, trying npm install..." && npm install --prefer-offline --no-audit --legacy-peer-deps)
 
-# Copy source and build
+# Copy source and build (build:docker skips type-check to reduce memory; typeCheck runs in CI)
 COPY . .
-RUN npm run build
+RUN npm run build:docker
 
 # Production deps only
 RUN npm prune --production && npm cache clean --force

@@ -15,6 +15,8 @@
     "baseUrl": "./",
     "paths": {
       "@/*": ["src/*"],
+      "@utils/*": ["src/utils/*"],
+      "@services/*": ["src/services/*"],
       "@/schemas/*": ["src/schemas/*"],
       "@/utils/*": ["src/utils/*"],
       "@/modules/*": ["src/modules/*"],
