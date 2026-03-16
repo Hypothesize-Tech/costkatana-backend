@@ -1,6 +1,6 @@
 
 import { Response } from 'express';
-import { TelemetryService } from '../services/telemetry.service';
+import { TelemetryServiceLegacy as TelemetryService } from '../services/telemetry-legacy-adapter';
 import { loggingService } from '../services/logging.service';
 import { trace } from '@opentelemetry/api';
 import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
@@ -821,7 +821,7 @@ export class TelemetryController {
           enrichment: {
             stats: enrichmentStats,
             recent_insights: enrichedSpans.slice(0, 10),
-            ai_recommendations: aiRecommendations.map(rec => ({
+            ai_recommendations: aiRecommendations.map((rec: { trace_id?: string; operation?: string; insight?: string; cost_impact?: string; routing_decision?: string; priority?: string; category?: string }) => ({
               trace_id: rec.trace_id,
               operation: rec.operation,
               insight: rec.insight,

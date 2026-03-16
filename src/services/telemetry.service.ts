@@ -52,6 +52,28 @@ export class TelemetryService {
    * Store a telemetry span record in MongoDB.
    * Called asynchronously from recordGenAIUsage so it does not block the operation.
    */
+  /** No-op when used from Express (server.ts). Nest uses TelemetryQueryService. */
+  static startBackgroundEnrichment(): void {
+    // No-op: Express server calls this; Nest uses modules/telemetry
+  }
+
+  /** Legacy static API for Express services. Returns stub data. */
+  static async queryTelemetry(_query: Record<string, unknown>) {
+    return { data: [] as unknown[], total: 0, page: 1, limit: 100 };
+  }
+
+  /** Legacy static API for Express services. Returns stub data. */
+  static async getPerformanceMetrics(_options?: Record<string, unknown>) {
+    return {
+      requests_per_minute: 0,
+      error_rate: 0,
+      avg_duration_ms: 0,
+      p95_duration_ms: 0,
+      top_operations: [],
+      cost_by_model: [],
+    };
+  }
+
   async storeTelemetryData(
     data: Partial<TelemetryStoreInput>,
   ): Promise<TelemetryDocument> {

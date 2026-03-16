@@ -18,7 +18,7 @@ export { IntelligentFailoverService } from '../services/intelligentFailover.serv
 export { NormalizationService } from '../services/normalization.service';
 
 // Types - Model Registry
-export {
+export type {
     ModelDefinition,
     ModelRequirements,
     ModelMatchResult,
@@ -31,7 +31,7 @@ export {
 } from '../types/modelRegistry.types';
 
 // Types - Pricing Registry
-export {
+export type {
     ModelPricing,
     CostCalculationRequest,
     CostCalculationResult,
@@ -44,7 +44,7 @@ export {
 } from '../types/pricingRegistry.types';
 
 // Types - Normalization
-export {
+export type {
     NormalizedRequest,
     NormalizedResponse,
     NormalizedError,
@@ -61,14 +61,14 @@ export {
 } from '../types/normalized.types';
 
 // Types - Routing
-export {
+export type {
     RoutingStrategy,
     RoutingRequest,
     RoutingResult
 } from '../services/intelligentRouter.service';
 
 // Types - Failover
-export {
+export type {
     FailoverStrategy,
     FailoverConfig,
     FailoverPlan,
