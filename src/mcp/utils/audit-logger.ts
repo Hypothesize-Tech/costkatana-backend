@@ -189,14 +189,31 @@ export class AuditLogger {
   }
 
   /**
-   * Store confirmation log entry
+   * Store confirmation log entry to persistent database
    */
   private static async storeConfirmationLog(
     entry: Record<string, unknown>,
   ): Promise<void> {
     try {
-      // In production, this would write to a persistent confirmation log database
-      loggingService.debug('Confirmation log stored', {
+      const McpSecurityEventLogModel = (
+        await import('../../common/utils/get-mongoose-models')
+      ).getMcpSecurityEventLogModel();
+
+      const doc = {
+        eventType: 'confirmation',
+        timestamp: entry.timestamp instanceof Date ? entry.timestamp : new Date(),
+        userId: new mongoose.Types.ObjectId(String(entry.userId)),
+        integration: entry.integration,
+        toolName: entry.toolName,
+        resource: entry.resource,
+        action: entry.action,
+        confirmed: entry.confirmed,
+        timedOut: entry.timedOut,
+      };
+
+      await McpSecurityEventLogModel.create(doc);
+
+      loggingService.debug('Confirmation log persisted', {
         entryId: `${entry.userId}-${entry.timestamp}`,
       });
     } catch (error) {
@@ -208,14 +225,29 @@ export class AuditLogger {
   }
 
   /**
-   * Store permission denial log entry
+   * Store permission denial log entry to persistent database
    */
   private static async storePermissionDenialLog(
     entry: Record<string, unknown>,
   ): Promise<void> {
     try {
-      // In production, this would write to a persistent security log database
-      loggingService.debug('Permission denial log stored', {
+      const McpSecurityEventLogModel = (
+        await import('../../common/utils/get-mongoose-models')
+      ).getMcpSecurityEventLogModel();
+
+      const doc = {
+        eventType: 'permission_denial',
+        timestamp: entry.timestamp instanceof Date ? entry.timestamp : new Date(),
+        userId: new mongoose.Types.ObjectId(String(entry.userId)),
+        integration: entry.integration,
+        toolName: entry.toolName,
+        reason: entry.reason,
+        missingScope: entry.missingScope,
+      };
+
+      await McpSecurityEventLogModel.create(doc);
+
+      loggingService.debug('Permission denial log persisted', {
         entryId: `${entry.userId}-${entry.timestamp}`,
       });
     } catch (error) {

@@ -26,6 +26,12 @@ export interface AWSPricingInfo {
   termLength?: string; // For reserved instances
   description?: string;
   lastUpdated?: Date;
+  /** Reserved Instance hourly rate from AWS Pricing API */
+  reservedHourlyRate?: number;
+  /** Reserved Instance upfront cost from AWS Pricing API */
+  reservedUpfrontCost?: number;
+  /** Reserved Instance monthly recurring from AWS Pricing API */
+  reservedMonthlyRecurring?: number;
 }
 
 export interface PricingFilters {
@@ -703,10 +709,13 @@ export class AwsPricingService {
       }
 
       if (bestReservedPricing) {
-        // Add Reserved Instance information to pricing info
+        // Add Reserved Instance information to pricing info (from real AWS Pricing API)
         pricingInfo.pricingModel = 'Reserved';
         pricingInfo.termLength = bestReservedPricing.termLength;
         pricingInfo.description = `Reserved Instance (${bestReservedPricing.termLength}, ${bestReservedPricing.paymentOption})`;
+        pricingInfo.reservedHourlyRate = bestReservedPricing.effectiveHourlyRate;
+        pricingInfo.reservedUpfrontCost = bestReservedPricing.upfrontCost;
+        pricingInfo.reservedMonthlyRecurring = bestReservedPricing.monthlyCost;
 
         // Calculate effective hourly rate vs OnDemand
         if (pricingInfo.pricePerHour) {
@@ -860,21 +869,24 @@ export class AwsPricingService {
     };
   } {
     const onDemandHourly = onDemandPricing.pricePerHour || 0;
+    const source = reservedPricing ?? onDemandPricing;
     const reservedHourly =
-      reservedPricing?.pricePerHour || onDemandHourly * 0.7; // Fallback assumption
-    const termLength = reservedPricing?.termLength || '1yr';
+      source.reservedHourlyRate ??
+      reservedPricing?.pricePerHour ??
+      onDemandHourly * 0.7; // Fallback only when AWS API returns no RI data
+    const termLength = source.termLength ?? reservedPricing?.termLength ?? '1yr';
+    const upfrontFromApi =
+      source.reservedUpfrontCost ?? reservedPricing?.reservedUpfrontCost;
 
-    // Calculate monthly and yearly costs
-    const onDemandMonthly = onDemandHourly * 24 * 30.44; // More accurate monthly calculation
+    const onDemandMonthly = onDemandHourly * 24 * 30.44;
     const onDemandYearly = onDemandHourly * 24 * 365.25;
 
-    // Calculate reserved costs (simplified - in production would use actual RI pricing)
     const reservedMonthly = reservedHourly * 24 * 30.44;
     const reservedYearly = reservedHourly * 24 * 365.25;
-    const upfrontCost = this.estimateReservedUpfrontCost(
-      onDemandHourly,
-      termLength,
-    );
+    const upfrontCost =
+      typeof upfrontFromApi === 'number'
+        ? upfrontFromApi
+        : this.estimateReservedUpfrontCost(onDemandHourly, termLength);
 
     const comparison = {
       onDemand: {
@@ -957,7 +969,7 @@ export class AwsPricingService {
   }
 
   /**
-   * Estimate Reserved Instance upfront costs
+   * Estimate Reserved Instance upfront costs (fallback when AWS Pricing API does not return upfront)
    */
   private estimateReservedUpfrontCost(
     onDemandHourly: number,
@@ -965,13 +977,13 @@ export class AwsPricingService {
   ): number {
     const years = parseInt(termLength) || 1;
     const annualOnDemandCost = onDemandHourly * 24 * 365.25;
-
-    // Simplified upfront cost estimation (in production would use actual AWS pricing)
-    const upfrontPercentage = years === 3 ? 0.5 : years === 1 ? 0.3 : 0.1; // 50% for 3yr, 30% for 1yr, 10% for others
-    const estimatedDiscount = years === 3 ? 0.4 : years === 1 ? 0.3 : 0.2; // 40% for 3yr, 30% for 1yr, 20% for others
-
-    const discountedAnnualCost = annualOnDemandCost * (1 - estimatedDiscount);
-    return Math.round(discountedAnnualCost * upfrontPercentage * 100) / 100;
+    // Conservative fallback: AWS typically offers ~30-40% discount for RI; upfront varies by payment option
+    // All Upfront: ~50% of discounted annual; Partial: ~25%; No Upfront: 0
+    const discount =
+      years === 3 ? 0.45 : years === 1 ? 0.35 : 0.25;
+    const discountedAnnual = annualOnDemandCost * (1 - discount);
+    const upfrontRatio = years === 3 ? 0.45 : years === 1 ? 0.28 : 0.12;
+    return Math.round(discountedAnnual * upfrontRatio * 100) / 100;
   }
 
   /**

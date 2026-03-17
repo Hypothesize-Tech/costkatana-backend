@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Usage } from '../../../schemas/core/usage.schema';
+import { calculateCost, getModelPricing } from '../../../utils/pricing';
 
 interface TrueCostComponents {
   // Provider API costs
@@ -295,7 +296,32 @@ export class TrueCostService {
       return this.calculateCostFromPricingData(metrics, pricingData);
     }
 
-    // Use hardcoded pricing as fallback
+    // Use dynamic pricing registry (utils/pricing) as fallback before hardcoded
+    try {
+      const modelPricing = getModelPricing(metrics.provider, metrics.model);
+      if (modelPricing) {
+        const totalCost = calculateCost(
+          metrics.inputTokens,
+          metrics.outputTokens,
+          metrics.provider,
+          metrics.model,
+        );
+        return {
+          cost: totalCost,
+          details:
+            `${metrics.provider}/${metrics.model}: ` +
+            `Input: ${(metrics.inputTokens / 1000).toFixed(2)}K, ` +
+            `Output: ${(metrics.outputTokens / 1000).toFixed(2)}K, ` +
+            `Total: $${totalCost.toFixed(6)} (from pricing registry)`,
+        };
+      }
+    } catch (err) {
+      this.logger.debug('Pricing registry lookup failed, using hardcoded', {
+        provider: metrics.provider,
+        model: metrics.model,
+      });
+    }
+
     return this.calculateHardcodedPricing(metrics);
   }
 

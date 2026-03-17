@@ -7,6 +7,10 @@ import {
   UpdateFunctionConfigurationCommand,
 } from '@aws-sdk/client-lambda';
 import {
+  CloudWatchClient,
+  GetMetricStatisticsCommand,
+} from '@aws-sdk/client-cloudwatch';
+import {
   IAMClient,
   GetRoleCommand,
   CreateRoleCommand,
@@ -629,7 +633,9 @@ export class LambdaService {
   }
 
   /**
-   * Find over-provisioned Lambda functions
+   * Find over-provisioned Lambda functions using CloudWatch Duration metrics
+   * Lambda does not expose MemoryUtilization by default; we use Duration as a proxy:
+   * high memory + short avg duration suggests potential over-provisioning
    */
   async findOverProvisionedFunctions(
     connection: AWSConnectionDocument,
@@ -645,9 +651,22 @@ export class LambdaService {
     }>
   > {
     const functions = await this.listFunctions(connection, region);
+    const reg = region || connection.allowedRegions?.[0] || 'us-east-1';
+    const credentials = await this.stsCredentialService.assumeRole(connection);
+    const cwClient = new CloudWatchClient({
+      region: reg,
+      credentials: {
+        accessKeyId: credentials.accessKeyId,
+        secretAccessKey: credentials.secretAccessKey,
+        sessionToken: credentials.sessionToken,
+      },
+    });
 
-    // In production, this would analyze CloudWatch metrics for memory utilization
-    // For now, we'll use a simplified approach
+    const endTime = new Date();
+    const startTime = new Date(
+      endTime.getTime() - 7 * 24 * 60 * 60 * 1000,
+    );
+
     const overProvisioned: Array<{
       functionName: string;
       memorySize: number;
@@ -658,22 +677,62 @@ export class LambdaService {
     }> = [];
 
     for (const func of functions) {
-      // Simple heuristic: functions with high memory but potentially low utilization
-      if (func.memorySize >= 1024) {
-        // Assume these might be over-provisioned
-        const recommendedMemory = Math.max(128, func.memorySize / 2);
+      if (func.memorySize < 512) continue;
+
+      let avgDurationMs: number | undefined;
+      try {
+        const resp = await cwClient.send(
+          new GetMetricStatisticsCommand({
+            Namespace: 'AWS/Lambda',
+            MetricName: 'Duration',
+            Dimensions: [{ Name: 'FunctionName', Value: func.functionName }],
+            StartTime: startTime,
+            EndTime: endTime,
+            Period: 86400,
+            Statistics: ['Average'],
+          }),
+        );
+        const pts = resp.Datapoints ?? [];
+        if (pts.length > 0) {
+          avgDurationMs =
+            pts.reduce((s, p) => s + (p.Average ?? 0), 0) / pts.length;
+        }
+      } catch {
+        avgDurationMs = undefined;
+      }
+
+      const likelyOverProvisioned =
+        avgDurationMs !== undefined
+          ? avgDurationMs < 1000 && func.memorySize >= 1024
+          : func.memorySize >= 1024;
+
+      if (likelyOverProvisioned) {
+        const recommendedMemory = Math.max(
+          128,
+          avgDurationMs !== undefined && avgDurationMs < 500
+            ? Math.min(512, func.memorySize / 2)
+            : func.memorySize / 2,
+        );
         const savings = await this.calculateMemorySavings(
           func.memorySize,
           recommendedMemory,
-          region,
+          reg,
         );
 
+        const utilizationPct =
+          avgDurationMs !== undefined && func.memorySize > 0
+            ? Math.round((avgDurationMs / 30000) * 100)
+            : undefined;
         overProvisioned.push({
           functionName: func.functionName,
           memorySize: func.memorySize,
+          averageUtilization: utilizationPct,
           recommendedMemory,
           estimatedMonthlySavings: savings,
-          reason: 'High memory allocation - consider right-sizing',
+          reason:
+            avgDurationMs !== undefined
+              ? `Avg duration ${Math.round(avgDurationMs)}ms with ${func.memorySize}MB - consider right-sizing`
+              : 'High memory allocation - consider right-sizing after reviewing CloudWatch Duration',
         });
       }
     }
@@ -682,7 +741,7 @@ export class LambdaService {
       connectionId: connection._id.toString(),
       totalFunctions: functions.length,
       overProvisionedCount: overProvisioned.length,
-      region,
+      region: reg,
     });
 
     return overProvisioned;

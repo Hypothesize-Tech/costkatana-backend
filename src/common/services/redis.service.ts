@@ -87,9 +87,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       allowStale: false,
     });
 
-    // Use in-memory cache when Redis is disabled (REDIS_ENABLED=false) or in local
-    // development without Redis configuration
     this.isLocalDev = !isRedisEnabled();
+
+    if (process.env.NODE_ENV === 'production' && this.isLocalDev) {
+      throw new Error(
+        'Redis is required in production. Mock Redis cannot be used when NODE_ENV=production. ' +
+          'Set REDIS_ENABLED=true and configure REDIS_HOST, REDIS_URL, or ELASTICACHE_URL.',
+      );
+    }
 
     if (this.isLocalDev) {
       this.logger.log(

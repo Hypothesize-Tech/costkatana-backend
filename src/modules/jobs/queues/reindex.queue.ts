@@ -6,6 +6,7 @@ import { Model, Connection } from 'mongoose';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { isRedisEnabled } from '../../../config/redis';
+import { calculateCost } from '../../../utils/pricing';
 
 interface ReindexJobData {
   type: 'search' | 'vector' | 'cache' | 'external' | 'full';
@@ -526,10 +527,27 @@ export class ReindexQueue implements OnModuleInit {
       updateData.totalTokens = doc.inputTokens + doc.outputTokens;
     }
 
-    // Update cost calculation if pricing data changed
-    if (doc.totalTokens && doc.provider && doc.model) {
-      // This would recalculate costs if pricing changed
-      // For now, just mark for potential update
+    // Recalculate cost using current pricing (provider may be 'service' in Usage schema)
+    const provider = doc.service ?? doc.provider;
+    const inputTokens = doc.promptTokens ?? doc.inputTokens ?? 0;
+    const outputTokens = doc.completionTokens ?? doc.outputTokens ?? 0;
+    if (provider && doc.model && (inputTokens > 0 || outputTokens > 0)) {
+      try {
+        const recalculatedCost = calculateCost(
+          inputTokens,
+          outputTokens,
+          provider,
+          doc.model,
+        );
+        updateData.cost = recalculatedCost;
+        updateData.costNeedsRecalculation = false;
+      } catch (err) {
+        this.logger.warn(
+          `Could not recalculate cost for usage ${doc._id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        updateData.costNeedsRecalculation = true;
+      }
+    } else {
       updateData.costNeedsRecalculation = false;
     }
 

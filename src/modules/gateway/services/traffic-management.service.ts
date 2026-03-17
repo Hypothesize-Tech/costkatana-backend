@@ -870,23 +870,48 @@ export class TrafficManagementService {
   }
 
   /**
-   * Detect suspicious request body patterns
+   * Detect suspicious request body patterns using comprehensive WAF-style rules
    */
   private detectSuspiciousBody(body?: any): boolean {
     if (!body) return false;
 
-    // Check for suspicious patterns in request body
-    // This could include SQL injection patterns, XSS attempts, etc.
-
     const bodyString = typeof body === 'string' ? body : JSON.stringify(body);
+    const normalized = bodyString.toLowerCase();
 
-    // Simple pattern checks (in production, use more sophisticated detection)
     const suspiciousPatterns = [
-      /(\bUNION\b|\bSELECT\b|\bDROP\b|\bINSERT\b|\bUPDATE\b|\bDELETE\b)/i, // SQL injection
-      /<script[^>]*>.*?<\/script>/i, // XSS attempts
-      /javascript:/i, // JavaScript URLs
-      /data:\s*text\/html/i, // Data URLs with HTML
+      // SQL injection
+      /\b(UNION|SELECT|DROP|INSERT|UPDATE|DELETE|EXEC|EXECUTE|TRUNCATE)\b/i,
+      /;\s*--|\/\*|\*\/|' OR '1'='1|" OR "1"="1|1=1|OR 1=1/i,
+      /\b(SLEEP|BENCHMARK|WAITFOR)\s*\(/i,
+      /INTO\s+(OUTFILE|DUMPFILE)/i,
+      // XSS
+      /<script[^>]*>[\s\S]*?<\/script>/i,
+      /javascript:/i,
+      /vbscript:/i,
+      /data:\s*text\/html/i,
+      /on\w+\s*=\s*["']?[^"'\s>]*/i, // onerror=, onload=, onclick=, etc.
+      /<img[^>]+onerror/i,
+      /<iframe[^>]*>/i,
+      /expression\s*\(/i, // CSS expression
+      // NoSQL injection
+      /\$\s*(gt|gte|lt|lte|ne|in|exists|regex)\s*:/i,
+      /\{\s*"\$[a-z]+"\s*:/i,
+      // Command injection
+      /[;&|`]\s*(curl|wget|nc|bash|sh|cmd|powershell)/i,
+      /\$\([^)]*\)|`[^`]*`/, // Command substitution
+      // Path traversal
+      /\.\.\/(\.\.\/)+/,
+      /%2e%2e%2f|%2e%2e\//i,
+      // LDAP injection (filter injection)
+      /\*\)\s*\(|\)\s*\(\s*\*/i,
+      // XML/XXE
+      /<!ENTITY|<!DOCTYPE\s+[^\s[]+\[/i,
+      /SYSTEM\s+["'](?:file|expect|php):/i,
     ];
+
+    const highEntropySuspicious =
+      /(eval\s*\(|Function\s*\(|setTimeout\s*\([^,]*\)|setInterval\s*\([^,]*\))/i;
+    if (highEntropySuspicious.test(bodyString)) return true;
 
     return suspiciousPatterns.some((pattern) => pattern.test(bodyString));
   }

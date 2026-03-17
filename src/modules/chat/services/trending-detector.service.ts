@@ -718,6 +718,7 @@ export class TrendingDetectorService {
 
   /**
    * Fetch trends from Twitter/X API (legacy trends/place endpoint, supports Bearer token)
+   * Throws when TWITTER_BEARER_TOKEN is unset or API fails - no fabricated mock data in production.
    */
   private async fetchTwitterTrends(options: {
     region?: string;
@@ -725,13 +726,18 @@ export class TrendingDetectorService {
   }): Promise<TrendData[]> {
     const bearerToken =
       process.env.TWITTER_BEARER_TOKEN || process.env.TWITTER_API_KEY;
-    const useMockTwitter =
-      process.env.USE_MOCK_TWITTER === 'true' || !bearerToken;
 
-    if (useMockTwitter) {
-      this.logger.debug(
-        'Using mock Twitter trends (Bearer token not configured or USE_MOCK_TWITTER=true)',
+    if (!bearerToken) {
+      this.logger.error(
+        'Twitter trends unavailable: TWITTER_BEARER_TOKEN or TWITTER_API_KEY not configured',
       );
+      throw new InternalServerErrorException(
+        'Twitter trends are not available. Configure TWITTER_BEARER_TOKEN or TWITTER_API_KEY to enable trend detection.',
+      );
+    }
+
+    if (process.env.USE_MOCK_TWITTER === 'true') {
+      this.logger.debug('USE_MOCK_TWITTER=true, returning mock Twitter trends');
       return this.getMockTwitterTrends(options);
     }
 
@@ -775,17 +781,16 @@ export class TrendingDetectorService {
         }
       }
 
-      if (trends.length === 0) {
-        this.logger.warn('Twitter API returned no trends, using mock fallback');
-        return this.getMockTwitterTrends(options);
-      }
-
       return trends;
     } catch (error) {
-      this.logger.warn('Twitter API failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return this.getMockTwitterTrends(options);
+      this.logger.error(
+        'Twitter API failed, cannot return fabricated trends',
+        { error: error instanceof Error ? error.message : String(error) },
+      );
+      throw new InternalServerErrorException(
+        'Twitter trends API is temporarily unavailable. Please try again later.',
+        { cause: error instanceof Error ? error : undefined },
+      );
     }
   }
 

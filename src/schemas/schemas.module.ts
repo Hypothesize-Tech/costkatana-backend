@@ -233,6 +233,10 @@ import {
   McpPermissionAuditLog,
   McpPermissionAuditLogSchema,
 } from './security/mcp-permission-audit-log.schema';
+import {
+  McpSecurityEventLog,
+  McpSecurityEventLogSchema,
+} from './security/mcp-security-event-log.schema';
 import { AuditAnchor, AuditAnchorSchema } from './security/audit-anchor.schema';
 import {
   DailyAnchorSummary,
@@ -477,6 +481,7 @@ import {
       { name: AWSAuditLog.name, schema: AWSAuditLogSchema },
       { name: McpPermission.name, schema: McpPermissionSchema },
       { name: McpPermissionAuditLog.name, schema: McpPermissionAuditLogSchema },
+      { name: McpSecurityEventLog.name, schema: McpSecurityEventLogSchema },
       { name: AuditAnchor.name, schema: AuditAnchorSchema },
       { name: DailyAnchorSummary.name, schema: DailyAnchorSummarySchema },
       { name: RootOfTrust.name, schema: RootOfTrustSchema },

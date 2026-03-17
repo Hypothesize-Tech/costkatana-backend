@@ -1,6 +1,7 @@
 import { SpanProcessor, ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { SpanExporter } from '@opentelemetry/sdk-trace-base';
 import { Context } from '@opentelemetry/api';
+import { Resource } from '@opentelemetry/resources';
 import { loggingService } from '../common/services/logging.service';
 import { redisService } from '../services/redis.service';
 import { getOtelEnricherService } from '../common/services/otel-enricher.service';
@@ -701,19 +702,43 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         },
       );
 
-      loggingService.info(
-        'Step 3: Clearing Redis buffer (spans are complex objects)',
-        {
-          component: 'SelfHealingSpanProcessor',
-          operation: 'loadBufferFromRedis',
-          type: 'redis_recovery',
-          step: 'clear_redis_buffer',
-          note: "In a real implementation, you'd need to reconstruct ReadableSpan objects",
-        },
-      );
+      // Reconstruct ReadableSpan objects and attempt batch export before clearing
+      const reconstructedSpans = this.deserializeSpansToReadable(bufferData);
+      if (reconstructedSpans.length > 0) {
+        loggingService.info(
+          `Step 3: Attempting to export ${reconstructedSpans.length} recovered spans`,
+          {
+            component: 'SelfHealingSpanProcessor',
+            operation: 'loadBufferFromRedis',
+            type: 'redis_recovery',
+            step: 'batch_export',
+          },
+        );
+        await new Promise<void>((resolve, reject) => {
+          this.exporter.export(
+            reconstructedSpans,
+            (result) => {
+              if (result.code === 0) {
+                loggingService.info('Recovered spans exported successfully', {
+                  component: 'SelfHealingSpanProcessor',
+                  operation: 'loadBufferFromRedis',
+                  spanCount: reconstructedSpans.length,
+                });
+              } else {
+                loggingService.warn(
+                  'Recovered span export completed with errors',
+                  {
+                    component: 'SelfHealingSpanProcessor',
+                    error: result.error?.message,
+                  },
+                );
+              }
+              resolve();
+            },
+          );
+        });
+      }
 
-      // Note: In a real implementation, you'd need to reconstruct ReadableSpan objects
-      // For now, we'll just clear the Redis buffer since spans are complex objects
       await redisService.del(this.redisBufferKey);
 
       loggingService.info('Redis buffer loading completed successfully', {
@@ -734,6 +759,50 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         totalTime: `${Date.now() - startTime}ms`,
       });
     }
+  }
+
+  /**
+   * Reconstruct ReadableSpan objects from serialized buffer data for recovery export
+   */
+  private deserializeSpansToReadable(bufferData: any[]): ReadableSpan[] {
+    const result: ReadableSpan[] = [];
+    const spanDataList = bufferData.map(
+      (item) => item.spanData ?? item,
+    ) as any[];
+    for (const s of spanDataList) {
+      try {
+        const resource = new Resource(s.resource ?? {});
+        const span = {
+          spanContext: () => ({
+            traceId: s.traceId ?? '',
+            spanId: s.spanId ?? '',
+            traceFlags: 1,
+          }),
+          parentSpanId: s.parentSpanId,
+          name: s.name ?? 'unknown',
+          kind: s.kind ?? 0,
+          startTime: s.startTime ?? [0, 0],
+          endTime: s.endTime ?? s.startTime ?? [0, 0],
+          status: s.status ?? { code: 0 },
+          attributes: s.attributes ?? {},
+          events: s.events ?? [],
+          links: s.links ?? [],
+          resource,
+          instrumentationScope: { name: 'recovered', version: '1.0.0' },
+          droppedAttributesCount: 0,
+          droppedEventsCount: 0,
+          droppedLinksCount: 0,
+          ended: true,
+        } as unknown as ReadableSpan;
+        result.push(span);
+      } catch (err) {
+        loggingService.warn('Failed to reconstruct span for recovery', {
+          spanId: s?.spanId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return result;
   }
 
   /**

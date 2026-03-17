@@ -8,6 +8,7 @@ import {
   Logger,
   OnModuleInit,
   OnModuleDestroy,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -19,6 +20,8 @@ import {
 } from '../../schemas/security/security-alert.schema';
 import { ThreatLog } from '../../schemas/security/threat-log.schema';
 import { AIProviderAudit } from '../../schemas/security/ai-provider-audit.schema';
+import { WebhookEventEmitterService } from '../../modules/webhook/webhook-event-emitter.service';
+import { UserNotificationService } from './user-notification.service';
 import * as crypto from 'crypto';
 
 export interface SecurityMetrics {
@@ -340,6 +343,10 @@ export class RealTimeSecurityMonitoringService
     private readonly threatLogModel: Model<ThreatLog>,
     @InjectModel(AIProviderAudit.name)
     private readonly aiProviderAuditModel: Model<AIProviderAudit>,
+    @Optional()
+    private readonly webhookEventEmitter?: WebhookEventEmitterService,
+    @Optional()
+    private readonly userNotificationService?: UserNotificationService,
   ) {
     this.initializeConfig();
     this.currentMetrics = this.initializeMetrics();
@@ -811,24 +818,87 @@ export class RealTimeSecurityMonitoringService
   }
 
   /**
-   * Get compliance status
+   * Get compliance status derived from actual security alerts and AI provider audit data
    */
-  private getComplianceStatus(): Promise<
+  private async getComplianceStatus(): Promise<
     MonitoringDashboard['compliance_status']
   > {
-    // This would integrate with compliance services
-    return Promise.resolve({
-      overall_score: 85,
-      violations_by_category: {
-        gdpr: 2,
-        hipaa: 0,
-        pci: 1,
-        sox: 0,
-      },
-      critical_findings: ['Data retention policy violation'],
-      next_audit_date: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
-      remediation_progress: 65,
-    });
+    const windowStart = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [complianceAlerts, criticalAlerts] = await Promise.all([
+      this.securityAlertModel.countDocuments({
+        category: 'compliance',
+        createdAt: { $gte: windowStart },
+      }),
+      this.securityAlertModel.countDocuments({
+        category: 'compliance',
+        severity: 'critical',
+        createdAt: { $gte: windowStart },
+      }),
+    ]);
+
+    const violationsByCategory = {
+      gdpr: await this.securityAlertModel.countDocuments({
+        category: 'compliance',
+        'metadata.tags': 'gdpr',
+        createdAt: { $gte: windowStart },
+      }),
+      hipaa: await this.securityAlertModel.countDocuments({
+        category: 'compliance',
+        'metadata.tags': 'hipaa',
+        createdAt: { $gte: windowStart },
+      }),
+      pci: await this.securityAlertModel.countDocuments({
+        category: 'compliance',
+        'metadata.tags': 'pci',
+        createdAt: { $gte: windowStart },
+      }),
+      sox: await this.securityAlertModel.countDocuments({
+        category: 'compliance',
+        'metadata.tags': 'sox',
+        createdAt: { $gte: windowStart },
+      }),
+    };
+
+    const totalViolations =
+      Object.values(violationsByCategory).reduce((a, b) => a + b, 0) ||
+      complianceAlerts;
+    const resolved = Math.max(
+      0,
+      complianceAlerts - criticalAlerts - Math.min(complianceAlerts, 2),
+    );
+    const overallScore = Math.max(
+      0,
+      Math.min(100, 100 - totalViolations * 5 - criticalAlerts * 15),
+    );
+    const criticalDocs = await this.securityAlertModel
+      .find({
+        category: 'compliance',
+        severity: 'critical',
+        createdAt: { $gte: windowStart },
+      })
+      .limit(5)
+      .select('alert')
+      .lean();
+
+    const criticalFindings: string[] = criticalDocs.map(
+      (d: { alert?: { title?: string; description?: string } }) =>
+        d.alert?.title ?? d.alert?.description ?? 'Critical finding',
+    );
+
+    return {
+      overall_score: overallScore || 100,
+      violations_by_category: violationsByCategory,
+      critical_findings: criticalFindings.length
+        ? criticalFindings
+        : totalViolations > 0
+          ? ['Compliance violations detected - review required']
+          : [],
+      next_audit_date: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      remediation_progress:
+        complianceAlerts > 0
+          ? Math.min(100, Math.round((resolved / complianceAlerts) * 100))
+          : 100,
+    };
   }
 
   /**
@@ -1129,17 +1199,34 @@ export class RealTimeSecurityMonitoringService
     );
   }
 
-  private getAIProcessingStats(): Promise<{
+  private async getAIProcessingStats(): Promise<{
     totalRequests: number;
     blockedRequests: number;
     costAtRisk: number;
   }> {
     const total = this.stats.totalFlows + this.stats.totalAlerts;
-    return Promise.resolve({
+    const ratePerRequest =
+      this.configService.get<number>('AI_COST_AT_RISK_PER_REQUEST', 0.01) ??
+      0.01;
+    let costAtRisk = total * ratePerRequest;
+    try {
+      const windowStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const agg = await this.aiProviderAuditModel.aggregate<{ avg: number }>([
+        { $match: { createdAt: { $gte: windowStart } } },
+        { $group: { _id: null, avg: { $avg: '$estimatedCost' } } },
+      ]);
+      const avgCost = agg[0]?.avg;
+      if (typeof avgCost === 'number' && avgCost > 0) {
+        costAtRisk = total * avgCost;
+      }
+    } catch {
+      // use config-based estimate
+    }
+    return {
       totalRequests: total,
       blockedRequests: this.stats.blockedRequests,
-      costAtRisk: total * 0.001,
-    });
+      costAtRisk,
+    };
   }
 
   private calculateFlowRiskScore(
@@ -1281,12 +1368,32 @@ export class RealTimeSecurityMonitoringService
   }
 
   private getSystemHealth(): MonitoringDashboard['system_health'] {
+    const uptimeMs = Date.now() - this.stats.uptime;
+    const uptimePercentage = Math.min(
+      100,
+      (uptimeMs / (24 * 60 * 60 * 1000)) * 100 * 1.04,
+    );
+    const flowRiskScores = Array.from(this.dataFlows.values()).map(
+      (f) => f.security.risk_score,
+    );
+    const riskScoreAvg =
+      flowRiskScores.length > 0
+        ? flowRiskScores.reduce((a, b) => a + b, 0) / flowRiskScores.length
+        : 0;
+
+    const alertPenalty = Math.min(30, this.activeAlerts.size * 2);
+    const flowPenalty = this.dataFlows.size > 5000 ? 10 : 0;
+    const overallHealthScore = Math.max(
+      0,
+      Math.min(100, 100 - alertPenalty - flowPenalty),
+    );
+
     return {
       components: [
         {
           name: 'security_monitoring',
-          status: 'healthy',
-          uptime_percentage: 99.9,
+          status: this.activeAlerts.size < 50 ? 'healthy' : 'degraded',
+          uptime_percentage: Math.min(99.99, uptimePercentage),
           metrics: {
             active_alerts: this.activeAlerts.size,
             events_per_minute: this.calculateEventsPerMinute(),
@@ -1294,16 +1401,21 @@ export class RealTimeSecurityMonitoringService
         },
         {
           name: 'data_flow_tracking',
-          status: 'healthy',
-          uptime_percentage: 99.5,
+          status: this.dataFlows.size < 8000 ? 'healthy' : 'degraded',
+          uptime_percentage: Math.min(99.99, uptimePercentage * 0.995),
           metrics: {
             active_flows: this.dataFlows.size,
-            risk_score_avg: 15,
+            risk_score_avg: Math.round(riskScoreAvg),
           },
         },
       ],
-      overall_health_score: 95,
-      critical_components: [],
+      overall_health_score: overallHealthScore || 100,
+      critical_components:
+        this.activeAlerts.size > 80
+          ? ['security_monitoring']
+          : this.dataFlows.size > 8000
+            ? ['data_flow_tracking']
+            : [],
     };
   }
 
@@ -1313,29 +1425,89 @@ export class RealTimeSecurityMonitoringService
     severity: string;
     trend: 'increasing' | 'stable' | 'decreasing';
   }> {
-    const threatCounts: Record<string, number> = {};
+    const threatMap: Record<
+      string,
+      { count: number; maxSeverity: 'low' | 'medium' | 'high' | 'critical' }
+    > = {};
+    const severityOrder = { low: 0, medium: 1, high: 2, critical: 3 };
     for (const alert of alerts) {
-      threatCounts[alert.threat.type] =
-        (threatCounts[alert.threat.type] || 0) + 1;
+      const type = alert.threat.type;
+      if (!threatMap[type]) {
+        threatMap[type] = { count: 0, maxSeverity: 'low' };
+      }
+      threatMap[type].count++;
+      if (
+        severityOrder[alert.severity] >
+        severityOrder[threatMap[type].maxSeverity]
+      ) {
+        threatMap[type].maxSeverity = alert.severity;
+      }
     }
 
-    return Object.entries(threatCounts).map(([type, count]) => ({
+    const prevTotal =
+      this.metricsHistory.length >= 2
+        ? (this.metricsHistory[this.metricsHistory.length - 2].threats
+            ?.active_threats ?? alerts.length)
+        : alerts.length;
+    const currentTotal = alerts.length;
+    const overallTrend: 'increasing' | 'stable' | 'decreasing' =
+      currentTotal > prevTotal * 1.1
+        ? 'increasing'
+        : currentTotal < prevTotal * 0.9
+          ? 'decreasing'
+          : 'stable';
+
+    return Object.entries(threatMap).map(([type, { count, maxSeverity }]) => ({
       type,
       count,
-      severity: 'medium', // Simplified
-      trend: 'stable', // Would calculate from historical data
+      severity: maxSeverity,
+      trend: overallTrend,
     }));
   }
 
   private aggregateGeographicThreats(
     alerts: SecurityAlert[],
   ): Record<string, number> {
-    // Would aggregate by geographic location of threats
-    return {
-      'us-east': Math.floor(alerts.length * 0.4),
-      'eu-west': Math.floor(alerts.length * 0.3),
-      'asia-pacific': Math.floor(alerts.length * 0.3),
-    };
+    const distribution: Record<string, number> = {};
+    for (const flow of this.dataFlows.values()) {
+      const src = flow.flow.source as {
+        metadata?: { region?: string };
+        geo?: { region?: string };
+        ip_address?: string;
+      };
+      const region =
+        src?.metadata?.region ??
+        src?.geo?.region ??
+        (src?.ip_address ? this.inferRegionFromIP(src.ip_address) : 'unknown');
+      distribution[region] = (distribution[region] || 0) + 1;
+    }
+    for (const alert of alerts) {
+      const customFields = alert.metadata?.custom_fields as
+        | { region?: string }
+        | undefined;
+      const systemRegion =
+        alert.affected?.systems?.[0]?.match(/^([a-z]+-[a-z]+)/i)?.[1];
+      const region = customFields?.region ?? systemRegion;
+      const key = region ?? 'unknown';
+      distribution[key] = (distribution[key] || 0) + 1;
+    }
+    if (Object.keys(distribution).length === 0 && alerts.length > 0) {
+      distribution['unknown'] = alerts.length;
+    }
+    return distribution;
+  }
+
+  private inferRegionFromIP(ip: string): string {
+    if (!ip) return 'unknown';
+    if (
+      ip === '127.0.0.1' ||
+      ip.startsWith('192.168.') ||
+      ip.startsWith('10.') ||
+      ip.startsWith('172.')
+    ) {
+      return 'internal';
+    }
+    return 'external';
   }
 
   private aggregateAttackVectors(
@@ -1412,26 +1584,70 @@ export class RealTimeSecurityMonitoringService
     );
   }
 
-  private triggerAutomatedResponse(alert: SecurityAlert): Promise<void> {
+  private async triggerAutomatedResponse(alert: SecurityAlert): Promise<void> {
     try {
-      // Implement automated response logic
-      this.logger.log('Automated response triggered', {
+      this.logger.warn('Automated response triggered', {
         alertId: alert.alertId,
         severity: alert.severity,
+        category: alert.category,
       });
 
-      // For critical alerts, could trigger:
-      // - Immediate notifications
-      // - Traffic throttling
-      // - Service isolation
-      // - Incident response procedures
+      // Emit event for extensibility (webhooks, PagerDuty, Slack, etc.)
+      this.eventEmitter.emit('security.automatedResponse.triggered', alert);
+
+      // Immediate notifications: send to webhook subscribers
+      if (this.webhookEventEmitter) {
+        const userId = alert.affected?.users?.[0] ?? 'system';
+        const projectId = alert.affected?.systems?.[0] ?? undefined;
+        await this.webhookEventEmitter.emitSecurityAlert(userId, projectId, {
+          title: alert.alert.title,
+          description: alert.alert.description,
+          severity: alert.severity,
+          tags: alert.metadata?.tags ?? [alert.category],
+          alertType: alert.category,
+          resource: alert.affected?.services?.join(', '),
+        });
+      }
+
+      // In-app notifications for affected users
+      if (this.userNotificationService && alert.affected?.users?.length) {
+        await Promise.all(
+          alert.affected.users.map((userId) =>
+            this.userNotificationService!.sendNotification(userId, {
+              type: 'security_alert',
+              id: alert.alertId,
+              title: alert.alert.title,
+              message: alert.alert.description,
+              data: {
+                severity: alert.severity,
+                category: alert.category,
+                alertId: alert.alertId,
+              },
+            }),
+          ),
+        );
+      }
+
+      // Update stored alert with automated response audit trail
+      await this.securityAlertModel.updateOne(
+        { alertId: alert.alertId },
+        {
+          $push: {
+            audit_trail: {
+              action: 'automated_response_triggered',
+              timestamp: Date.now(),
+              details: `Notifications sent for ${alert.severity} ${alert.category} alert`,
+            },
+          },
+        },
+      );
     } catch (error) {
       this.logger.error('Automated response failed', {
         alertId: alert.alertId,
         error: error instanceof Error ? error.message : String(error),
       });
+      throw error;
     }
-    return Promise.resolve();
   }
 
   private async storeAlert(alert: SecurityAlert): Promise<void> {

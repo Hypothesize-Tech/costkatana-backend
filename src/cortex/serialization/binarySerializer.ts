@@ -393,8 +393,14 @@ export class SchemaBasedSerializer {
 
   private encodeValue(value: any, type: string, repeated?: boolean): Buffer {
     if (repeated && Array.isArray(value)) {
-      const buffers = value.map((v) => this.encodeSingleValue(v, type));
-      return Buffer.concat(buffers);
+      const parts: Buffer[] = [];
+      for (const v of value) {
+        const elemBuf = this.encodeSingleValue(v, type);
+        const lenBuf = Buffer.allocUnsafe(4);
+        lenBuf.writeUInt32LE(elemBuf.length, 0);
+        parts.push(lenBuf, elemBuf);
+      }
+      return Buffer.concat(parts);
     }
     return this.encodeSingleValue(value, type);
   }
@@ -420,9 +426,18 @@ export class SchemaBasedSerializer {
 
   private decodeValue(buffer: Buffer, type: string, repeated?: boolean): any {
     if (repeated) {
-      // For simplicity, assuming single value for now
-      // In production, would need length prefixes for each array element
-      return [this.decodeSingleValue(buffer, type)];
+      const result: any[] = [];
+      let offset = 0;
+      while (offset < buffer.length) {
+        if (offset + 4 > buffer.length) break;
+        const elemLen = buffer.readUInt32LE(offset);
+        offset += 4;
+        if (offset + elemLen > buffer.length) break;
+        const elemBuf = buffer.subarray(offset, offset + elemLen);
+        offset += elemLen;
+        result.push(this.decodeSingleValue(elemBuf, type));
+      }
+      return result;
     }
     return this.decodeSingleValue(buffer, type);
   }

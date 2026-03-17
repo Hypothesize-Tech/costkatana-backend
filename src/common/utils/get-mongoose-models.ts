@@ -56,6 +56,10 @@ import {
   MongodbMcpAuditLog,
   MongodbMcpAuditLogSchema,
 } from '../../schemas/security/mongodb-mcp-audit-log.schema';
+import {
+  McpSecurityEventLog,
+  McpSecurityEventLogSchema,
+} from '../../schemas/security/mcp-security-event-log.schema';
 
 function getModel<T>(name: string, schema: mongoose.Schema): Model<T> {
   return (mongoose.models[name] as Model<T>) ?? (mongoose.model<T>(name, schema) as Model<T>);
@@ -84,3 +88,5 @@ export const getMcpPermissionModel = () =>
   getModel<McpPermission>(McpPermission.name, McpPermissionSchema);
 export const getMongodbMcpAuditLogModel = () =>
   getModel<MongodbMcpAuditLog>(MongodbMcpAuditLog.name, MongodbMcpAuditLogSchema);
+export const getMcpSecurityEventLogModel = () =>
+  getModel<McpSecurityEventLog>(McpSecurityEventLog.name, McpSecurityEventLogSchema);

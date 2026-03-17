@@ -97,8 +97,9 @@ export class RedisService {
     });
 
     // Use in-memory cache only for local development without Redis configuration
-    // Production and staging environments MUST use Redis
+    // Production MUST use real Redis - never allow mock in NODE_ENV=production
     this.isLocalDev =
+      process.env.NODE_ENV !== 'production' &&
       process.env.NODE_ENV === 'development' &&
       !process.env.REDIS_HOST &&
       !process.env.REDIS_URL &&
