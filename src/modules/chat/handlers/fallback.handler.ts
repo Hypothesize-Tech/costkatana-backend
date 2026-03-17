@@ -4,7 +4,7 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import {
   HandlerRequest,
   HandlerResult,
@@ -123,7 +123,7 @@ export class FallbackHandler {
 
     if (streamingCallback) {
       // Use streaming response for real-time token delivery
-      const streamResult = await this.bedrockService.streamModelResponse(
+      const streamResult = await BedrockService.streamModelResponse(
         messages,
         request.modelId || 'nova-pro-v1:0',
         {
@@ -137,18 +137,15 @@ export class FallbackHandler {
       outputTokens = streamResult.outputTokens;
     } else {
       // Use regular invocation for non-streaming
-      const response = await this.bedrockService.invokeModel(
+      const response = await BedrockService.invokeModel(
         messages[messages.length - 1]?.content || '',
         request.modelId || 'nova-pro-v1:0',
         {
-          maxTokens: request.maxTokens || 1000,
-          temperature: request.temperature || 0.7,
           recentMessages: context.recentMessages,
           useSystemPrompt: true,
-          userId: request.userId,
         },
       );
-      responseText = response.response || '';
+      responseText = typeof response === 'string' ? response : (response as { response?: string })?.response || '';
       // Estimate tokens for non-streaming (could be improved)
       inputTokens = Math.ceil(
         (messages[messages.length - 1]?.content || '').length / 4,

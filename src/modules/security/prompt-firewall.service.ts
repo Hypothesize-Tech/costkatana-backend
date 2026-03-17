@@ -25,7 +25,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import crypto from 'crypto';
-import { BedrockService } from '../../services/bedrock.service';
+import { BedrockService } from '../bedrock/bedrock.service';
 import { ServiceHelper } from '../../utils/serviceHelper';
 import {
   HtmlSecurityService,

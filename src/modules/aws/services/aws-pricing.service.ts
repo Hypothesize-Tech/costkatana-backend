@@ -14,6 +14,12 @@ export interface AWSPricingInfo {
   pricePerHour?: number;
   pricePerGBSecond?: number;
   pricePerRequest?: number;
+  /** ECS Fargate vCPU-hour rate */
+  pricePerVcpuHour?: number;
+  /** ECS Fargate memory GB-hour rate */
+  pricePerGBHour?: number;
+  /** S3 storage per GB-month */
+  pricePerGBMonth?: number;
   currency: string;
   effectiveDate: Date;
   pricingModel?: 'OnDemand' | 'Reserved' | 'Spot';
@@ -27,6 +33,7 @@ export interface PricingFilters {
   region?: string;
   instanceType?: string;
   operation?: string;
+  productFamily?: string;
 }
 
 @Injectable()
@@ -115,6 +122,155 @@ export class AwsPricingService {
       });
       return null;
     }
+  }
+
+  /**
+   * Get RDS pricing information
+   */
+  async getRDSPricing(
+    dbInstanceClass: string,
+    region: string = 'us-east-1',
+    engine: string = 'MySQL',
+  ): Promise<AWSPricingInfo | null> {
+    try {
+      const cacheKey = `rds-${dbInstanceClass}-${region}`;
+      const cached = this.getCachedPricing(cacheKey);
+      if (cached) return cached;
+
+      const filters: PricingFilters = {
+        serviceCode: 'AmazonRDS',
+        region,
+        instanceType: dbInstanceClass,
+      };
+      const params = await this.getPricingWithEngine(filters, engine);
+      if (params) {
+        this.setCachedPricing(cacheKey, params);
+        return params;
+      }
+      return null;
+    } catch (error) {
+      this.logger.error('Failed to get RDS pricing', {
+        dbInstanceClass,
+        region,
+        error,
+        context: 'AwsPricingService',
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Get S3 pricing for a region
+   */
+  async getS3Pricing(
+    region: string = 'us-east-1',
+  ): Promise<AWSPricingInfo | null> {
+    try {
+      const cacheKey = `s3-${region}`;
+      const cached = this.getCachedPricing(cacheKey);
+      if (cached) return cached;
+
+      const filters: PricingFilters = {
+        serviceCode: 'AmazonS3',
+        region,
+      };
+      const pricing = await this.getPricing(filters);
+      if (pricing) {
+        this.setCachedPricing(cacheKey, pricing);
+      }
+      return pricing;
+    } catch (error) {
+      this.logger.error('Failed to get S3 pricing', { region, error });
+      return null;
+    }
+  }
+
+  /**
+   * Get DynamoDB pricing for provisioned capacity
+   */
+  async getDynamoDBPricing(
+    region: string = 'us-east-1',
+    billingMode: 'PROVISIONED' | 'PAY_PER_REQUEST' = 'PROVISIONED',
+  ): Promise<AWSPricingInfo | null> {
+    if (billingMode === 'PAY_PER_REQUEST') {
+      return null; // Pay-per-request has no hourly rate
+    }
+    try {
+      const cacheKey = `dynamodb-${billingMode}-${region}`;
+      const cached = this.getCachedPricing(cacheKey);
+      if (cached) return cached;
+
+      const filters: PricingFilters = {
+        serviceCode: 'AmazonDynamoDB',
+        region,
+        productFamily: 'DynamoDB Write Capacity',
+      };
+      const pricing = await this.getPricing(filters);
+      if (pricing) {
+        this.setCachedPricing(cacheKey, pricing);
+      }
+      return pricing;
+    } catch (error) {
+      this.logger.error('Failed to get DynamoDB pricing', { region, error });
+      return null;
+    }
+  }
+
+  /**
+   * Get ECS Fargate pricing for a region
+   */
+  async getECSFargatePricing(
+    region: string = 'us-east-1',
+  ): Promise<AWSPricingInfo | null> {
+    try {
+      const cacheKey = `ecs-fargate-${region}`;
+      const cached = this.getCachedPricing(cacheKey);
+      if (cached) return cached;
+
+      const filters: PricingFilters = {
+        serviceCode: 'AmazonECS',
+        region,
+      };
+      const pricing = await this.getPricing(filters);
+      if (pricing) {
+        this.setCachedPricing(cacheKey, pricing);
+      }
+      return pricing;
+    } catch (error) {
+      this.logger.error('Failed to get ECS pricing', { region, error });
+      return null;
+    }
+  }
+
+  /**
+   * Helper to get pricing with engine filter for RDS
+   */
+  private async getPricingWithEngine(
+    filters: PricingFilters,
+    engine: string,
+  ): Promise<AWSPricingInfo | null> {
+    const params: GetProductsCommandInput = {
+      ServiceCode: filters.serviceCode,
+      Filters: [
+        {
+          Type: 'TERM_MATCH',
+          Field: 'regionCode',
+          Value: filters.region || 'us-east-1',
+        },
+        {
+          Type: 'TERM_MATCH',
+          Field: 'instanceType',
+          Value: filters.instanceType || '',
+        },
+        { Type: 'TERM_MATCH', Field: 'engine', Value: engine },
+      ],
+      MaxResults: this.MAX_RESULTS,
+    };
+    const response = await this.pricingClient.send(
+      new GetProductsCommand(params),
+    );
+    if (!response.PriceList?.length) return null;
+    return this.findBestPricingMatch(response.PriceList, filters);
   }
 
   /**
@@ -285,6 +441,14 @@ export class AwsPricingService {
       });
     }
 
+    if (filters.productFamily) {
+      params.Filters!.push({
+        Type: 'TERM_MATCH',
+        Field: 'productFamily',
+        Value: filters.productFamily,
+      });
+    }
+
     // Add additional filters based on service type
     switch (filters.serviceCode) {
       case 'AmazonEC2':
@@ -350,7 +514,10 @@ export class AwsPricingService {
     return !!(
       pricingInfo.pricePerHour ||
       pricingInfo.pricePerGBSecond ||
-      pricingInfo.pricePerRequest
+      pricingInfo.pricePerRequest ||
+      pricingInfo.pricePerVcpuHour ||
+      pricingInfo.pricePerGBHour ||
+      pricingInfo.pricePerGBMonth
     );
   }
 
@@ -410,7 +577,10 @@ export class AwsPricingService {
       if (
         !pricingInfo.pricePerHour &&
         !pricingInfo.pricePerGBSecond &&
-        !pricingInfo.pricePerRequest
+        !pricingInfo.pricePerRequest &&
+        !pricingInfo.pricePerVcpuHour &&
+        !pricingInfo.pricePerGBHour &&
+        !pricingInfo.pricePerGBMonth
       ) {
         this.logger.warn('No pricing information extracted from AWS response', {
           serviceCode: filters.serviceCode,
@@ -826,7 +996,9 @@ export class AwsPricingService {
     );
     scenarios.push({
       scenario: '100% utilization (24/7)',
-      recommended: (highUtilSavings > 1000 ? 'reserved' : 'ondemand') as 'reserved' | 'ondemand',
+      recommended: (highUtilSavings > 1000 ? 'reserved' : 'ondemand') as
+        | 'reserved'
+        | 'ondemand',
       savings: highUtilSavings,
     });
 
@@ -838,7 +1010,9 @@ export class AwsPricingService {
     );
     scenarios.push({
       scenario: '70% utilization (business hours)',
-      recommended: (mediumUtilSavings > 500 ? 'reserved' : 'ondemand') as 'reserved' | 'ondemand',
+      recommended: (mediumUtilSavings > 500 ? 'reserved' : 'ondemand') as
+        | 'reserved'
+        | 'ondemand',
       savings: mediumUtilSavings,
     });
 
@@ -850,7 +1024,9 @@ export class AwsPricingService {
     );
     scenarios.push({
       scenario: '30% utilization (development)',
-      recommended: (lowUtilSavings > 100 ? 'reserved' : 'ondemand') as 'reserved' | 'ondemand',
+      recommended: (lowUtilSavings > 100 ? 'reserved' : 'ondemand') as
+        | 'reserved'
+        | 'ondemand',
       savings: lowUtilSavings,
     });
 
@@ -1180,6 +1356,14 @@ export class AwsPricingService {
           case 'AWSLambda':
             this.parseLambdaPricing(price, unit, description, pricingInfo);
             break;
+          case 'AmazonECS':
+            this.parseECSPricing(price, unit, description, pricingInfo);
+            break;
+          case 'AmazonS3':
+            this.parseS3Pricing(price, unit, description, pricingInfo);
+            break;
+          case 'AmazonRDS':
+          case 'AmazonDynamoDB':
           default:
             this.parseGenericPricing(price, unit, description, pricingInfo);
             break;
@@ -1249,6 +1433,55 @@ export class AwsPricingService {
           price,
           description,
         });
+        break;
+    }
+  }
+
+  /**
+   * Parse ECS Fargate pricing (vCPU-hours and GB-hours)
+   */
+  private parseECSPricing(
+    price: number,
+    unit: string,
+    _description: string,
+    pricingInfo: AWSPricingInfo,
+  ): void {
+    switch (unit) {
+      case 'vCPU-Hours':
+      case 'vCPU-Hour':
+        pricingInfo.pricePerVcpuHour = price;
+        break;
+      case 'GB-Hours':
+      case 'GB-Hour':
+        pricingInfo.pricePerGBHour = price;
+        break;
+      case 'Hrs':
+      case 'Hours':
+        if (!pricingInfo.pricePerVcpuHour) pricingInfo.pricePerVcpuHour = price;
+        break;
+      default:
+        break;
+    }
+  }
+
+  /**
+   * Parse S3 storage pricing
+   */
+  private parseS3Pricing(
+    price: number,
+    unit: string,
+    _description: string,
+    pricingInfo: AWSPricingInfo,
+  ): void {
+    switch (unit) {
+      case 'GB-Mo':
+      case 'GB-Month':
+        pricingInfo.pricePerGBMonth = price;
+        break;
+      case 'GB':
+        if (!pricingInfo.pricePerGBMonth) pricingInfo.pricePerGBMonth = price;
+        break;
+      default:
         break;
     }
   }
@@ -1716,17 +1949,26 @@ export class AwsPricingService {
         };
 
       case 'AmazonS3':
-        // Updated S3 pricing
+        // Updated S3 pricing (Standard storage)
         return {
           service: 'AmazonS3',
-          pricePerGBSecond: (0.023 / (30 * 24 * 3600)) * regionMultiplier, // Convert GB-month to GB-second
+          pricePerGBMonth: 0.023 * regionMultiplier,
+          pricePerGBSecond: (0.023 / (30 * 24 * 3600)) * regionMultiplier,
         };
 
       case 'AmazonECS':
-        // Updated ECS/Fargate pricing
+        // Updated ECS/Fargate pricing (vCPU + memory)
         return {
           service: 'AmazonECS',
-          pricePerHour: 0.04048 * regionMultiplier, // vCPU per hour
+          pricePerVcpuHour: 0.04048 * regionMultiplier,
+          pricePerGBHour: 0.004445 * regionMultiplier,
+        };
+
+      case 'AmazonDynamoDB':
+        // Provisioned write capacity unit per hour
+        return {
+          service: 'AmazonDynamoDB',
+          pricePerHour: 0.00065 * regionMultiplier, // per WCU-hour
         };
 
       default:

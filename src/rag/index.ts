@@ -26,7 +26,10 @@ export { IterativeRAGPattern } from './patterns/iterative.pattern';
 export { RecursiveRAGPattern } from './patterns/recursive.pattern';
 
 // Orchestrator
-export { ModularRAGOrchestrator, modularRAGOrchestrator } from './orchestrator/modularRAG.orchestrator';
+export {
+  ModularRAGOrchestrator,
+  modularRAGOrchestrator,
+} from './orchestrator/modularRAG.orchestrator';
 
 // Configuration
 export * from './config/default.config';
@@ -34,4 +37,3 @@ export * from './config/default.config';
 // Evaluation (RAGAS-aligned metrics)
 export { RAGEvaluator, ragEvaluator } from './evaluation';
 export type { EvaluationMetrics, EvaluationInput } from './evaluation';
-

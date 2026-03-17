@@ -4,7 +4,7 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { HybridSearchResult } from './hybrid-search.service';
 
 export interface RerankOptions {
@@ -97,15 +97,16 @@ Return a JSON array of scores (0-1) for each candidate, where 1.0 is most releva
 
 Return ONLY the JSON array, no other text.`;
 
-      const response = await this.bedrockService.invokeModel(
+      const response = await BedrockService.invokeModel(
         prompt,
         'anthropic.claude-3-5-sonnet-20241022-v2:0',
-        { maxTokens: 1000, temperature: 0.3 },
+        { useSystemPrompt: false },
       );
 
       let scores: number[] = [];
-      if (response.response && response.response.trim()) {
-        const responseText = response.response.trim();
+      const responseText =
+        typeof response === 'string' ? response.trim() : '';
+      if (responseText) {
         const jsonMatch = responseText.match(/\[[\d.,\s]+\]/);
         if (jsonMatch) {
           try {

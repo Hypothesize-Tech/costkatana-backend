@@ -10,7 +10,7 @@ import {
   FusionConfig,
 } from '../types/rag.types';
 import { Document } from '@langchain/core/documents';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 export class FusionModule extends BaseRAGModule {
   protected config: FusionConfig;
@@ -20,14 +20,14 @@ export class FusionModule extends BaseRAGModule {
       enabled: true,
       strategy: 'rrf',
       deduplicationThreshold: 0.85,
-    }
+    },
   ) {
     super('FusionModule', 'fusion', config);
     this.config = config;
   }
 
   protected async executeInternal(
-    input: RAGModuleInput
+    input: RAGModuleInput,
   ): Promise<RAGModuleOutput> {
     const { documents, metadata, config } = input;
 
@@ -42,7 +42,9 @@ export class FusionModule extends BaseRAGModule {
 
     try {
       // If metadata contains multiple document lists, fuse them
-      const documentSets = (metadata?.documentSets as Document[][] | undefined) ?? [documents ?? []];
+      const documentSets = (metadata?.documentSets as
+        | Document[][]
+        | undefined) ?? [documents ?? []];
 
       let fusedDocuments: Document[];
 
@@ -54,7 +56,8 @@ export class FusionModule extends BaseRAGModule {
         case 'weighted':
           fusedDocuments = this.weightedFusion(
             documentSets,
-            (effectiveConfig.weights as Record<string, number> | undefined) ?? {}
+            (effectiveConfig.weights as Record<string, number> | undefined) ??
+              {},
           );
           break;
 
@@ -73,14 +76,17 @@ export class FusionModule extends BaseRAGModule {
       // Deduplicate
       const deduplicated = this.deduplicateDocuments(
         fusedDocuments,
-        (effectiveConfig.deduplicationThreshold as number | undefined) ?? 0.85
+        (effectiveConfig.deduplicationThreshold as number | undefined) ?? 0.85,
       );
 
       loggingService.info('Documents fused', {
         component: 'FusionModule',
         strategy: effectiveConfig.strategy,
         inputSets: documentSets.length,
-        totalDocuments: documentSets.reduce((sum: number, set: Document[]) => sum + set.length, 0),
+        totalDocuments: documentSets.reduce(
+          (sum: number, set: Document[]) => sum + set.length,
+          0,
+        ),
         fusedCount: deduplicated.length,
       });
 
@@ -131,7 +137,7 @@ export class FusionModule extends BaseRAGModule {
     // Sort by score
     const fusedDocs = Array.from(scoreMap.values())
       .sort((a, b) => b.score - a.score)
-      .map(entry => {
+      .map((entry) => {
         entry.document.metadata.fusionScore = entry.score;
         return entry.document;
       });
@@ -144,7 +150,7 @@ export class FusionModule extends BaseRAGModule {
    */
   private weightedFusion(
     documentSets: Document[][],
-    weights: Record<string, number>
+    weights: Record<string, number>,
   ): Document[] {
     const scoreMap = new Map<string, { document: Document; score: number }>();
 
@@ -168,7 +174,7 @@ export class FusionModule extends BaseRAGModule {
     // Sort by score
     const fusedDocs = Array.from(scoreMap.values())
       .sort((a, b) => b.score - a.score)
-      .map(entry => {
+      .map((entry) => {
         entry.document.metadata.fusionScore = entry.score;
         return entry.document;
       });
@@ -180,10 +186,13 @@ export class FusionModule extends BaseRAGModule {
    * Distribution-based score fusion
    */
   private distributionBasedFusion(documentSets: Document[][]): Document[] {
-    const scoreMap = new Map<string, { document: Document; scores: number[] }>();
+    const scoreMap = new Map<
+      string,
+      { document: Document; scores: number[] }
+    >();
 
     for (const docSet of documentSets) {
-      docSet.forEach(doc => {
+      docSet.forEach((doc) => {
         const docId = this.getDocumentId(doc);
         const score = (doc.metadata.score as number) || 0.5;
 
@@ -197,7 +206,7 @@ export class FusionModule extends BaseRAGModule {
 
     // Calculate mean score for each document
     const fusedDocs = Array.from(scoreMap.values())
-      .map(entry => {
+      .map((entry) => {
         const meanScore =
           entry.scores.reduce((a, b) => a + b, 0) / entry.scores.length;
         entry.document.metadata.fusionScore = meanScore;
@@ -205,7 +214,7 @@ export class FusionModule extends BaseRAGModule {
         return { document: entry.document, score: meanScore };
       })
       .sort((a, b) => b.score - a.score)
-      .map(entry => entry.document);
+      .map((entry) => entry.document);
 
     return fusedDocs;
   }
@@ -213,12 +222,17 @@ export class FusionModule extends BaseRAGModule {
   /**
    * LLM-based fusion using distribution-based scoring
    */
-  private async llmBasedFusion(documentSets: Document[][]): Promise<Document[]> {
+  private async llmBasedFusion(
+    documentSets: Document[][],
+  ): Promise<Document[]> {
     // Use distribution-based fusion as sophisticated approach
     // This provides similar benefits to LLM-based fusion without the cost
-    loggingService.info('Using distribution-based fusion for LLM-based strategy', {
-      component: 'FusionModule',
-    });
+    loggingService.info(
+      'Using distribution-based fusion for LLM-based strategy',
+      {
+        component: 'FusionModule',
+      },
+    );
     return Promise.resolve(this.distributionBasedFusion(documentSets));
   }
 
@@ -227,7 +241,7 @@ export class FusionModule extends BaseRAGModule {
    */
   private deduplicateDocuments(
     documents: Document[],
-    _threshold: number
+    _threshold: number,
   ): Document[] {
     const deduplicated: Document[] = [];
     const seen = new Set<string>();
@@ -261,8 +275,7 @@ export class FusionModule extends BaseRAGModule {
    */
   private getContentHash(doc: Document): string {
     return (
-      (doc.metadata.contentHash as string) ||
-      doc.pageContent.substring(0, 200)
+      (doc.metadata.contentHash as string) || doc.pageContent.substring(0, 200)
     );
   }
 
@@ -303,4 +316,3 @@ export class FusionModule extends BaseRAGModule {
     return true;
   }
 }
-

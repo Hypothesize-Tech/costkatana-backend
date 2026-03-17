@@ -59,6 +59,8 @@ export class EnterpriseSecurityController {
     @Query('start_date') startDate?: string,
     @Query('end_date') endDate?: string,
   ) {
+    const startTime = Date.now();
+
     if (!framework) {
       throw new BadRequestException('Missing required parameter: framework');
     }
@@ -82,7 +84,7 @@ export class EnterpriseSecurityController {
         report,
         generated_at: Date.now(),
         performance: {
-          generation_time: Date.now() - Date.now(), // Would track actual time
+          generation_time: Date.now() - startTime,
         },
       },
     };
@@ -109,6 +111,8 @@ export class EnterpriseSecurityController {
       sort_order?: 'asc' | 'desc';
     },
   ) {
+    const startTime = Date.now();
+
     const auditQuery = {
       eventTypes: query.event_types ? [query.event_types] : undefined,
       severity: query.severity ? [query.severity] : undefined,
@@ -143,7 +147,7 @@ export class EnterpriseSecurityController {
         },
         aggregations: results.aggregations,
         performance: {
-          query_time: Date.now() - Date.now(), // Would track actual time
+          query_time: Date.now() - startTime,
         },
       },
     };
@@ -158,6 +162,8 @@ export class EnterpriseSecurityController {
   async testContentFiltering(
     @Body() body: { content: string; provider?: string; model?: string },
   ) {
+    const startTime = Date.now();
+
     const { content, provider = 'test', model = 'test' } = body;
 
     if (!content) {
@@ -203,7 +209,7 @@ export class EnterpriseSecurityController {
             filterResult.filtering.riskScore,
             filterResult.classification.classification.riskScore,
           ),
-          processing_time: Date.now() - Date.now(), // Would track actual time
+          processing_time: Date.now() - startTime,
         },
       },
     };
@@ -223,6 +229,8 @@ export class EnterpriseSecurityController {
       offset?: string;
     },
   ) {
+    const startTime = Date.now();
+
     const options = {
       severity: query.severity,
       category: query.category,
@@ -240,7 +248,7 @@ export class EnterpriseSecurityController {
         pagination: result.pagination,
         summary: result.summary,
         performance: {
-          query_time: Date.now() - Date.now(), // Would track actual time
+          query_time: Date.now() - startTime,
         },
       },
     };
@@ -252,6 +260,8 @@ export class EnterpriseSecurityController {
    */
   @Get('data-lineage/:dataId')
   async getDataLineage(@Param('dataId') dataId: string) {
+    const startTime = Date.now();
+
     if (!dataId) {
       throw new BadRequestException('Missing required parameter: dataId');
     }
@@ -288,7 +298,7 @@ export class EnterpriseSecurityController {
           ).toISOString(),
         },
         performance: {
-          query_time: Date.now() - Date.now(), // Would track actual time
+          query_time: Date.now() - startTime,
         },
       },
     };
@@ -311,6 +321,8 @@ export class EnterpriseSecurityController {
       scope?: string[];
     },
   ) {
+    const startTime = Date.now();
+
     const {
       report_type = 'security_review',
       start_date,
@@ -346,7 +358,7 @@ export class EnterpriseSecurityController {
       data: {
         report,
         performance: {
-          generation_time: Date.now() - Date.now(), // Would track actual time
+          generation_time: Date.now() - startTime,
           events_processed: report.summary.totalEvents,
         },
       },
@@ -370,6 +382,8 @@ export class EnterpriseSecurityController {
       offset?: string;
     },
   ) {
+    const startTime = Date.now();
+
     const auditQuery = {
       userId: query.user_id,
       provider: query.provider,
@@ -424,7 +438,7 @@ export class EnterpriseSecurityController {
           has_more: results.hasMore,
         },
         performance: {
-          query_time: Date.now() - Date.now(), // Would track actual time
+          query_time: Date.now() - startTime,
         },
       },
     };
@@ -436,6 +450,8 @@ export class EnterpriseSecurityController {
    */
   @Get('statistics')
   async getSecurityStatistics() {
+    const startTime = Date.now();
+
     const statistics =
       await this.enterpriseSecurityService.getSecurityStatistics();
 
@@ -458,7 +474,7 @@ export class EnterpriseSecurityController {
                   : 'needs_improvement',
         },
         performance: {
-          query_time: Date.now() - Date.now(), // Would track actual time
+          query_time: Date.now() - startTime,
         },
       },
     };

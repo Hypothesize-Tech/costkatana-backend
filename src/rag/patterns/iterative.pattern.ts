@@ -15,7 +15,7 @@ import { RetrieveModule } from '../modules/retrieve.module';
 import { RerankModule } from '../modules/rerank.module';
 import { ReadModule } from '../modules/read.module';
 import { ChatBedrockConverse } from '@langchain/aws';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 import { Document } from '@langchain/core/documents';
 
 export class IterativeRAGPattern extends BaseRAGPattern {
@@ -26,11 +26,11 @@ export class IterativeRAGPattern extends BaseRAGPattern {
 
   constructor(config: RAGConfig) {
     super('IterativeRAG', 'iterative', config);
-    
+
     this.retrieveModule = new RetrieveModule(config.modules.retrieve);
     this.rerankModule = new RerankModule(config.modules.rerank);
     this.readModule = new ReadModule(config.modules.read);
-    
+
     this.llm = new ChatBedrockConverse({
       model: 'anthropic.claude-3-sonnet-20240229-v1:0',
       region: process.env.AWS_REGION || 'us-east-1',
@@ -41,7 +41,7 @@ export class IterativeRAGPattern extends BaseRAGPattern {
 
   protected async executePattern(
     query: string,
-    context: RAGContext
+    context: RAGContext,
   ): Promise<RAGResult> {
     const startTime = Date.now();
     const maxIterations = this.config.iterations || 3;
@@ -63,12 +63,15 @@ export class IterativeRAGPattern extends BaseRAGPattern {
     try {
       // Iterative retrieval-generation loop
       while (state.currentIteration < maxIterations && !state.converged) {
-        loggingService.info(`Iterative RAG: Iteration ${state.currentIteration + 1}`, {
-          component: 'IterativeRAGPattern',
-          iteration: state.currentIteration + 1,
-          maxIterations,
-          refinementQuery: state.refinementQuery.substring(0, 100),
-        });
+        loggingService.info(
+          `Iterative RAG: Iteration ${state.currentIteration + 1}`,
+          {
+            component: 'IterativeRAGPattern',
+            iteration: state.currentIteration + 1,
+            maxIterations,
+            refinementQuery: state.refinementQuery.substring(0, 100),
+          },
+        );
 
         // Retrieve documents for this iteration
         const retrieveStart = Date.now();
@@ -80,10 +83,13 @@ export class IterativeRAGPattern extends BaseRAGPattern {
         totalRetrievalDuration += Date.now() - retrieveStart;
 
         if (!retrieveResult.success || !retrieveResult.documents) {
-          loggingService.warn('Iterative RAG: Retrieval failed, stopping iteration', {
-            component: 'IterativeRAGPattern',
-            iteration: state.currentIteration + 1,
-          });
+          loggingService.warn(
+            'Iterative RAG: Retrieval failed, stopping iteration',
+            {
+              component: 'IterativeRAGPattern',
+              iteration: state.currentIteration + 1,
+            },
+          );
           break;
         }
 
@@ -94,9 +100,10 @@ export class IterativeRAGPattern extends BaseRAGPattern {
           config: this.config.modules.rerank,
         });
 
-        const iterationDocs = rerankResult.success && rerankResult.documents
-          ? rerankResult.documents
-          : retrieveResult.documents;
+        const iterationDocs =
+          rerankResult.success && rerankResult.documents
+            ? rerankResult.documents
+            : retrieveResult.documents;
 
         state.retrievedDocuments.push(iterationDocs);
         allDocuments.push(...iterationDocs);
@@ -109,9 +116,12 @@ export class IterativeRAGPattern extends BaseRAGPattern {
           config: this.config.modules.read,
         });
 
-        const extractedContext = typeof readResult.data === 'object' && readResult.data !== null && 'extractedContext' in readResult.data
-          ? String(readResult.data.extractedContext)
-          : '';
+        const extractedContext =
+          typeof readResult.data === 'object' &&
+          readResult.data !== null &&
+          'extractedContext' in readResult.data
+            ? String(readResult.data.extractedContext)
+            : '';
 
         // Generate or refine answer
         const genStart = Date.now();
@@ -119,22 +129,25 @@ export class IterativeRAGPattern extends BaseRAGPattern {
           // First iteration: generate initial answer
           state.partialAnswer = await this.generateInitialAnswer(
             query,
-            extractedContext
+            extractedContext,
           );
         } else {
           // Subsequent iterations: refine answer
           state.partialAnswer = await this.refineAnswer(
             query,
             state.partialAnswer,
-            extractedContext
+            extractedContext,
           );
         }
         totalGenerationDuration += Date.now() - genStart;
 
-        loggingService.info(`Iterative RAG: Answer generated for iteration ${state.currentIteration + 1}`, {
-          component: 'IterativeRAGPattern',
-          answerLength: state.partialAnswer.length,
-        });
+        loggingService.info(
+          `Iterative RAG: Answer generated for iteration ${state.currentIteration + 1}`,
+          {
+            component: 'IterativeRAGPattern',
+            answerLength: state.partialAnswer.length,
+          },
+        );
 
         // Check convergence
         state.converged = await this.checkConvergence(
@@ -154,7 +167,7 @@ export class IterativeRAGPattern extends BaseRAGPattern {
         if (state.currentIteration < maxIterations - 1) {
           state.refinementQuery = await this.generateRefinementQuery(
             query,
-            state.partialAnswer
+            state.partialAnswer,
           );
         }
 
@@ -199,7 +212,8 @@ export class IterativeRAGPattern extends BaseRAGPattern {
             generationDuration: totalGenerationDuration,
             moduleDurations: {
               iterations: state.currentIteration,
-              avgIterationTime: (Date.now() - startTime) / state.currentIteration,
+              avgIterationTime:
+                (Date.now() - startTime) / state.currentIteration,
             },
           },
           cacheHit: false,
@@ -238,7 +252,8 @@ export class IterativeRAGPattern extends BaseRAGPattern {
 
       return {
         success: false,
-        answer: 'I apologize, but I encountered an error while processing your request.',
+        answer:
+          'I apologize, but I encountered an error while processing your request.',
         documents: [],
         sources: [],
         metadata: {
@@ -264,7 +279,7 @@ export class IterativeRAGPattern extends BaseRAGPattern {
    */
   private async generateInitialAnswer(
     query: string,
-    context: string
+    context: string,
   ): Promise<string> {
     const prompt = `Based on the following context, provide an initial answer to the question. Be comprehensive but acknowledge if more information might be needed.
 
@@ -276,8 +291,8 @@ Question: ${query}
 Initial Answer:`;
 
     const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-    return typeof response.content === 'string' 
-      ? response.content.trim() 
+    return typeof response.content === 'string'
+      ? response.content.trim()
       : 'Unable to generate initial answer';
   }
 
@@ -287,7 +302,7 @@ Initial Answer:`;
   private async refineAnswer(
     query: string,
     previousAnswer: string,
-    newContext: string
+    newContext: string,
   ): Promise<string> {
     const prompt = `You previously answered a question, but now have additional context. Refine and expand your answer incorporating the new information.
 
@@ -302,8 +317,8 @@ ${newContext}
 Refined Answer:`;
 
     const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-    return typeof response.content === 'string' 
-      ? response.content.trim() 
+    return typeof response.content === 'string'
+      ? response.content.trim()
       : previousAnswer;
   }
 
@@ -312,15 +327,17 @@ Refined Answer:`;
    */
   private async checkConvergence(
     answer: string,
-    latestContext: string
+    latestContext: string,
   ): Promise<boolean> {
     // Simple heuristic: if answer is comprehensive and long enough, consider converged
     if (answer.length > 500) {
       // Check if latest context adds significant new information
       const contextWords = new Set(latestContext.toLowerCase().split(/\s+/));
       const answerWords = new Set(answer.toLowerCase().split(/\s+/));
-      
-      const newWords = [...contextWords].filter(word => !answerWords.has(word));
+
+      const newWords = [...contextWords].filter(
+        (word) => !answerWords.has(word),
+      );
       const overlapRatio = newWords.length / contextWords.size;
 
       // If very little new information, consider converged
@@ -335,7 +352,7 @@ Refined Answer:`;
    */
   private async generateRefinementQuery(
     originalQuery: string,
-    currentAnswer: string
+    currentAnswer: string,
   ): Promise<string> {
     const prompt = `Given the original question and current answer, generate a focused follow-up question to retrieve additional specific information that would improve the answer.
 
@@ -347,11 +364,14 @@ ${currentAnswer.substring(0, 500)}...
 Follow-up question for more information:`;
 
     try {
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      const refinement = typeof response.content === 'string' 
-        ? response.content.trim() 
-        : originalQuery;
-      
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      const refinement =
+        typeof response.content === 'string'
+          ? response.content.trim()
+          : originalQuery;
+
       return refinement || originalQuery;
     } catch (error) {
       return originalQuery;
@@ -375,9 +395,11 @@ ${iterativeAnswer}
 Final Synthesized Answer (comprehensive and well-structured):`;
 
     try {
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      return typeof response.content === 'string' 
-        ? response.content.trim() 
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      return typeof response.content === 'string'
+        ? response.content.trim()
         : iterativeAnswer;
     } catch (error) {
       return iterativeAnswer;
@@ -392,7 +414,8 @@ Final Synthesized Answer (comprehensive and well-structured):`;
     const deduplicated: Document[] = [];
 
     for (const doc of documents) {
-      const key = doc.metadata._id as string || doc.pageContent.substring(0, 100);
+      const key =
+        (doc.metadata._id as string) || doc.pageContent.substring(0, 100);
       if (!seen.has(key)) {
         seen.add(key);
         deduplicated.push(doc);
@@ -407,7 +430,7 @@ Final Synthesized Answer (comprehensive and well-structured):`;
    */
   private extractSources(documents: any[]): string[] {
     const sources = new Set<string>();
-    
+
     for (const doc of documents) {
       const source = doc.metadata?.fileName || doc.metadata?.source;
       if (source) {
@@ -422,7 +445,8 @@ Final Synthesized Answer (comprehensive and well-structured):`;
     return {
       name: 'Iterative RAG',
       type: 'iterative',
-      description: 'Multi-round retrieval with progressive answer building and refinement',
+      description:
+        'Multi-round retrieval with progressive answer building and refinement',
       useCases: [
         'Comprehensive research queries',
         'Complex multi-aspect questions',
@@ -435,4 +459,3 @@ Final Synthesized Answer (comprehensive and well-structured):`;
     };
   }
 }
-

@@ -28,7 +28,7 @@ describe('RecursiveRAGPattern', () => {
 
       const result = await recursivePattern.execute(
         'Compare AWS, Azure, and GCP pricing models and their cost optimization strategies',
-        context
+        context,
       );
 
       expect(result.success).toBe(true);
@@ -44,7 +44,7 @@ describe('RecursiveRAGPattern', () => {
 
       const result = await recursivePattern.execute(
         'What are the prerequisites for implementing Kubernetes and how do they compare to Docker Swarm?',
-        context
+        context,
       );
 
       expect(result.success).toBe(true);
@@ -58,7 +58,7 @@ describe('RecursiveRAGPattern', () => {
 
       const result = await recursivePattern.execute(
         'Explain the relationship between containerization, orchestration, and cloud-native architecture',
-        context
+        context,
       );
 
       expect(result.success).toBe(true);
@@ -73,7 +73,7 @@ describe('RecursiveRAGPattern', () => {
 
       const result = await recursivePattern.execute(
         'Compare NoSQL and SQL databases in terms of scalability and consistency',
-        context
+        context,
       );
 
       expect(result.documents).toBeDefined();
@@ -81,4 +81,3 @@ describe('RecursiveRAGPattern', () => {
     });
   });
 });
-

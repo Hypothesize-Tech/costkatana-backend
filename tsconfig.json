@@ -17,8 +17,8 @@
       "@/*": ["src/*"],
       "@utils/*": ["src/utils/*"],
       "@services/*": ["src/services/*"],
-      "@models/*": ["src/models/*"],
-      "@models": ["src/models/index"],
+      "@models/*": ["src/schemas/*"],
+      "@models": ["src/schemas/models-compat.index"],
       "@middleware/*": ["src/middleware/*"],
       "@mcp/*": ["src/mcp/*"],
       "@/schemas/*": ["src/schemas/*"],
@@ -27,6 +27,7 @@
       "@/common/*": ["src/common/*"]
     },
     "incremental": true,
+    "tsBuildInfoFile": "./.tsbuildinfo",
     "skipLibCheck": true,
     "strictNullChecks": true,
     "forceConsistentCasingInFileNames": true,

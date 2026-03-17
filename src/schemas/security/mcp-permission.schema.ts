@@ -28,6 +28,7 @@ export interface IToolPermissions {
 }
 
 export type McpPermissionDocument = HydratedDocument<McpPermission>;
+export type IMcpPermission = McpPermission;
 
 @Schema({ timestamps: true })
 export class McpPermission {

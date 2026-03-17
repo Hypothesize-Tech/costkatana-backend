@@ -10,7 +10,7 @@ import {
   PredictConfig,
 } from '../types/rag.types';
 import { ChatBedrockConverse } from '@langchain/aws';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 export class PredictModule extends BaseRAGModule {
   protected config: PredictConfig;
@@ -22,7 +22,7 @@ export class PredictModule extends BaseRAGModule {
       generateHypothesis: true,
       numHypotheses: 1,
       temperature: 0.5,
-    }
+    },
   ) {
     super('PredictModule', 'predict', config);
     this.config = config;
@@ -36,7 +36,7 @@ export class PredictModule extends BaseRAGModule {
   }
 
   protected async executeInternal(
-    input: RAGModuleInput
+    input: RAGModuleInput,
   ): Promise<RAGModuleOutput> {
     const { query, context, config } = input;
     const effectiveConfig = { ...this.config, ...config };
@@ -51,7 +51,7 @@ export class PredictModule extends BaseRAGModule {
     try {
       const hypotheses = await this.generateHypotheses(
         query,
-        effectiveConfig.numHypotheses || 1
+        effectiveConfig.numHypotheses || 1,
       );
 
       loggingService.info('Hypotheses generated', {
@@ -63,7 +63,7 @@ export class PredictModule extends BaseRAGModule {
       return {
         ...this.createSuccessOutput(
           { hypotheses },
-          { hypothesesCount: hypotheses.length }
+          { hypothesesCount: hypotheses.length },
         ),
         query: hypotheses[0] || query, // Return best hypothesis as new query
       };
@@ -74,7 +74,10 @@ export class PredictModule extends BaseRAGModule {
       });
 
       return {
-        ...this.createSuccessOutput({ hypotheses: [query] }, { fallback: true }),
+        ...this.createSuccessOutput(
+          { hypotheses: [query] },
+          { fallback: true },
+        ),
         query,
       };
     }
@@ -85,7 +88,7 @@ export class PredictModule extends BaseRAGModule {
    */
   private async generateHypotheses(
     query: string,
-    count: number
+    count: number,
   ): Promise<string[]> {
     const hypotheses: string[] = [];
 
@@ -118,9 +121,8 @@ Question: "${query}"
 Answer paragraph:`;
 
     const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-    const hypothesis = typeof response.content === 'string' 
-      ? response.content.trim() 
-      : query;
+    const hypothesis =
+      typeof response.content === 'string' ? response.content.trim() : query;
 
     return hypothesis || query;
   }
@@ -130,11 +132,7 @@ Answer paragraph:`;
   }
 
   protected getCapabilities(): string[] {
-    return [
-      'hypothesis_generation',
-      'hyde_retrieval',
-      'multiple_hypotheses',
-    ];
+    return ['hypothesis_generation', 'hyde_retrieval', 'multiple_hypotheses'];
   }
 
   resetConfig(): void {
@@ -161,4 +159,3 @@ Answer paragraph:`;
     return true;
   }
 }
-

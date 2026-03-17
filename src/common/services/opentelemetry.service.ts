@@ -42,7 +42,9 @@ export class OpenTelemetryService {
    */
   async startTelemetry(): Promise<void> {
     if (process.env.NODE_ENV !== 'production') {
-      this.logger.debug('OpenTelemetry disabled (NODE_ENV=production), skipping initialization');
+      this.logger.debug(
+        'OpenTelemetry disabled (NODE_ENV=production), skipping initialization',
+      );
       return;
     }
 

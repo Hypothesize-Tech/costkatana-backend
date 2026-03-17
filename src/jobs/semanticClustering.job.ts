@@ -1,5 +1,5 @@
 import { SemanticPatternAnalyzerService } from '../services/semanticPatternAnalyzer.service';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 
 /**
  * Semantic Clustering Job
@@ -20,7 +20,7 @@ export class SemanticClusteringJob {
     }
 
     loggingService.info('🔍 Starting semantic clustering job', {
-      intervalHours
+      intervalHours,
     });
 
     // Run immediately on start (with delay to allow system to stabilize)
@@ -29,7 +29,7 @@ export class SemanticClusteringJob {
     // Schedule periodic runs
     this.intervalId = setInterval(
       () => this.run(),
-      intervalHours * 60 * 60 * 1000
+      intervalHours * 60 * 60 * 1000,
     );
   }
 
@@ -49,7 +49,9 @@ export class SemanticClusteringJob {
    */
   static async run(): Promise<void> {
     if (this.isRunning) {
-      loggingService.warn('Semantic clustering job already running, skipping this cycle');
+      loggingService.warn(
+        'Semantic clustering job already running, skipping this cycle',
+      );
       return;
     }
 
@@ -63,35 +65,45 @@ export class SemanticClusteringJob {
       const endDate = new Date();
       const startDate = new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-      const clusters = await SemanticPatternAnalyzerService.runClusteringAnalysis({
-        startDate,
-        endDate,
-        numClusters: 20
-      });
+      const clusters =
+        await SemanticPatternAnalyzerService.runClusteringAnalysis({
+          startDate,
+          endDate,
+          numClusters: 20,
+        });
 
       const duration = Date.now() - startTime;
       loggingService.info('✅ Semantic clustering job completed', {
         clustersCreated: clusters.length,
-        durationMs: duration
+        durationMs: duration,
       });
 
       // Log high-value insights
       const highValueClusters = clusters.filter(
-        c => c.optimization.totalEstimatedSavings > 5
+        (c: { optimization: { totalEstimatedSavings: number } }) =>
+          c.optimization.totalEstimatedSavings > 5,
       );
 
       if (highValueClusters.length > 0) {
-        loggingService.info('💡 High-value optimization opportunities discovered', {
-          count: highValueClusters.length,
-          totalPotentialSavings: highValueClusters.reduce(
-            (sum, c) => sum + c.optimization.totalEstimatedSavings,
-            0
-          ).toFixed(2)
-        });
+        loggingService.info(
+          '💡 High-value optimization opportunities discovered',
+          {
+            count: highValueClusters.length,
+            totalPotentialSavings: highValueClusters
+              .reduce(
+                (
+                  sum: number,
+                  c: { optimization: { totalEstimatedSavings: number } },
+                ) => sum + c.optimization.totalEstimatedSavings,
+                0,
+              )
+              .toFixed(2),
+          },
+        );
       }
     } catch (error) {
       loggingService.error('❌ Semantic clustering job failed', {
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
     } finally {
       this.isRunning = false;
@@ -107,7 +119,9 @@ export class SemanticClusteringJob {
 }
 
 // Auto-start in production (can be controlled via env var)
-if (process.env.NODE_ENV === 'production' && process.env.ENABLE_SEMANTIC_CLUSTERING !== 'false') {
+if (
+  process.env.NODE_ENV === 'production' &&
+  process.env.ENABLE_SEMANTIC_CLUSTERING !== 'false'
+) {
   SemanticClusteringJob.start();
 }
-

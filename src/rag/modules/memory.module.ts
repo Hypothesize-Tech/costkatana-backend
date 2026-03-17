@@ -10,7 +10,7 @@ import {
   MemoryConfig,
   RAGContext,
 } from '../types/rag.types';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 import { redisService } from '../../services/redis.service';
 
 export interface MemoryEntry {
@@ -30,38 +30,34 @@ export class MemoryModule extends BaseRAGModule {
       windowSize: 5,
       retentionStrategy: 'recency',
       semanticCompression: false,
-    }
+    },
   ) {
     super('MemoryModule', 'memory', config);
     this.config = config;
   }
 
   protected async executeInternal(
-    input: RAGModuleInput
+    input: RAGModuleInput,
   ): Promise<RAGModuleOutput> {
     const { query, context, config } = input;
     const effectiveConfig = { ...this.config, ...config };
 
     if (!context?.conversationId) {
       return {
-        ...this.createSuccessOutput(
-          { memory: [] },
-          { noContext: true }
-        ),
+        ...this.createSuccessOutput({ memory: [] }, { noContext: true }),
         query,
       };
     }
 
     try {
       // Retrieve conversation memory
-      const memory = await this.getMemory(context.conversationId, effectiveConfig);
+      const memory = await this.getMemory(
+        context.conversationId,
+        effectiveConfig,
+      );
 
       // Add current query to memory
-      await this.addToMemory(
-        context.conversationId,
-        query,
-        effectiveConfig
-      );
+      await this.addToMemory(context.conversationId, query, effectiveConfig);
 
       // Format memory for context
       const formattedMemory = this.formatMemory(memory, effectiveConfig);
@@ -79,7 +75,7 @@ export class MemoryModule extends BaseRAGModule {
           {
             entriesCount: memory.length,
             strategy: effectiveConfig.retentionStrategy,
-          }
+          },
         ),
         query,
         metadata: { memory: formattedMemory },
@@ -102,7 +98,7 @@ export class MemoryModule extends BaseRAGModule {
    */
   private async getMemory(
     conversationId: string,
-    config: MemoryConfig
+    config: MemoryConfig,
   ): Promise<MemoryEntry[]> {
     // Try cache first
     if (this.memoryCache.has(conversationId)) {
@@ -133,7 +129,7 @@ export class MemoryModule extends BaseRAGModule {
   private async addToMemory(
     conversationId: string,
     content: string,
-    config: MemoryConfig
+    config: MemoryConfig,
   ): Promise<void> {
     const memory = await this.getMemory(conversationId, config);
 
@@ -156,7 +152,7 @@ export class MemoryModule extends BaseRAGModule {
       await redisService.set(
         `memory:${conversationId}`,
         JSON.stringify(retained),
-        3600 // 1 hour TTL
+        3600, // 1 hour TTL
       );
     } catch (error) {
       loggingService.warn('Failed to save memory to Redis', {
@@ -171,7 +167,7 @@ export class MemoryModule extends BaseRAGModule {
    */
   private applyRetention(
     memory: MemoryEntry[],
-    config: MemoryConfig
+    config: MemoryConfig,
   ): MemoryEntry[] {
     const windowSize = config.windowSize || 5;
     const strategy = config.retentionStrategy || 'recency';
@@ -238,10 +234,7 @@ export class MemoryModule extends BaseRAGModule {
   /**
    * Format memory for context
    */
-  private formatMemory(
-    memory: MemoryEntry[],
-    config: MemoryConfig
-  ): string {
+  private formatMemory(memory: MemoryEntry[], config: MemoryConfig): string {
     if (memory.length === 0) {
       return '';
     }
@@ -258,12 +251,12 @@ export class MemoryModule extends BaseRAGModule {
    */
   private compressedFormat(memory: MemoryEntry[]): string {
     // Group by importance and recency
-    const highImportance = memory.filter(e => e.importance > 0.7);
+    const highImportance = memory.filter((e) => e.importance > 0.7);
     const recentEntries = memory.slice(-3);
-    
+
     // Combine unique entries
     const uniqueEntries = new Set([...highImportance, ...recentEntries]);
-    
+
     return Array.from(uniqueEntries)
       .map((entry, idx) => `[${idx + 1}] ${entry.content}`)
       .join('\n');
@@ -323,4 +316,3 @@ export class MemoryModule extends BaseRAGModule {
     return true;
   }
 }
-

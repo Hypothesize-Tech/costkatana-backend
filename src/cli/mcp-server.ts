@@ -7,7 +7,7 @@
 
 import { MCPServer } from '../mcp/server';
 import { initializeMCP } from '../mcp/init';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 
 // Suppress non-critical logs for stdio
 process.env.LOG_LEVEL = 'error';
@@ -54,7 +54,10 @@ async function main() {
       process.exit(0);
     });
   } catch (error) {
-    console.error('Failed to start MCP server:', error instanceof Error ? error.message : String(error));
+    console.error(
+      'Failed to start MCP server:',
+      error instanceof Error ? error.message : String(error),
+    );
     process.exit(1);
   }
 }

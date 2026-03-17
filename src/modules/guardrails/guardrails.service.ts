@@ -34,6 +34,17 @@ interface CacheEntry<T> {
   expiry: number;
 }
 
+let guardrailsServiceInstance: GuardrailsService | null = null;
+
+export function getGuardrailsService(): GuardrailsService {
+  if (!guardrailsServiceInstance) {
+    throw new Error(
+      'GuardrailsService not initialized. Ensure GuardrailsModule is imported.',
+    );
+  }
+  return guardrailsServiceInstance;
+}
+
 @Injectable()
 export class GuardrailsService {
   private readonly logger = new Logger(GuardrailsService.name);
@@ -56,7 +67,9 @@ export class GuardrailsService {
     private readonly aiRouterService: AIRouterService,
     private readonly emailService: EmailService,
     private readonly pricingService: PricingService,
-  ) {}
+  ) {
+    guardrailsServiceInstance = this;
+  }
 
   async checkWorkflowQuota(userId: string): Promise<GuardrailViolation | null> {
     try {

@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Injectable,
   NestInterceptor,
   ExecutionContext,
@@ -444,16 +445,20 @@ ${request}
 
     // Additional check: validate the user ID matches if resourceOwnerId is provided
     if (resourceOwnerId && resourceOwnerId !== currentContext.userId) {
-      // This could be valid if the resource is shared within a workspace
-      // For now, we'll log it but allow it (workspace-level sharing)
-      this.logger.log('Resource owned by different user in same tenant', {
-        component: 'TenantIsolationService',
-        operation: 'validateResourceOwnership',
-        currentUserId: currentContext.userId,
-        resourceOwnerId,
-        resourceId,
-        tenantId,
-      });
+      this.logger.warn(
+        'Tenant isolation violation: resource owned by different user',
+        {
+          component: 'TenantIsolationService',
+          operation: 'validateResourceOwnership',
+          currentUserId: currentContext.userId,
+          resourceOwnerId,
+          resourceId,
+          tenantId,
+        },
+      );
+      throw new ForbiddenException(
+        'Resource does not belong to the current user. Cross-user resource access is not allowed.',
+      );
     }
 
     return {

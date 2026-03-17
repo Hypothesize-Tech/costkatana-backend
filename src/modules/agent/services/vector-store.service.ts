@@ -19,6 +19,17 @@ interface SearchResult {
   score: number;
 }
 
+let vectorStoreServiceInstance: VectorStoreService | null = null;
+
+export function getVectorStoreService(): VectorStoreService {
+  if (!vectorStoreServiceInstance) {
+    throw new Error(
+      'VectorStoreService not initialized. Ensure AgentModule is imported.',
+    );
+  }
+  return vectorStoreServiceInstance;
+}
+
 /**
  * Vector Store Service
  * Handles vector embeddings and similarity search for knowledge base and RAG
@@ -40,6 +51,7 @@ export class VectorStoreService implements OnModuleInit {
   private readonly SIMILARITY_THRESHOLD = 0.9;
 
   constructor() {
+    vectorStoreServiceInstance = this;
     // Initialize embeddings
     try {
       this.embeddings = createSafeBedrockEmbeddings({
@@ -362,12 +374,13 @@ export class VectorStoreService implements OnModuleInit {
           source: metadata.source,
         });
       } else {
-        // Add to in-memory fallback store
+        // Add to in-memory fallback store with real embeddings
         for (const doc of docs) {
+          const embedding = await this.embedText(doc.pageContent);
           const key = `${metadata.source || 'unknown'}_${Date.now()}_${Math.random()}`;
           this.documentStore.set(key, {
             content: doc.pageContent,
-            embedding: [], // Would generate real embeddings if needed
+            embedding,
             metadata: doc.metadata,
           });
         }
@@ -423,12 +436,13 @@ export class VectorStoreService implements OnModuleInit {
           },
         );
       } else {
-        // Add to in-memory fallback store
+        // Add to in-memory fallback store with real embeddings
         for (const doc of docs) {
+          const embedding = await this.embedText(doc.pageContent);
           const key = `mongodb_${collection}_${Date.now()}_${Math.random()}`;
           this.documentStore.set(key, {
             content: doc.pageContent,
-            embedding: [], // Would generate real embeddings if needed
+            embedding,
             metadata: {
               ...doc.metadata,
               vectorStoreKey: key,

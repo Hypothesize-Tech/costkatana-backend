@@ -256,10 +256,11 @@ export class ExperimentationController {
   @Post('estimate-cost')
   async estimateExperimentCost(@Body() dto: EstimateExperimentCostDto) {
     const params = dto as unknown as EstimateExperimentCostRequest;
-    const costEstimate = await this.experimentationService.estimateExperimentCost(
-      params.type,
-      params.parameters,
-    );
+    const costEstimate =
+      await this.experimentationService.estimateExperimentCost(
+        params.type,
+        params.parameters,
+      );
     return {
       success: true,
       data: costEstimate,

@@ -8,7 +8,7 @@ import { VisualComplianceBedrockService } from './services/visual-compliance-bed
 import { VisualComplianceS3Service } from './services/visual-compliance-s3.service';
 import { MetaPromptPresetsService } from './services/meta-prompt-presets.service';
 import { AiCostTrackingService } from './services/ai-cost-tracking.service';
-import { BedrockService } from '../../services/bedrock.service';
+import { BedrockService } from '../bedrock/bedrock.service';
 import { GenAITelemetryService } from '../../utils/genaiTelemetry';
 
 @Module({

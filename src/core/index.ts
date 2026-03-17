@@ -1,6 +1,6 @@
 /**
  * Provider-Independent Core
- * 
+ *
  * Central exports for the provider-independent architecture.
  * This module provides unified access to model registries, pricing,
  * intelligent routing, and failover capabilities.
@@ -19,60 +19,60 @@ export { NormalizationService } from '../services/normalization.service';
 
 // Types - Model Registry
 export type {
-    ModelDefinition,
-    ModelRequirements,
-    ModelMatchResult,
-    ModelFilterOptions,
-    ModelRegistryStats,
-    ModelStatus,
-    ModelCapability,
-    ModelTier,
-    ModelQualityScores
+  ModelDefinition,
+  ModelRequirements,
+  ModelMatchResult,
+  ModelFilterOptions,
+  ModelRegistryStats,
+  ModelStatus,
+  ModelCapability,
+  ModelTier,
+  ModelQualityScores,
 } from '../types/modelRegistry.types';
 
 // Types - Pricing Registry
 export type {
-    ModelPricing,
-    CostCalculationRequest,
-    CostCalculationResult,
-    CostComparison,
-    PricingUpdateEvent,
-    PricingSyncConfig,
-    PricingRegistryStats,
-    PricingUnit,
-    PricingTier
+  ModelPricing,
+  CostCalculationRequest,
+  CostCalculationResult,
+  CostComparison,
+  PricingUpdateEvent,
+  PricingSyncConfig,
+  PricingRegistryStats,
+  PricingUnit,
+  PricingTier,
 } from '../types/pricingRegistry.types';
 
 // Types - Normalization
 export type {
-    NormalizedRequest,
-    NormalizedResponse,
-    NormalizedError,
-    NormalizedErrorFactory,
-    NormalizedMessage,
-    NormalizedParameters,
-    NormalizedUsage,
-    NormalizedCost,
-    NormalizedFinishReason,
-    NormalizedLatency,
-    NormalizedCacheInfo,
-    NormalizedErrorType,
-    NormalizedStreamChunk
+  NormalizedRequest,
+  NormalizedResponse,
+  NormalizedError,
+  NormalizedErrorFactory,
+  NormalizedMessage,
+  NormalizedParameters,
+  NormalizedUsage,
+  NormalizedCost,
+  NormalizedFinishReason,
+  NormalizedLatency,
+  NormalizedCacheInfo,
+  NormalizedErrorType,
+  NormalizedStreamChunk,
 } from '../types/normalized.types';
 
 // Types - Routing
 export type {
-    RoutingStrategy,
-    RoutingRequest,
-    RoutingResult
+  RoutingStrategy,
+  RoutingRequest,
+  RoutingResult,
 } from '../services/intelligentRouter.service';
 
 // Types - Failover
 export type {
-    FailoverStrategy,
-    FailoverConfig,
-    FailoverPlan,
-    FailoverContext
+  FailoverStrategy,
+  FailoverConfig,
+  FailoverPlan,
+  FailoverContext,
 } from '../services/intelligentFailover.service';
 
 import { ModelRegistryService } from '../services/modelRegistry.service';
@@ -85,22 +85,21 @@ import { IntelligentFailoverService } from '../services/intelligentFailover.serv
  * Call this once during application startup
  */
 export function initializeProviderCore(): void {
-    // Initialize singletons
-    ModelRegistryService.getInstance();
-    PricingRegistryService.getInstance();
-    IntelligentRouterService.getInstance();
-    IntelligentFailoverService.getInstance();
+  // Initialize singletons
+  ModelRegistryService.getInstance();
+  PricingRegistryService.getInstance();
+  IntelligentRouterService.getInstance();
+  IntelligentFailoverService.getInstance();
 }
 
 /**
  * Get all registry instances
  */
 export function getCoreServices() {
-    return {
-        modelRegistry: ModelRegistryService.getInstance(),
-        pricingRegistry: PricingRegistryService.getInstance(),
-        intelligentRouter: IntelligentRouterService.getInstance(),
-        intelligentFailover: IntelligentFailoverService.getInstance()
-    };
+  return {
+    modelRegistry: ModelRegistryService.getInstance(),
+    pricingRegistry: PricingRegistryService.getInstance(),
+    intelligentRouter: IntelligentRouterService.getInstance(),
+    intelligentFailover: IntelligentFailoverService.getInstance(),
+  };
 }
-

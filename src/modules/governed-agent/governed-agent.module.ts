@@ -11,7 +11,7 @@ import { UtilsModule } from '../utils/utils.module';
 import { AuthModule } from '../auth/auth.module';
 import { ChatModule } from '../chat/chat.module';
 // Services
-import { BedrockService } from '../../services/bedrock.service';
+import { BedrockService } from '../bedrock/bedrock.service';
 import { GenAITelemetryService } from '../../utils/genaiTelemetry';
 
 // Schemas

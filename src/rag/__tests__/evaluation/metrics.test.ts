@@ -14,7 +14,7 @@ describe('RAGEvaluator', () => {
         new Document({
           pageContent: content,
           metadata: { score: 0.8 },
-        })
+        }),
     );
   };
 
@@ -102,7 +102,9 @@ describe('RAGEvaluator', () => {
         {
           query: 'What is containerization?',
           answer: 'Containerization is a method of packaging applications...',
-          documents: createMockDocuments(['Containers provide isolated environments...']),
+          documents: createMockDocuments([
+            'Containers provide isolated environments...',
+          ]),
         },
       ];
 
@@ -116,4 +118,3 @@ describe('RAGEvaluator', () => {
     });
   });
 });
-

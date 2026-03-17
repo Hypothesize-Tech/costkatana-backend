@@ -1,5 +1,5 @@
 import { LearningLoopService } from '../services/learningLoop.service';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 
 /**
  * Learning Loop Processor Job
@@ -20,7 +20,7 @@ export class LearningLoopProcessorJob {
     }
 
     loggingService.info('🔁 Starting learning loop processor job', {
-      intervalHours
+      intervalHours,
     });
 
     // Run immediately on start
@@ -29,7 +29,7 @@ export class LearningLoopProcessorJob {
     // Schedule periodic runs
     this.intervalId = setInterval(
       () => this.run(),
-      intervalHours * 60 * 60 * 1000
+      intervalHours * 60 * 60 * 1000,
     );
   }
 
@@ -49,7 +49,9 @@ export class LearningLoopProcessorJob {
    */
   static async run(): Promise<void> {
     if (this.isRunning) {
-      loggingService.warn('Learning loop processor job already running, skipping this cycle');
+      loggingService.warn(
+        'Learning loop processor job already running, skipping this cycle',
+      );
       return;
     }
 
@@ -63,11 +65,11 @@ export class LearningLoopProcessorJob {
 
       const duration = Date.now() - startTime;
       loggingService.info('✅ Learning loop processor job completed', {
-        durationMs: duration
+        durationMs: duration,
       });
     } catch (error) {
       loggingService.error('❌ Learning loop processor job failed', {
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
     } finally {
       this.isRunning = false;
@@ -83,7 +85,9 @@ export class LearningLoopProcessorJob {
 }
 
 // Auto-start in production (can be controlled via env var)
-if (process.env.NODE_ENV === 'production' && process.env.ENABLE_LEARNING_LOOP !== 'false') {
+if (
+  process.env.NODE_ENV === 'production' &&
+  process.env.ENABLE_LEARNING_LOOP !== 'false'
+) {
   LearningLoopProcessorJob.start();
 }
-

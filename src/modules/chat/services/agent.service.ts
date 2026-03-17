@@ -15,7 +15,7 @@ import {
 } from './multi-agent-flow.service';
 import { McpIntegrationHandlerService } from './mcp-integration-handler.service';
 import { IntegrationChatService } from './integration-chat.service';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { VercelToolsService } from '../../agent/services/vercel-tools.service';
 import { getMaxTokensForModel } from '../../../utils/model-tokens';
 import { Usage, UsageDocument } from '../../../schemas/core/usage.schema';
@@ -2263,7 +2263,7 @@ export class AgentService {
           };
         }
 
-        const result = await this.bedrockService.invokeModelDirectly(
+        const result = await BedrockService.invokeModelDirectly(
           selectedModel,
           payload,
         );

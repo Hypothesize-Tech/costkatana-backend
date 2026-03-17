@@ -3,8 +3,8 @@
  * Validates userId from JWT and manages user context
  */
 
-import { loggingService } from '../../services/logging.service';
-import { User } from '../../models';
+import { loggingService } from '../../common/services/logging.service';
+import { User } from '../../schemas/user/user.schema';
 import { IntegrationType } from '../types/permission.types';
 
 export interface MCPAuthContext {
@@ -27,10 +27,10 @@ export class MCPAuthService {
 
     try {
       loggingService.debug('MCP auth: Finding user', { userId });
-      
+
       // Find user by ID
       const user = await User.findById(userId).lean();
-      
+
       if (!user) {
         loggingService.warn('MCP authentication failed: user not found', {
           userId,
@@ -38,7 +38,10 @@ export class MCPAuthService {
         return null;
       }
 
-      loggingService.debug('MCP auth: User found, checking active status', { userId, isActive: user.isActive });
+      loggingService.debug('MCP auth: User found, checking active status', {
+        userId,
+        isActive: user.isActive,
+      });
 
       // Check if user is active
       if (!user.isActive) {
@@ -53,10 +56,10 @@ export class MCPAuthService {
       // Get user's connected integrations
       const integrations = await this.getUserIntegrations(userId);
 
-      loggingService.debug('MCP auth: Integrations retrieved', { 
-        userId, 
+      loggingService.debug('MCP auth: Integrations retrieved', {
+        userId,
         integrations,
-        integrationCount: integrations.length 
+        integrationCount: integrations.length,
       });
 
       const context: MCPAuthContext = {
@@ -87,17 +90,20 @@ export class MCPAuthService {
   /**
    * Get user's connected integrations
    */
-  private static async getUserIntegrations(userId: string): Promise<IntegrationType[]> {
+  private static async getUserIntegrations(
+    userId: string,
+  ): Promise<IntegrationType[]> {
     const integrations: IntegrationType[] = [];
 
     try {
       // Check connection models
-      const [vercelConn, githubConn, googleConn, mongodbConn] = await Promise.all([
-        import('../../models/VercelConnection'),
-        import('../../models/GitHubConnection'),
-        import('../../models/GoogleConnection'),
-        import('../../models/MongoDBConnection'),
-      ]);
+      const [vercelConn, githubConn, googleConn, mongodbConn] =
+        await Promise.all([
+          import('../../schemas/integration/vercel-connection.schema'),
+          import('../../schemas/integration/github-connection.schema'),
+          import('../../schemas/integration/google-connection.schema'),
+          import('../../schemas/integration/mongodb-connection.schema'),
+        ]);
 
       // Check each integration
       const checks = await Promise.all([
@@ -113,7 +119,7 @@ export class MCPAuthService {
       if (checks[3]) integrations.push('mongodb');
 
       // Check standard Integration model for others
-      const { Integration } = await import('../../models/Integration');
+      const { Integration } = await import('../../schemas/integration/integration.schema');
       const standardIntegrations = await Integration.find({
         userId,
         status: 'active',
@@ -142,34 +148,49 @@ export class MCPAuthService {
    */
   static async validateIntegrationAccess(
     userId: string,
-    integration: IntegrationType
+    integration: IntegrationType,
   ): Promise<boolean> {
     try {
       switch (integration) {
         case 'vercel': {
-          const { VercelConnection } = await import('../../models/VercelConnection');
-          return await VercelConnection.exists({ userId, isActive: true }) !== null;
+          const { VercelConnection } =
+            await import('../../schemas/integration/vercel-connection.schema');
+          return (
+            (await VercelConnection.exists({ userId, isActive: true })) !== null
+          );
         }
         case 'github': {
-          const { GitHubConnection } = await import('../../models/GitHubConnection');
-          return await GitHubConnection.exists({ userId, isActive: true }) !== null;
+          const { GitHubConnection } =
+            await import('../../schemas/integration/github-connection.schema');
+          return (
+            (await GitHubConnection.exists({ userId, isActive: true })) !== null
+          );
         }
         case 'google': {
-          const { GoogleConnection } = await import('../../models/GoogleConnection');
-          return await GoogleConnection.exists({ userId, isActive: true }) !== null;
+          const { GoogleConnection } =
+            await import('../../schemas/integration/google-connection.schema');
+          return (
+            (await GoogleConnection.exists({ userId, isActive: true })) !== null
+          );
         }
         case 'mongodb': {
-          const { MongoDBConnection } = await import('../../models/MongoDBConnection');
-          return await MongoDBConnection.exists({ userId, isActive: true }) !== null;
+          const { MongoDBConnection } =
+            await import('../../schemas/integration/mongodb-connection.schema');
+          return (
+            (await MongoDBConnection.exists({ userId, isActive: true })) !==
+            null
+          );
         }
         default: {
-          const { Integration } = await import('../../models/Integration');
+          const { Integration } = await import('../../schemas/integration/integration.schema');
           const typePattern = new RegExp(integration, 'i');
-          return await Integration.exists({
-            userId,
-            status: 'active',
-            type: typePattern,
-          }) !== null;
+          return (
+            (await Integration.exists({
+              userId,
+              status: 'active',
+              type: typePattern,
+            })) !== null
+          );
         }
       }
     } catch (error) {
@@ -187,40 +208,56 @@ export class MCPAuthService {
    */
   static async getConnectionId(
     userId: string,
-    integration: IntegrationType
+    integration: IntegrationType,
   ): Promise<string | null> {
     try {
       switch (integration) {
         case 'vercel': {
-          const { VercelConnection } = await import('../../models/VercelConnection');
-          const conn = await VercelConnection.findOne({ userId, isActive: true })
+          const { VercelConnection } =
+            await import('../../schemas/integration/vercel-connection.schema');
+          const conn = await VercelConnection.findOne({
+            userId,
+            isActive: true,
+          })
             .select('_id')
             .lean();
           return conn?._id.toString() || null;
         }
         case 'github': {
-          const { GitHubConnection } = await import('../../models/GitHubConnection');
-          const conn = await GitHubConnection.findOne({ userId, isActive: true })
+          const { GitHubConnection } =
+            await import('../../schemas/integration/github-connection.schema');
+          const conn = await GitHubConnection.findOne({
+            userId,
+            isActive: true,
+          })
             .select('_id')
             .lean();
           return conn?._id.toString() || null;
         }
         case 'google': {
-          const { GoogleConnection } = await import('../../models/GoogleConnection');
-          const conn = await GoogleConnection.findOne({ userId, isActive: true })
+          const { GoogleConnection } =
+            await import('../../schemas/integration/google-connection.schema');
+          const conn = await GoogleConnection.findOne({
+            userId,
+            isActive: true,
+          })
             .select('_id')
             .lean();
           return conn?._id.toString() || null;
         }
         case 'mongodb': {
-          const { MongoDBConnection } = await import('../../models/MongoDBConnection');
-          const conn = await MongoDBConnection.findOne({ userId, isActive: true })
+          const { MongoDBConnection } =
+            await import('../../schemas/integration/mongodb-connection.schema');
+          const conn = await MongoDBConnection.findOne({
+            userId,
+            isActive: true,
+          })
             .select('_id')
             .lean();
           return conn?._id.toString() || null;
         }
         default: {
-          const { Integration } = await import('../../models/Integration');
+          const { Integration } = await import('../../schemas/integration/integration.schema');
           const typePattern = new RegExp(integration, 'i');
           const conn = await Integration.findOne({
             userId,

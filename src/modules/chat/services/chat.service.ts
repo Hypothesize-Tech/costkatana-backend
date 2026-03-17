@@ -49,7 +49,7 @@ import { ResponseSanitizerService } from '../utils/response-sanitizer';
 import { RouteDecider } from '../utils/route-decider';
 import { ContextOptimizer } from '../utils/context-optimizer';
 import { LangchainHelpers } from '../utils/langchain-helpers';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { ChatEventsFactoryService } from './chat-events-factory.service';
 import { ChatEventsRedisService } from './chat-events-redis.service';
 import Redis from 'ioredis';
@@ -235,7 +235,13 @@ export class ChatService {
     private readonly connectionChecker: ConnectionChecker,
     private readonly responseSanitizer: ResponseSanitizerService,
     private readonly integrationDetector: IntegrationDetector,
-    @Inject(forwardRef(() => require('../langchain/langchain-orchestrator.service').LangchainOrchestratorService))
+    @Inject(
+      forwardRef(
+        () =>
+          require('../langchain/langchain-orchestrator.service')
+            .LangchainOrchestratorService,
+      ),
+    )
     private readonly langchainOrchestrator: LangchainOrchestratorService,
     private readonly cortexStreamingOrchestrator: CortexStreamingOrchestratorService,
     @InjectModel(GovernedTask.name)
@@ -260,12 +266,19 @@ export class ChatService {
    * Ensures content is always a string for ChatMessage. Handles objects from
    * integration results (e.g. { message, viewLinks, metadata }) and other edge cases.
    */
-  private ensureStringContent(value: unknown, fallback = 'Operation completed'): string {
+  private ensureStringContent(
+    value: unknown,
+    fallback = 'Operation completed',
+  ): string {
     if (value == null) return fallback;
     if (typeof value === 'string') return value;
     if (typeof value === 'object' && value !== null && 'message' in value) {
       const msg = (value as { message?: unknown }).message;
-      return typeof msg === 'string' ? msg : msg != null ? String(msg) : fallback;
+      return typeof msg === 'string'
+        ? msg
+        : msg != null
+          ? String(msg)
+          : fallback;
     }
     return String(value);
   }
@@ -285,7 +298,10 @@ export class ChatService {
   /**
    * Store user input session in Redis (30-minute TTL)
    */
-  private async storeUserInputSession(sessionId: string, session: any): Promise<void> {
+  private async storeUserInputSession(
+    sessionId: string,
+    session: any,
+  ): Promise<void> {
     if (!this.chatEventsRedis) {
       this.logger.warn('Redis not available, skipping session storage');
       return;
@@ -293,10 +309,14 @@ export class ChatService {
 
     try {
       const key = `chat:user_input_session:${sessionId}`;
-      await this.redisClient.setex(key, 1800, JSON.stringify({
-        ...session,
-        timestamp: new Date(),
-      }));
+      await this.redisClient.setex(
+        key,
+        1800,
+        JSON.stringify({
+          ...session,
+          timestamp: new Date(),
+        }),
+      );
     } catch (error) {
       this.logger.error('Failed to store user input session in Redis', {
         error: error instanceof Error ? error.message : String(error),
@@ -347,7 +367,10 @@ export class ChatService {
   /**
    * Store strategy formation session in Redis (30-minute TTL)
    */
-  private async storeStrategyFormationSession(sessionId: string, session: any): Promise<void> {
+  private async storeStrategyFormationSession(
+    sessionId: string,
+    session: any,
+  ): Promise<void> {
     if (!this.chatEventsRedis) {
       this.logger.warn('Redis not available, skipping session storage');
       return;
@@ -355,10 +378,14 @@ export class ChatService {
 
     try {
       const key = `chat:strategy_formation_session:${sessionId}`;
-      await this.redisClient.setex(key, 1800, JSON.stringify({
-        ...session,
-        timestamp: new Date(),
-      }));
+      await this.redisClient.setex(
+        key,
+        1800,
+        JSON.stringify({
+          ...session,
+          timestamp: new Date(),
+        }),
+      );
     } catch (error) {
       this.logger.error('Failed to store strategy formation session in Redis', {
         error: error instanceof Error ? error.message : String(error),
@@ -370,7 +397,9 @@ export class ChatService {
   /**
    * Get strategy formation session from Redis
    */
-  private async getStrategyFormationSession(sessionId: string): Promise<any | null> {
+  private async getStrategyFormationSession(
+    sessionId: string,
+  ): Promise<any | null> {
     if (!this.chatEventsRedis) {
       this.logger.warn('Redis not available for session retrieval');
       return null;
@@ -710,7 +739,10 @@ export class ChatService {
           conversationId: conversation._id,
           userId,
           role: 'assistant',
-          content: this.ensureStringContent(mcpResult.response, 'MCP integration completed'),
+          content: this.ensureStringContent(
+            mcpResult.response,
+            'MCP integration completed',
+          ),
           modelId: dto.modelId,
           agentPath: mcpResult.agentPath,
           optimizationsApplied: mcpResult.optimizationsApplied,
@@ -825,7 +857,10 @@ export class ChatService {
               conversationId: conversation._id,
               userId,
               role: 'assistant',
-              content: this.ensureStringContent(formattedResult, 'Integration command completed'),
+              content: this.ensureStringContent(
+                formattedResult,
+                'Integration command completed',
+              ),
               modelId: dto.modelId,
               agentPath: integrationResult.agentPath || ['integration_agent'],
               optimizationsApplied: integrationResult.optimizationsApplied,
@@ -920,7 +955,10 @@ export class ChatService {
                 conversationId: conversation._id,
                 userId,
                 role: 'assistant',
-                content: this.ensureStringContent(formattedMCPResult, 'Integration command completed'),
+                content: this.ensureStringContent(
+                  formattedMCPResult,
+                  'Integration command completed',
+                ),
                 modelId: dto.modelId,
                 agentPath: mcpResult.agentPath || ['mcp_integration'],
                 optimizationsApplied: mcpResult.optimizationsApplied,
@@ -1072,7 +1110,10 @@ export class ChatService {
           conversationId: conversation._id,
           userId,
           role: 'assistant',
-          content: this.ensureStringContent(vercelResult.response, 'Vercel operation completed'),
+          content: this.ensureStringContent(
+            vercelResult.response,
+            'Vercel operation completed',
+          ),
           modelId: dto.modelId,
           agentPath: ['vercel_agent'],
           optimizationsApplied: ['vercel_integration'],
@@ -1148,7 +1189,10 @@ export class ChatService {
             conversationId: conversation._id,
             userId,
             role: 'assistant',
-            content: this.ensureStringContent(mongodbResult.message, 'MongoDB query completed'),
+            content: this.ensureStringContent(
+              mongodbResult.message,
+              'MongoDB query completed',
+            ),
             modelId: dto.modelId,
             agentPath: ['mongodb_agent'],
             optimizationsApplied: ['mongodb_integration'],
@@ -1258,7 +1302,10 @@ export class ChatService {
             conversationId: conversation._id,
             userId,
             role: 'assistant',
-            content: this.ensureStringContent(githubResult.response, 'GitHub operation completed'),
+            content: this.ensureStringContent(
+              githubResult.response,
+              'GitHub operation completed',
+            ),
             modelId: dto.modelId,
             agentPath: ['github_agent'],
             optimizationsApplied: ['github_integration'],
@@ -1418,7 +1465,10 @@ export class ChatService {
                 conversationId: conversation._id,
                 userId,
                 role: 'assistant',
-                content: this.ensureStringContent(cortexResult, 'Streaming completed'),
+                content: this.ensureStringContent(
+                  cortexResult,
+                  'Streaming completed',
+                ),
                 modelId: dto.modelId,
                 agentPath: ['cortex-streaming'],
                 optimizationsApplied: ['cortex-multi-stage'],
@@ -2040,7 +2090,10 @@ export class ChatService {
               conversationId: conversation._id,
               userId,
               role: 'assistant',
-              content: this.ensureStringContent(response.content, 'Response completed'),
+              content: this.ensureStringContent(
+                response.content,
+                'Response completed',
+              ),
               modelId: dto.modelId,
               agentPath: response.agentPath,
               optimizationsApplied: response.optimizationsApplied,
@@ -2818,8 +2871,7 @@ export class ChatService {
         recentMessages: previousMessages,
         useSystemPrompt: true,
       });
-      const responseText =
-        typeof result === 'string' ? result : (result?.response ?? '');
+      const responseText = typeof result === 'string' ? result : '';
       return responseText?.trim() || null;
     };
 
@@ -3203,14 +3255,18 @@ export class ChatService {
    * for processMCPRoute. Returns undefined when input is undefined so callers can fall back to detectMentions.
    */
   private mapHandlerMentionsToParsedMentions(
-    parsedMentions: Array<{ type: string; id?: string; displayName?: string }> | undefined,
+    parsedMentions:
+      | Array<{ type: string; id?: string; displayName?: string }>
+      | undefined,
   ): ParsedMention[] | undefined {
     if (!parsedMentions || parsedMentions.length === 0) {
       return undefined;
     }
     return parsedMentions.map((m) => ({
       integration: m.type,
-      originalMention: m.displayName ? `@${m.type}:${m.displayName}` : `@${m.type}`,
+      originalMention: m.displayName
+        ? `@${m.type}:${m.displayName}`
+        : `@${m.type}`,
       entityId: m.id,
     }));
   }
@@ -5216,7 +5272,7 @@ export class ChatService {
     outputTokens: number;
     cost: number;
   }> {
-    return this.bedrockService.streamModelResponse(messages, modelId, {
+    return BedrockService.streamModelResponse(messages, modelId, {
       ...options,
       onChunk,
     });

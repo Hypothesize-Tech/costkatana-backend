@@ -1,6 +1,6 @@
 /**
  * Parallel Execution Optimizer
- * 
+ *
  * Analyzes dependency graphs and optimizes for parallel execution:
  * - Build dependency DAG (Directed Acyclic Graph)
  * - Detect independent execution paths
@@ -8,7 +8,7 @@
  * - Estimate performance improvements
  */
 
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 import { ProgramNode, IRProgram, IRParallelGroup } from './promptAST.types';
 
 export interface DependencyNode {
@@ -53,11 +53,12 @@ export class ParallelExecutionOptimizerService {
   static buildDependencyGraph(ast: ProgramNode): DependencyGraph {
     const nodes = new Map<string, DependencyNode>();
     const edges = new Map<string, string[]>();
-    
+
     // First pass: Create nodes
     for (const statement of ast.body) {
-      const deps = 'dependencies' in statement ? statement.dependencies || [] : [];
-      
+      const deps =
+        'dependencies' in statement ? statement.dependencies || [] : [];
+
       nodes.set(statement.id, {
         id: statement.id,
         type: statement.type,
@@ -65,7 +66,9 @@ export class ParallelExecutionOptimizerService {
         dependents: [],
         level: 0,
         estimatedCost: statement.metadata.cost || 0,
-        estimatedLatency: statement.metadata.tokens ? statement.metadata.tokens * 0.01 : 100
+        estimatedLatency: statement.metadata.tokens
+          ? statement.metadata.tokens * 0.01
+          : 100,
       });
 
       // Build edges
@@ -96,10 +99,13 @@ export class ParallelExecutionOptimizerService {
 
     loggingService.info('Dependency graph built', {
       nodeCount: nodes.size,
-      edgeCount: Array.from(edges.values()).reduce((sum, arr) => sum + arr.length, 0),
+      edgeCount: Array.from(edges.values()).reduce(
+        (sum, arr) => sum + arr.length,
+        0,
+      ),
       levelCount: levels.size,
       criticalPathLength: criticalPath.length,
-      totalLatency
+      totalLatency,
     });
 
     return {
@@ -107,14 +113,16 @@ export class ParallelExecutionOptimizerService {
       edges,
       levels,
       criticalPath,
-      totalLatency
+      totalLatency,
     };
   }
 
   /**
    * Compute execution levels (topological sort)
    */
-  private static computeLevels(nodes: Map<string, DependencyNode>): Map<number, string[]> {
+  private static computeLevels(
+    nodes: Map<string, DependencyNode>,
+  ): Map<number, string[]> {
     const levels = new Map<number, string[]>();
     const visited = new Set<string>();
     const temp = new Set<string>();
@@ -177,11 +185,11 @@ export class ParallelExecutionOptimizerService {
     // Topological order
     const sorted: string[] = [];
     const visited = new Set<string>();
-    
+
     const dfs = (nodeId: string) => {
       if (visited.has(nodeId)) return;
       visited.add(nodeId);
-      
+
       const node = nodes.get(nodeId)!;
       for (const depId of node.dependencies) {
         dfs(depId);
@@ -198,10 +206,10 @@ export class ParallelExecutionOptimizerService {
     // Compute longest paths
     for (const nodeId of sorted) {
       const node = nodes.get(nodeId)!;
-      
+
       for (const depId of node.dependencies) {
         const newDist = distances.get(depId)! + node.estimatedLatency;
-        
+
         if (newDist > distances.get(nodeId)!) {
           distances.set(nodeId, newDist);
           parents.set(nodeId, depId);
@@ -212,7 +220,7 @@ export class ParallelExecutionOptimizerService {
     // Find node with maximum distance
     let maxDist = 0;
     let maxNode = sorted[0];
-    
+
     for (const [nodeId, dist] of distances.entries()) {
       if (dist > maxDist) {
         maxDist = dist;
@@ -223,7 +231,7 @@ export class ParallelExecutionOptimizerService {
     // Reconstruct path
     const path: string[] = [];
     let current: string | null = maxNode;
-    
+
     while (current !== null) {
       path.push(current);
       current = parents.get(current)!;
@@ -237,7 +245,7 @@ export class ParallelExecutionOptimizerService {
    */
   private static computeTotalLatency(
     nodes: Map<string, DependencyNode>,
-    path: string[]
+    path: string[],
   ): number {
     return path.reduce((sum, nodeId) => {
       const node = nodes.get(nodeId);
@@ -250,24 +258,28 @@ export class ParallelExecutionOptimizerService {
    */
   static generateParallelExecutionPlan(
     graph: DependencyGraph,
-    maxParallelism: number = 4
+    maxParallelism: number = 4,
   ): ParallelExecutionPlan {
     const groups: ParallelGroup[] = [];
     let estimatedParallelLatency = 0;
     const estimatedSequentialLatency = graph.totalLatency;
 
     // Group nodes by level for parallel execution
-    for (const [level, nodeIds] of Array.from(graph.levels.entries()).sort((a, b) => a[0] - b[0])) {
-      const nodeLatencies = nodeIds.map(id => graph.nodes.get(id)!.estimatedLatency);
+    for (const [level, nodeIds] of Array.from(graph.levels.entries()).sort(
+      (a, b) => a[0] - b[0],
+    )) {
+      const nodeLatencies = nodeIds.map(
+        (id) => graph.nodes.get(id)!.estimatedLatency,
+      );
       const maxLatency = Math.max(...nodeLatencies);
-      
+
       const group: ParallelGroup = {
         groupId: `group_level_${level}`,
         level,
         nodes: nodeIds,
         estimatedLatency: maxLatency,
         canExecuteInParallel: nodeIds.length > 1,
-        maxParallelism: Math.min(nodeIds.length, maxParallelism)
+        maxParallelism: Math.min(nodeIds.length, maxParallelism),
       };
 
       groups.push(group);
@@ -275,14 +287,17 @@ export class ParallelExecutionOptimizerService {
     }
 
     const speedupFactor = estimatedSequentialLatency / estimatedParallelLatency;
-    const resourceUtilization = this.computeResourceUtilization(groups, maxParallelism);
+    const resourceUtilization = this.computeResourceUtilization(
+      groups,
+      maxParallelism,
+    );
 
     loggingService.info('Generated parallel execution plan', {
       groupCount: groups.length,
       estimatedSequentialLatency,
       estimatedParallelLatency,
       speedupFactor: speedupFactor.toFixed(2) + 'x',
-      resourceUtilization: (resourceUtilization * 100).toFixed(1) + '%'
+      resourceUtilization: (resourceUtilization * 100).toFixed(1) + '%',
     });
 
     return {
@@ -290,7 +305,7 @@ export class ParallelExecutionOptimizerService {
       estimatedSequentialLatency,
       estimatedParallelLatency,
       speedupFactor,
-      resourceUtilization
+      resourceUtilization,
     };
   }
 
@@ -299,13 +314,13 @@ export class ParallelExecutionOptimizerService {
    */
   private static computeResourceUtilization(
     groups: ParallelGroup[],
-    maxParallelism: number
+    maxParallelism: number,
   ): number {
     if (groups.length === 0) return 0;
 
     const totalSlots = groups.reduce(
       (sum, group) => sum + group.maxParallelism,
-      0
+      0,
     );
     const maxPossibleSlots = groups.length * maxParallelism;
 
@@ -317,7 +332,7 @@ export class ParallelExecutionOptimizerService {
    */
   static optimizeIRForParallel(
     ir: IRProgram,
-    plan: ParallelExecutionPlan
+    plan: ParallelExecutionPlan,
   ): IRProgram {
     const parallelGroups: IRParallelGroup[] = [];
 
@@ -326,7 +341,7 @@ export class ParallelExecutionOptimizerService {
         parallelGroups.push({
           id: group.groupId,
           instructions: group.nodes,
-          estimatedSpeedup: group.nodes.length / group.maxParallelism
+          estimatedSpeedup: group.nodes.length / group.maxParallelism,
         });
       }
     }
@@ -335,17 +350,15 @@ export class ParallelExecutionOptimizerService {
       ...ir,
       metadata: {
         ...ir.metadata,
-        parallelGroups
-      }
+        parallelGroups,
+      },
     };
   }
 
   /**
    * Analyze parallelization opportunities
    */
-  static analyzeParallelizationOpportunities(
-    ast: ProgramNode
-  ): {
+  static analyzeParallelizationOpportunities(ast: ProgramNode): {
     totalNodes: number;
     parallelizableNodes: number;
     parallelizationPercentage: number;
@@ -353,7 +366,7 @@ export class ParallelExecutionOptimizerService {
     estimatedSpeedup: number;
   } {
     const graph = this.buildDependencyGraph(ast);
-    
+
     // Count nodes that can execute in parallel (nodes at same level)
     let parallelizableNodes = 0;
     let maxNodesAtSameLevel = 0;
@@ -371,14 +384,15 @@ export class ParallelExecutionOptimizerService {
 
     // Estimate speedup using Amdahl's Law
     const parallelFraction = parallelizableNodes / totalNodes;
-    const estimatedSpeedup = 1 / ((1 - parallelFraction) + (parallelFraction / recommendedMaxParallelism));
+    const estimatedSpeedup =
+      1 / (1 - parallelFraction + parallelFraction / recommendedMaxParallelism);
 
     loggingService.info('Analyzed parallelization opportunities', {
       totalNodes,
       parallelizableNodes,
       parallelizationPercentage: parallelizationPercentage.toFixed(1) + '%',
       recommendedMaxParallelism,
-      estimatedSpeedup: estimatedSpeedup.toFixed(2) + 'x'
+      estimatedSpeedup: estimatedSpeedup.toFixed(2) + 'x',
     });
 
     return {
@@ -386,7 +400,7 @@ export class ParallelExecutionOptimizerService {
       parallelizableNodes,
       parallelizationPercentage,
       recommendedMaxParallelism,
-      estimatedSpeedup
+      estimatedSpeedup,
     };
   }
 
@@ -417,13 +431,15 @@ export class ParallelExecutionOptimizerService {
 
     // Check for long critical path
     if (graph.criticalPath.length > 10) {
-      warnings.push(`Long critical path detected (${graph.criticalPath.length} nodes). Consider breaking into smaller tasks.`);
+      warnings.push(
+        `Long critical path detected (${graph.criticalPath.length} nodes). Consider breaking into smaller tasks.`,
+      );
     }
 
     return {
       valid: errors.length === 0,
       errors,
-      warnings
+      warnings,
     };
   }
 
@@ -461,9 +477,7 @@ export class ParallelExecutionOptimizerService {
   /**
    * Generate execution schedule
    */
-  static generateExecutionSchedule(
-    plan: ParallelExecutionPlan
-  ): {
+  static generateExecutionSchedule(plan: ParallelExecutionPlan): {
     schedule: Array<{
       time: number;
       group: ParallelGroup;
@@ -471,14 +485,18 @@ export class ParallelExecutionOptimizerService {
     }>;
     totalTime: number;
   } {
-    const schedule: Array<{ time: number; group: ParallelGroup; action: 'start' | 'end' }> = [];
+    const schedule: Array<{
+      time: number;
+      group: ParallelGroup;
+      action: 'start' | 'end';
+    }> = [];
     let currentTime = 0;
 
     for (const group of plan.groups) {
       schedule.push({
         time: currentTime,
         group,
-        action: 'start'
+        action: 'start',
       });
 
       currentTime += group.estimatedLatency;
@@ -486,14 +504,13 @@ export class ParallelExecutionOptimizerService {
       schedule.push({
         time: currentTime,
         group,
-        action: 'end'
+        action: 'end',
       });
     }
 
     return {
       schedule,
-      totalTime: currentTime
+      totalTime: currentTime,
     };
   }
 }
-

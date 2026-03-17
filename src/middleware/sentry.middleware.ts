@@ -1,7 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import * as Sentry from '@sentry/node';
-import { setUserContext, setRequestContext, setBusinessContext, addBreadcrumb } from '../config/sentry';
-import { loggingService } from '../services/logging.service';
+import {
+  setUserContext,
+  setRequestContext,
+  setBusinessContext,
+  addBreadcrumb,
+} from '../config/sentry';
+import { loggingService } from '../common/services/logging.service';
 
 /**
  * Sentry Context Middleware
@@ -13,7 +18,7 @@ import { loggingService } from '../services/logging.service';
 export const sentryContextMiddleware = (
   req: Request & { user?: any },
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   const startTime = Date.now();
 
@@ -25,7 +30,7 @@ export const sentryContextMiddleware = (
         email: req.user.email,
         username: req.user.username,
         role: req.user.role,
-        organization: req.user.organizationId || req.user.organization
+        organization: req.user.organizationId || req.user.organization,
       });
 
       // Add breadcrumb for authenticated user action
@@ -36,8 +41,8 @@ export const sentryContextMiddleware = (
         {
           userId: req.user.id || req.user._id,
           userRole: req.user.role,
-          userEmail: req.user.email
-        }
+          userEmail: req.user.email,
+        },
       );
     } else {
       // Add breadcrumb for anonymous access
@@ -47,8 +52,8 @@ export const sentryContextMiddleware = (
         'info',
         {
           userAgent: req.get('User-Agent'),
-          ip: req.ip
-        }
+          ip: req.ip,
+        },
       );
     }
 
@@ -59,7 +64,7 @@ export const sentryContextMiddleware = (
       headers: req.headers as Record<string, string>,
       query: req.query as Record<string, any>,
       params: req.params,
-      body: req.method !== 'GET' ? req.body : undefined // Don't log body for GET requests
+      body: req.method !== 'GET' ? req.body : undefined, // Don't log body for GET requests
     });
 
     // Set business context based on route patterns
@@ -78,8 +83,8 @@ export const sentryContextMiddleware = (
         url: req.originalUrl,
         userAgent: req.get('User-Agent'),
         contentType: req.get('Content-Type'),
-        contentLength: req.get('Content-Length')
-      }
+        contentLength: req.get('Content-Length'),
+      },
     );
 
     // Store original response methods to intercept
@@ -97,27 +102,26 @@ export const sentryContextMiddleware = (
         {
           statusCode: res.statusCode,
           duration: `${duration}ms`,
-          responseSize: res.get('Content-Length')
-        }
+          responseSize: res.get('Content-Length'),
+        },
       );
     };
 
     // Wrap response methods to capture completion
-    res.send = function(data: any) {
+    res.send = function (data: any) {
       addResponseBreadcrumb();
       return originalSend.call(this, data);
     };
 
-    res.json = function(data: any) {
+    res.json = function (data: any) {
       addResponseBreadcrumb();
       return originalJson.call(this, data);
     };
 
-    res.end = function(chunk?: any, encoding?: any, callback?: any) {
+    res.end = function (chunk?: any, encoding?: any, callback?: any) {
       addResponseBreadcrumb();
       return originalEnd.call(this, chunk, encoding, callback);
     };
-
   } catch (error) {
     // Log middleware errors but don't break the request
     loggingService.warn('Sentry context middleware error', {
@@ -125,7 +129,7 @@ export const sentryContextMiddleware = (
       operation: 'sentryContextMiddleware',
       type: 'middleware_error',
       error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
+      stack: error instanceof Error ? error.stack : undefined,
     });
   }
 
@@ -145,7 +149,11 @@ function setBusinessContextFromRoute(req: Request & { user?: any }): void {
   let feature = 'unknown';
 
   // Authentication routes
-  if (path.includes('/auth') || path.includes('/login') || path.includes('/register')) {
+  if (
+    path.includes('/auth') ||
+    path.includes('/login') ||
+    path.includes('/register')
+  ) {
     operation = method === 'POST' ? 'authentication' : 'auth_check';
     component = 'authentication';
     feature = 'user_access';
@@ -169,19 +177,31 @@ function setBusinessContextFromRoute(req: Request & { user?: any }): void {
     feature = 'optimization';
   }
   // AI operations
-  else if (path.includes('/ai') || path.includes('/intelligence') || path.includes('/chat')) {
+  else if (
+    path.includes('/ai') ||
+    path.includes('/intelligence') ||
+    path.includes('/chat')
+  ) {
     operation = 'ai_interaction';
     component = 'ai_services';
     feature = 'ai_interactions';
   }
   // Analytics and reporting
-  else if (path.includes('/analytics') || path.includes('/metrics') || path.includes('/reports')) {
+  else if (
+    path.includes('/analytics') ||
+    path.includes('/metrics') ||
+    path.includes('/reports')
+  ) {
     operation = 'data_analysis';
     component = 'analytics';
     feature = 'reporting';
   }
   // API keys and security
-  else if (path.includes('/keys') || path.includes('/security') || path.includes('/apikey')) {
+  else if (
+    path.includes('/keys') ||
+    path.includes('/security') ||
+    path.includes('/apikey')
+  ) {
     operation = getCrudOperation(method);
     component = 'security';
     feature = 'api_keys';
@@ -204,8 +224,8 @@ function setBusinessContextFromRoute(req: Request & { user?: any }): void {
     component,
     feature,
     userId: req.user?.id || req.user?._id,
-        projectId: req.params?.projectId || (req.query?.projectId as string),
-    costOptimizationId: req.params?.optimizationId || req.params?.id
+    projectId: req.params?.projectId || (req.query?.projectId as string),
+    costOptimizationId: req.params?.optimizationId || req.params?.id,
   });
 }
 
@@ -260,32 +280,34 @@ function setCustomTags(req: Request & { user?: any }): void {
     tags['api.version'] = apiVersion;
   }
 
-    // Content type
-    const contentType = req.get('Content-Type');
-    if (contentType) {
-      if (contentType.includes('application/json')) {
-        tags['content.type'] = 'json';
-      } else if (contentType.includes('multipart/form-data')) {
-        tags['content.type'] = 'multipart';
-      } else if (contentType.includes('application/x-www-form-urlencoded')) {
-        tags['content.type'] = 'form-urlencoded';
-      } else {
-        tags['content.type'] = 'other';
-      }
+  // Content type
+  const contentType = req.get('Content-Type');
+  if (contentType) {
+    if (contentType.includes('application/json')) {
+      tags['content.type'] = 'json';
+    } else if (contentType.includes('multipart/form-data')) {
+      tags['content.type'] = 'multipart';
+    } else if (contentType.includes('application/x-www-form-urlencoded')) {
+      tags['content.type'] = 'form-urlencoded';
+    } else {
+      tags['content.type'] = 'other';
     }
+  }
 
-    // Request size
-    const contentLength = req.get('Content-Length');
-    if (contentLength) {
-      const size = parseInt(contentLength, 10);
-      if (size > 1024 * 1024) { // > 1MB
-        tags['request.size'] = 'large';
-      } else if (size > 1024 * 100) { // > 100KB
-        tags['request.size'] = 'medium';
-      } else {
-        tags['request.size'] = 'small';
-      }
+  // Request size
+  const contentLength = req.get('Content-Length');
+  if (contentLength) {
+    const size = parseInt(contentLength, 10);
+    if (size > 1024 * 1024) {
+      // > 1MB
+      tags['request.size'] = 'large';
+    } else if (size > 1024 * 100) {
+      // > 100KB
+      tags['request.size'] = 'medium';
+    } else {
+      tags['request.size'] = 'small';
     }
+  }
 
   // Set all tags
   Object.entries(tags).forEach(([key, value]) => {
@@ -300,13 +322,12 @@ function setCustomTags(req: Request & { user?: any }): void {
 export const sentryPerformanceMiddleware = (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   // Sentry automatically instruments HTTP requests
   // This middleware is kept for future custom instrumentation if needed
   next();
 };
-
 
 /**
  * Middleware to capture business logic errors and send to Sentry
@@ -315,7 +336,7 @@ export const sentryBusinessErrorMiddleware = (
   error: Error,
   req: Request & { user?: any },
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   // Only capture business logic errors, not validation or auth errors
   if (error && !isValidationError(error) && !isAuthError(error)) {
@@ -325,31 +346,33 @@ export const sentryBusinessErrorMiddleware = (
       feature: getFeatureFromPath(req.path),
       userId: req.user?.id || req.user?._id,
       projectId: req.params?.projectId,
-      costOptimizationId: req.params?.optimizationId
+      costOptimizationId: req.params?.optimizationId,
     };
 
     // Import here to avoid circular dependencies
     const { captureError } = require('../config/sentry');
 
     captureError(error, {
-      user: req.user ? {
-        id: req.user.id || req.user._id,
-        email: req.user.email,
-        role: req.user.role,
-        organization: req.user.organizationId || req.user.organization
-      } : undefined,
-                request: {
-                    method: req.method,
-                    url: req.originalUrl,
-                    query: req.query as Record<string, any>,
-                    params: req.params as Record<string, any>
-                },
+      user: req.user
+        ? {
+            id: req.user.id || req.user._id,
+            email: req.user.email,
+            role: req.user.role,
+            organization: req.user.organizationId || req.user.organization,
+          }
+        : undefined,
+      request: {
+        method: req.method,
+        url: req.originalUrl,
+        query: req.query as Record<string, any>,
+        params: req.params as Record<string, any>,
+      },
       business: businessContext,
       tags: {
         'error.type': 'business_logic',
         'http.method': req.method,
-        'http.url': req.originalUrl
-      }
+        'http.url': req.originalUrl,
+      },
     });
   }
 
@@ -361,7 +384,7 @@ export const sentryBusinessErrorMiddleware = (
  */
 function isValidationError(error: any): boolean {
   if (!error) return false;
-  
+
   // Handle Error objects
   if (error instanceof Error) {
     if (error.name === 'ValidationError') return true;
@@ -371,7 +394,7 @@ function isValidationError(error: any): boolean {
     }
     return false;
   }
-  
+
   // Handle plain objects
   if (typeof error === 'object') {
     if (error.name === 'ValidationError') return true;
@@ -380,12 +403,12 @@ function isValidationError(error: any): boolean {
       return message.includes('validation') || message.includes('Validation');
     }
   }
-  
+
   // Handle strings
   if (typeof error === 'string') {
     return error.toLowerCase().includes('validation');
   }
-  
+
   return false;
 }
 
@@ -394,41 +417,49 @@ function isValidationError(error: any): boolean {
  */
 function isAuthError(error: any): boolean {
   if (!error) return false;
-  
+
   // Handle Error objects
   if (error instanceof Error) {
-    if (error.name === 'UnauthorizedError' || error.name === 'ForbiddenError') return true;
+    if (error.name === 'UnauthorizedError' || error.name === 'ForbiddenError')
+      return true;
     const message = error.message || '';
     if (message && typeof message === 'string') {
-      return message.includes('unauthorized') ||
-             message.includes('forbidden') ||
-             message.includes('authentication') ||
-             message.includes('authorization');
+      return (
+        message.includes('unauthorized') ||
+        message.includes('forbidden') ||
+        message.includes('authentication') ||
+        message.includes('authorization')
+      );
     }
     return false;
   }
-  
+
   // Handle plain objects
   if (typeof error === 'object') {
-    if (error.name === 'UnauthorizedError' || error.name === 'ForbiddenError') return true;
+    if (error.name === 'UnauthorizedError' || error.name === 'ForbiddenError')
+      return true;
     const message = error.message || error.error?.message || '';
     if (message && typeof message === 'string') {
-      return message.includes('unauthorized') ||
-             message.includes('forbidden') ||
-             message.includes('authentication') ||
-             message.includes('authorization');
+      return (
+        message.includes('unauthorized') ||
+        message.includes('forbidden') ||
+        message.includes('authentication') ||
+        message.includes('authorization')
+      );
     }
   }
-  
+
   // Handle strings
   if (typeof error === 'string') {
     const lowerError = error.toLowerCase();
-    return lowerError.includes('unauthorized') ||
-           lowerError.includes('forbidden') ||
-           lowerError.includes('authentication') ||
-           lowerError.includes('authorization');
+    return (
+      lowerError.includes('unauthorized') ||
+      lowerError.includes('forbidden') ||
+      lowerError.includes('authentication') ||
+      lowerError.includes('authorization')
+    );
   }
-  
+
   return false;
 }
 
@@ -440,13 +471,18 @@ function getFeatureFromPath(path: string): string {
 
   // Map common path patterns to features
   if (pathParts.includes('projects')) return 'projects';
-  if (pathParts.includes('optimization') || pathParts.includes('cost')) return 'cost_optimization';
-  if (pathParts.includes('ai') || pathParts.includes('intelligence')) return 'ai_services';
-  if (pathParts.includes('analytics') || pathParts.includes('metrics')) return 'analytics';
-  if (pathParts.includes('users') || pathParts.includes('profile')) return 'user_management';
+  if (pathParts.includes('optimization') || pathParts.includes('cost'))
+    return 'cost_optimization';
+  if (pathParts.includes('ai') || pathParts.includes('intelligence'))
+    return 'ai_services';
+  if (pathParts.includes('analytics') || pathParts.includes('metrics'))
+    return 'analytics';
+  if (pathParts.includes('users') || pathParts.includes('profile'))
+    return 'user_management';
   if (pathParts.includes('auth')) return 'authentication';
   if (pathParts.includes('webhook')) return 'webhooks';
-  if (pathParts.includes('security') || pathParts.includes('keys')) return 'security';
+  if (pathParts.includes('security') || pathParts.includes('keys'))
+    return 'security';
 
   return 'unknown';
 }

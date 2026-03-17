@@ -35,7 +35,7 @@ export interface ToolRegistryEntry {
 
 export type ToolHandler = (
   params: any,
-  context: ToolExecutionContext
+  context: ToolExecutionContext,
 ) => Promise<any>;
 
 export interface ToolExecutionContext {
@@ -60,13 +60,16 @@ export interface ToolValidationResult {
  */
 export function validateToolParameters(
   params: any,
-  schema: ToolSchema
+  schema: ToolSchema,
 ): ToolValidationResult {
   const errors: Array<{ parameter: string; message: string }> = [];
 
   // Check required parameters
   for (const param of schema.parameters) {
-    if (param.required && (params[param.name] === undefined || params[param.name] === null)) {
+    if (
+      param.required &&
+      (params[param.name] === undefined || params[param.name] === null)
+    ) {
       errors.push({
         parameter: param.name,
         message: `Required parameter '${param.name}' is missing`,

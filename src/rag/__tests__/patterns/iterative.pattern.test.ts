@@ -28,7 +28,7 @@ describe('IterativeRAGPattern', () => {
 
       const result = await iterativePattern.execute(
         'Provide a comprehensive guide to cloud cost optimization',
-        context
+        context,
       );
 
       expect(result.success).toBe(true);
@@ -44,7 +44,7 @@ describe('IterativeRAGPattern', () => {
 
       const result = await iterativePattern.execute(
         'What is machine learning?',
-        context
+        context,
       );
 
       expect(result.success).toBe(true);
@@ -58,7 +58,7 @@ describe('IterativeRAGPattern', () => {
 
       const result = await iterativePattern.execute(
         'Explain the benefits and drawbacks of microservices architecture',
-        context
+        context,
       );
 
       expect(result.success).toBe(true);
@@ -73,7 +73,7 @@ describe('IterativeRAGPattern', () => {
 
       const result = await iterativePattern.execute(
         'Compare different database types',
-        context
+        context,
       );
 
       expect(result.metadata.performance).toHaveProperty('totalDuration');
@@ -81,4 +81,3 @@ describe('IterativeRAGPattern', () => {
     });
   });
 });
-

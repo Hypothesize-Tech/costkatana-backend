@@ -12,7 +12,7 @@ import {
 } from '../types/rag.types';
 import { Document } from '@langchain/core/documents';
 import { ChatBedrockConverse } from '@langchain/aws';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 export class RerankModule extends BaseRAGModule {
   protected config: RerankConfig;
@@ -24,11 +24,11 @@ export class RerankModule extends BaseRAGModule {
       topK: 5,
       useLLM: false,
       scoreThreshold: 0.5,
-    }
+    },
   ) {
     super('RerankModule', 'rerank', config);
     this.config = config;
-    
+
     if (config.useLLM) {
       this.llm = new ChatBedrockConverse({
         model: config.model || 'amazon.nova-micro-v1:0',
@@ -40,7 +40,7 @@ export class RerankModule extends BaseRAGModule {
   }
 
   protected async executeInternal(
-    input: RAGModuleInput
+    input: RAGModuleInput,
   ): Promise<RAGModuleOutput> {
     const { query, documents, config } = input;
 
@@ -57,18 +57,22 @@ export class RerankModule extends BaseRAGModule {
     try {
       // Rerank documents
       let rankedDocuments: Document[];
-      
+
       if (effectiveConfig.useLLM && this.llm) {
         rankedDocuments = await this.llmBasedRerank(query, documents);
       } else {
-        rankedDocuments = await this.heuristicRerank(query, documents, effectiveConfig);
+        rankedDocuments = await this.heuristicRerank(
+          query,
+          documents,
+          effectiveConfig,
+        );
       }
 
       // Apply CRAG - detect and filter low-quality retrievals
       const correctedDocuments = await this.applyCRAG(
         query,
         rankedDocuments,
-        effectiveConfig
+        effectiveConfig,
       );
 
       // Take top K
@@ -97,7 +101,7 @@ export class RerankModule extends BaseRAGModule {
         component: 'RerankModule',
         error: error instanceof Error ? error.message : String(error),
       });
-      
+
       // Return original documents on failure
       return {
         ...this.createSuccessOutput(documents, { fallback: true }),
@@ -112,7 +116,7 @@ export class RerankModule extends BaseRAGModule {
    */
   private async llmBasedRerank(
     query: string,
-    documents: Document[]
+    documents: Document[],
   ): Promise<Document[]> {
     if (!this.llm) {
       return this.heuristicRerank(query, documents, this.config);
@@ -122,7 +126,8 @@ export class RerankModule extends BaseRAGModule {
       const scoredDocs: DocumentScore[] = [];
 
       // Score each document using LLM
-      for (const doc of documents.slice(0, 10)) { // Limit to avoid too many API calls
+      for (const doc of documents.slice(0, 10)) {
+        // Limit to avoid too many API calls
         const score = await this.scoreLLMRelevance(query, doc);
         scoredDocs.push({
           document: doc,
@@ -137,7 +142,7 @@ export class RerankModule extends BaseRAGModule {
       // Sort by score
       scoredDocs.sort((a, b) => b.score - a.score);
 
-      return scoredDocs.map(sd => {
+      return scoredDocs.map((sd) => {
         const doc = sd.document;
         doc.metadata.rerankScore = sd.score;
         return doc;
@@ -156,7 +161,7 @@ export class RerankModule extends BaseRAGModule {
    */
   private async scoreLLMRelevance(
     query: string,
-    document: Document
+    document: Document,
   ): Promise<number> {
     if (!this.llm) return 0.5;
 
@@ -169,8 +174,11 @@ Document: "${document.pageContent.substring(0, 500)}"
 Relevance score:`;
 
     try {
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      const content = typeof response.content === 'string' ? response.content : '0.5';
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      const content =
+        typeof response.content === 'string' ? response.content : '0.5';
       const score = parseFloat(content.match(/[\d.]+/)?.[0] || '0.5');
       return Math.max(0, Math.min(1, score));
     } catch (error) {
@@ -184,14 +192,14 @@ Relevance score:`;
   private async heuristicRerank(
     query: string,
     documents: Document[],
-    config: RerankConfig
+    config: RerankConfig,
   ): Promise<Document[]> {
     const queryTerms = query.toLowerCase().split(/\s+/);
     const scoredDocs: DocumentScore[] = [];
 
     for (const doc of documents) {
       const content = doc.pageContent.toLowerCase();
-      
+
       // Keyword matching score
       let keywordScore = 0;
       for (const term of queryTerms) {
@@ -207,8 +215,10 @@ Relevance score:`;
       let recencyScore = 0.5;
       if (doc.metadata.createdAt) {
         const createdAt = new Date(doc.metadata.createdAt as string);
-        const daysSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
-        recencyScore = daysSinceCreation < 30 ? 1.0 : daysSinceCreation < 90 ? 0.7 : 0.5;
+        const daysSinceCreation =
+          (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+        recencyScore =
+          daysSinceCreation < 30 ? 1.0 : daysSinceCreation < 90 ? 0.7 : 0.5;
       }
 
       // Authority score (based on access count)
@@ -216,7 +226,7 @@ Relevance score:`;
       const authorityScore = Math.min(accessCount / 100, 1.0);
 
       // Combined score
-      const combinedScore = 
+      const combinedScore =
         semanticScore * 0.4 +
         keywordScore * 0.3 +
         recencyScore * 0.2 +
@@ -242,7 +252,7 @@ Relevance score:`;
     // Sort by score
     scoredDocs.sort((a, b) => b.score - a.score);
 
-    return scoredDocs.map(sd => {
+    return scoredDocs.map((sd) => {
       const doc = sd.document;
       doc.metadata.rerankScore = sd.score;
       doc.metadata.relevanceFactors = sd.relevanceFactors;
@@ -256,13 +266,13 @@ Relevance score:`;
   private async applyCRAG(
     query: string,
     documents: Document[],
-    config: RerankConfig
+    config: RerankConfig,
   ): Promise<Document[]> {
     const threshold = config.scoreThreshold || 0.5;
-    
+
     // Filter documents below threshold
-    const filteredDocs = documents.filter(doc => {
-      const score = doc.metadata.rerankScore as number || 0.5;
+    const filteredDocs = documents.filter((doc) => {
+      const score = (doc.metadata.rerankScore as number) || 0.5;
       return score >= threshold;
     });
 
@@ -293,15 +303,15 @@ Relevance score:`;
    */
   private applyDiversityPenalty(
     scoredDocs: DocumentScore[],
-    penaltyFactor: number
+    penaltyFactor: number,
   ): void {
     const seen = new Set<string>();
 
     for (const scoredDoc of scoredDocs) {
       const contentHash = scoredDoc.document.pageContent.substring(0, 100);
-      
+
       if (seen.has(contentHash)) {
-        scoredDoc.score *= (1 - penaltyFactor);
+        scoredDoc.score *= 1 - penaltyFactor;
       } else {
         seen.add(contentHash);
       }
@@ -350,4 +360,3 @@ Relevance score:`;
     return true;
   }
 }
-

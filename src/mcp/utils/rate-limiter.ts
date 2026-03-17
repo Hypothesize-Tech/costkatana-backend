@@ -3,7 +3,7 @@
  * Prevents abuse and ensures fair usage
  */
 
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 import { redisService } from '../../services/redis.service';
 import { IntegrationType, HttpMethod } from '../types/permission.types';
 
@@ -21,13 +21,14 @@ export interface RateLimitResult {
 
 export class RateLimiter {
   // Default rate limits
-  private static readonly DEFAULT_LIMITS: Record<HttpMethod, RateLimitConfig> = {
-    GET: { requests: 100, windowSeconds: 60 },
-    POST: { requests: 50, windowSeconds: 60 },
-    PUT: { requests: 50, windowSeconds: 60 },
-    PATCH: { requests: 50, windowSeconds: 60 },
-    DELETE: { requests: 10, windowSeconds: 3600 }, // 10 per hour for DELETE
-  };
+  private static readonly DEFAULT_LIMITS: Record<HttpMethod, RateLimitConfig> =
+    {
+      GET: { requests: 100, windowSeconds: 60 },
+      POST: { requests: 50, windowSeconds: 60 },
+      PUT: { requests: 50, windowSeconds: 60 },
+      PATCH: { requests: 50, windowSeconds: 60 },
+      DELETE: { requests: 10, windowSeconds: 3600 }, // 10 per hour for DELETE
+    };
 
   /**
    * Check rate limit
@@ -36,7 +37,7 @@ export class RateLimiter {
     userId: string,
     integration: IntegrationType,
     httpMethod: HttpMethod,
-    toolName: string
+    toolName: string,
   ): Promise<RateLimitResult> {
     try {
       const config = this.DEFAULT_LIMITS[httpMethod];
@@ -56,7 +57,9 @@ export class RateLimiter {
 
       // Get reset time
       const ttl = await redisService.getTTL(key);
-      const resetAt = new Date(Date.now() + (ttl > 0 ? ttl * 1000 : config.windowSeconds * 1000));
+      const resetAt = new Date(
+        Date.now() + (ttl > 0 ? ttl * 1000 : config.windowSeconds * 1000),
+      );
 
       if (!allowed) {
         loggingService.warn('Rate limit exceeded', {
@@ -104,7 +107,7 @@ export class RateLimiter {
    */
   static async resetRateLimit(
     userId: string,
-    integration?: IntegrationType
+    integration?: IntegrationType,
   ): Promise<number> {
     try {
       const pattern = integration
@@ -113,10 +116,10 @@ export class RateLimiter {
 
       let deleted = 0;
       let cursor = '0';
-      
+
       // Use Redis client directly for SCAN
       const client = redisService['client' as keyof typeof redisService] as any;
-      
+
       if (!client || typeof client.scan !== 'function') {
         // Fallback to simple deletion if scan not available
         const keys = await client.keys(pattern);
@@ -130,13 +133,16 @@ export class RateLimiter {
         }
         return deleted;
       }
-      
+
       // Use SCAN instead of KEYS to avoid blocking Redis
       do {
-        const result = await client.scan(cursor, { MATCH: pattern, COUNT: 100 });
+        const result = await client.scan(cursor, {
+          MATCH: pattern,
+          COUNT: 100,
+        });
         cursor = result.cursor.toString();
         const keys = result.keys;
-        
+
         if (keys.length > 0) {
           // Delete keys in batch
           const deletePromises = keys.map(async (key: string) => {
@@ -147,9 +153,12 @@ export class RateLimiter {
               return 0;
             }
           });
-          
+
           const results = await Promise.all(deletePromises);
-          deleted += results.reduce((sum: number, result: number) => sum + result, 0);
+          deleted += results.reduce(
+            (sum: number, result: number) => sum + result,
+            0,
+          );
         }
       } while (cursor !== '0');
 
@@ -177,7 +186,7 @@ export class RateLimiter {
   static async getRateLimitStatus(
     userId: string,
     integration: IntegrationType,
-    httpMethod: HttpMethod
+    httpMethod: HttpMethod,
   ): Promise<{
     current: number;
     limit: number;
@@ -188,9 +197,11 @@ export class RateLimiter {
       const config = this.DEFAULT_LIMITS[httpMethod];
       const key = `ratelimit:mcp:${userId}:${integration}:${httpMethod}`;
 
-      const current = parseInt(await redisService.get(key) || '0');
+      const current = parseInt((await redisService.get(key)) || '0');
       const ttl = await redisService.getTTL(key);
-      const resetAt = new Date(Date.now() + (ttl > 0 ? ttl * 1000 : config.windowSeconds * 1000));
+      const resetAt = new Date(
+        Date.now() + (ttl > 0 ? ttl * 1000 : config.windowSeconds * 1000),
+      );
 
       return {
         current,

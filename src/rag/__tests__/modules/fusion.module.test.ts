@@ -10,10 +10,14 @@ describe('FusionModule', () => {
   });
 
   const createMockDocuments = (count: number, prefix: string): Document[] => {
-    return Array.from({ length: count }, (_, i) => new Document({
-      pageContent: `${prefix} document ${i}`,
-      metadata: { score: 0.9 - (i * 0.1), source: `source-${i}` },
-    }));
+    return Array.from(
+      { length: count },
+      (_, i) =>
+        new Document({
+          pageContent: `${prefix} document ${i}`,
+          metadata: { score: 0.9 - i * 0.1, source: `source-${i}` },
+        }),
+    );
   };
 
   describe('executeInternal', () => {
@@ -100,4 +104,3 @@ describe('FusionModule', () => {
     });
   });
 });
-

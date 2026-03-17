@@ -35,7 +35,7 @@ function getDisplayName(modelId: string, modelName?: string): string {
     'anthropic.claude-3-sonnet-20240229-v1:0': 'Claude 3 Sonnet',
     'anthropic.claude-opus-4-6-v1': 'Claude Opus 4.6',
     'anthropic.claude-sonnet-4-6': 'Claude Sonnet 4.6',
-      'anthropic.claude-sonnet-4-6-v1:0': 'Claude Sonnet 4.6', // legacy
+    'anthropic.claude-sonnet-4-6-v1:0': 'Claude Sonnet 4.6', // legacy
     'anthropic.claude-opus-4-1-20250805-v1:0': 'Claude Opus 4.1',
     'anthropic.claude-opus-4-20250514-v1:0': 'Claude Opus 4',
     'global.anthropic.claude-sonnet-4-5-20250929-v1:0':

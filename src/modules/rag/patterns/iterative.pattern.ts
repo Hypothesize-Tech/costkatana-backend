@@ -4,7 +4,7 @@ import { OrchestratorInput, PatternResult } from '../types/rag.types';
 import { RetrieveModule } from '../modules/retrieve.module';
 import { RerankModule } from '../modules/rerank.module';
 import { ReadModule } from '../modules/read.module';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 interface IterativeState {
   currentIteration: number;
@@ -229,11 +229,13 @@ Question: ${query}
 Initial Answer:`;
 
     try {
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
-      return typeof response.content === 'string'
-        ? response.content.trim()
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
+      return typeof response === 'string'
+        ? response.trim()
         : 'Unable to generate initial answer';
     } catch (error) {
       return 'Unable to generate initial answer due to processing error';
@@ -261,11 +263,13 @@ ${newContext}
 Refined Answer:`;
 
     try {
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
-      return typeof response.content === 'string'
-        ? response.content.trim()
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
+      return typeof response === 'string'
+        ? response.trim()
         : previousAnswer;
     } catch (error) {
       return previousAnswer;
@@ -314,12 +318,14 @@ ${currentAnswer.substring(0, 500)}...
 Follow-up question for more information:`;
 
     try {
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
       const refinement =
-        typeof response.content === 'string'
-          ? response.content.trim()
+        typeof response === 'string'
+          ? response.trim()
           : originalQuery;
 
       return refinement || originalQuery;
@@ -345,11 +351,13 @@ ${iterativeAnswer}
 Final Synthesized Answer (comprehensive and well-structured):`;
 
     try {
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
-      return typeof response.content === 'string'
-        ? response.content.trim()
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
+      return typeof response === 'string'
+        ? response.trim()
         : iterativeAnswer;
     } catch (error) {
       return iterativeAnswer;

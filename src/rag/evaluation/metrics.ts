@@ -1,6 +1,6 @@
 import { Document } from '@langchain/core/documents';
 import { ChatBedrockConverse } from '@langchain/aws';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 /**
  * Evaluation metrics for RAG system quality assessment (RAGAS-aligned).
@@ -66,7 +66,11 @@ export class RAGEvaluator {
     ]);
 
     const retrievalRecall = input.groundTruth
-      ? await this.evaluateRetrievalRecall(input.query, input.documents, input.groundTruth)
+      ? await this.evaluateRetrievalRecall(
+          input.query,
+          input.documents,
+          input.groundTruth,
+        )
       : 0;
 
     const overall = this.calculateOverallScore({
@@ -94,7 +98,7 @@ export class RAGEvaluator {
    */
   async evaluateContextRelevance(
     query: string,
-    documents: Document[]
+    documents: Document[],
   ): Promise<number> {
     if (documents.length === 0) return 0;
 
@@ -113,8 +117,11 @@ ${context}
 Rate the overall relevance from 0.0 (completely irrelevant) to 1.0 (highly relevant).
 Respond with only a number between 0.0 and 1.0.`;
 
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      const content = typeof response.content === 'string' ? response.content : '';
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      const content =
+        typeof response.content === 'string' ? response.content : '';
       const score = parseFloat(content.trim());
 
       return isNaN(score) ? 0.5 : Math.max(0, Math.min(1, score));
@@ -132,7 +139,7 @@ Respond with only a number between 0.0 and 1.0.`;
    */
   async evaluateAnswerFaithfulness(
     answer: string,
-    documents: Document[]
+    documents: Document[],
   ): Promise<number> {
     if (documents.length === 0) return 0;
 
@@ -153,8 +160,11 @@ Answer: "${answer}"
 Rate faithfulness from 0.0 (not grounded) to 1.0 (fully grounded).
 Respond with only a number between 0.0 and 1.0.`;
 
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      const content = typeof response.content === 'string' ? response.content : '';
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      const content =
+        typeof response.content === 'string' ? response.content : '';
       const score = parseFloat(content.trim());
 
       return isNaN(score) ? 0.5 : Math.max(0, Math.min(1, score));
@@ -172,7 +182,7 @@ Respond with only a number between 0.0 and 1.0.`;
    */
   async evaluateAnswerRelevance(
     query: string,
-    answer: string
+    answer: string,
   ): Promise<number> {
     try {
       const prompt = `Evaluate how relevant this answer is to the query.
@@ -183,8 +193,11 @@ Answer: "${answer}"
 Rate relevance from 0.0 (completely irrelevant) to 1.0 (highly relevant).
 Respond with only a number between 0.0 and 1.0.`;
 
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      const content = typeof response.content === 'string' ? response.content : '';
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      const content =
+        typeof response.content === 'string' ? response.content : '';
       const score = parseFloat(content.trim());
 
       return isNaN(score) ? 0.5 : Math.max(0, Math.min(1, score));
@@ -202,7 +215,7 @@ Respond with only a number between 0.0 and 1.0.`;
    */
   async evaluateRetrievalPrecision(
     query: string,
-    documents: Document[]
+    documents: Document[],
   ): Promise<number> {
     if (documents.length === 0) return 0;
 
@@ -217,8 +230,13 @@ Document: "${doc.pageContent.substring(0, 200)}"
 
 Answer with only "yes" or "no".`;
 
-        const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-        const content = typeof response.content === 'string' ? response.content.toLowerCase() : '';
+        const response = await this.llm.invoke([
+          { role: 'user', content: prompt },
+        ]);
+        const content =
+          typeof response.content === 'string'
+            ? response.content.toLowerCase()
+            : '';
 
         if (content.includes('yes')) {
           relevantCount++;
@@ -242,7 +260,7 @@ Answer with only "yes" or "no".`;
   async evaluateRetrievalRecall(
     query: string,
     documents: Document[],
-    groundTruth: string
+    groundTruth: string,
   ): Promise<number> {
     try {
       const retrievedContent = documents
@@ -259,8 +277,11 @@ ${retrievedContent}
 Rate from 0.0 (missing critical info) to 1.0 (has all needed info).
 Respond with only a number between 0.0 and 1.0.`;
 
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      const content = typeof response.content === 'string' ? response.content : '';
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      const content =
+        typeof response.content === 'string' ? response.content : '';
       const score = parseFloat(content.trim());
 
       return isNaN(score) ? 0.5 : Math.max(0, Math.min(1, score));
@@ -297,7 +318,9 @@ Respond with only a number between 0.0 and 1.0.`;
    * Batch evaluate multiple queries
    */
   async batchEvaluate(inputs: EvaluationInput[]): Promise<EvaluationMetrics[]> {
-    const results = await Promise.all(inputs.map((input) => this.evaluate(input)));
+    const results = await Promise.all(
+      inputs.map((input) => this.evaluate(input)),
+    );
     return results;
   }
 
@@ -330,7 +353,9 @@ Respond with only a number between 0.0 and 1.0.`;
       min[key] = Math.min(...values);
       max[key] = Math.max(...values);
 
-      const variance = values.reduce((sum, val) => sum + Math.pow(val - mean[key]!, 2), 0) / values.length;
+      const variance =
+        values.reduce((sum, val) => sum + Math.pow(val - mean[key]!, 2), 0) /
+        values.length;
       std[key] = Math.sqrt(variance);
     });
 
@@ -344,4 +369,3 @@ Respond with only a number between 0.0 and 1.0.`;
 }
 
 export const ragEvaluator = new RAGEvaluator();
-

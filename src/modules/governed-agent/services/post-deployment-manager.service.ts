@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { LoggerService } from '../../../common/logger/logger.service';
 import { GitHubMcpService } from '../../mcp/services/integrations/github-mcp.service';
 import { VercelMcpService } from '../../mcp/services/integrations/vercel-mcp.service';
@@ -208,7 +208,7 @@ Respond with JSON:
         'amazon.nova-pro-v1:0',
         { useSystemPrompt: false },
       );
-      const response = result.response;
+      const response = typeof result === 'string' ? result : '';
 
       const cleaned = response
         .replace(/```json\n?/g, '')
@@ -309,7 +309,9 @@ Provide a JSON response with:
         { useSystemPrompt: false },
       );
       const aiResponseText =
-        typeof aiResult === 'string' ? aiResult : (aiResult?.response ?? '');
+        typeof aiResult === 'string'
+          ? aiResult
+          : (aiResult as { response?: string })?.response ?? '';
 
       // Parse AI response or provide fallback
       let analysisData;
@@ -598,7 +600,7 @@ Generate the complete modified file content that incorporates the requested chan
         'amazon.nova-pro-v1:0',
         { useSystemPrompt: false },
       );
-      const response = result.response;
+      const response = typeof result === 'string' ? result : (result as { response?: string }).response ?? '';
 
       return response.trim();
     } catch (error) {
@@ -905,14 +907,14 @@ Output a JSON array of objects with exactly these keys: file (string, path or fi
 Example: [{"file":"src/index.ts","changeType":"modify","description":"Add validation","code":"// validation logic"}]
 Output only the JSON array, no markdown or explanation.`;
 
-      const result = await this.bedrockService.invokeModel(
+      const result = await BedrockService.invokeModel(
         prompt,
         'amazon.nova-pro-v1:0',
         {
           useSystemPrompt: false,
         },
       );
-      const raw = (result?.response ?? '').trim();
+      const raw = (typeof result === 'string' ? result : (result as { response?: string })?.response ?? '').trim();
       const jsonMatch = raw.match(/\[[\s\S]*\]/);
       const jsonStr = jsonMatch ? jsonMatch[0] : raw;
       const parsed = JSON.parse(jsonStr) as Array<{

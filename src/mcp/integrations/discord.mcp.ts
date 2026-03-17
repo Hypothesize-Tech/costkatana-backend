@@ -4,7 +4,11 @@
  */
 
 import { BaseIntegrationMCP } from './base-integration.mcp';
-import { createToolSchema, createParameter, CommonParameters } from '../registry/tool-metadata';
+import {
+  createToolSchema,
+  createParameter,
+  CommonParameters,
+} from '../registry/tool-metadata';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
@@ -23,22 +27,26 @@ export class DiscordMCP extends BaseIntegrationMCP {
         'discord',
         'List Discord channels in a guild',
         'GET',
-        [createParameter('guildId', 'string', 'Guild (server) ID', { required: true })],
-        { requiredScopes: ['channels:read'] }
+        [
+          createParameter('guildId', 'string', 'Guild (server) ID', {
+            required: true,
+          }),
+        ],
+        { requiredScopes: ['channels:read'] },
       ),
       async (params, context) => {
         const data = await this.makeRequest(
           context.connectionId,
           'GET',
           `${DISCORD_API_BASE}/guilds/${params.guildId}/channels`,
-          { timeout: 300000 } // 5 minute timeout
+          { timeout: 300000 }, // 5 minute timeout
         );
 
         return {
           channels: data,
           count: data.length,
         };
-      }
+      },
     );
 
     // Create channel
@@ -49,15 +57,19 @@ export class DiscordMCP extends BaseIntegrationMCP {
         'Create a new Discord channel',
         'POST',
         [
-          createParameter('guildId', 'string', 'Guild (server) ID', { required: true }),
+          createParameter('guildId', 'string', 'Guild (server) ID', {
+            required: true,
+          }),
           createParameter('name', 'string', 'Channel name', { required: true }),
           createParameter('type', 'number', 'Channel type (0=text, 2=voice)', {
             required: false,
             default: 0,
           }),
-          createParameter('topic', 'string', 'Channel topic', { required: false }),
+          createParameter('topic', 'string', 'Channel topic', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['channels:write'] }
+        { requiredScopes: ['channels:write'] },
       ),
       async (params, context) => {
         const body: any = {
@@ -73,11 +85,11 @@ export class DiscordMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${DISCORD_API_BASE}/guilds/${params.guildId}/channels`,
-          { body }
+          { body },
         );
 
         return data;
-      }
+      },
     );
 
     // Delete channel
@@ -87,25 +99,29 @@ export class DiscordMCP extends BaseIntegrationMCP {
         'discord',
         'Delete a Discord channel',
         'DELETE',
-        [createParameter('channelId', 'string', 'Channel ID', { required: true })],
+        [
+          createParameter('channelId', 'string', 'Channel ID', {
+            required: true,
+          }),
+        ],
         {
           requiredScopes: ['channels:write'],
           dangerous: true,
-        }
+        },
       ),
       async (params, context) => {
         await this.makeRequest(
           context.connectionId,
           'DELETE',
           `${DISCORD_API_BASE}/channels/${params.channelId}`,
-          { timeout: 300000 } // 5 minutes
+          { timeout: 300000 }, // 5 minutes
         );
 
         return {
           success: true,
           message: `Channel ${params.channelId} deleted successfully`,
         };
-      }
+      },
     );
 
     // ===== MESSAGE OPERATIONS =====
@@ -118,11 +134,17 @@ export class DiscordMCP extends BaseIntegrationMCP {
         'Send a message to a Discord channel',
         'POST',
         [
-          createParameter('channelId', 'string', 'Channel ID', { required: true }),
-          createParameter('content', 'string', 'Message content', { required: true }),
-          createParameter('embeds', 'array', 'Message embeds', { required: false }),
+          createParameter('channelId', 'string', 'Channel ID', {
+            required: true,
+          }),
+          createParameter('content', 'string', 'Message content', {
+            required: true,
+          }),
+          createParameter('embeds', 'array', 'Message embeds', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['messages:write'] }
+        { requiredScopes: ['messages:write'] },
       ),
       async (params, context) => {
         const body: any = {
@@ -137,11 +159,11 @@ export class DiscordMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${DISCORD_API_BASE}/channels/${params.channelId}/messages`,
-          { body, timeout: 300000 } // 5 minutes
+          { body, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Edit message
@@ -152,11 +174,17 @@ export class DiscordMCP extends BaseIntegrationMCP {
         'Edit an existing message',
         'PATCH',
         [
-          createParameter('channelId', 'string', 'Channel ID', { required: true }),
-          createParameter('messageId', 'string', 'Message ID', { required: true }),
-          createParameter('content', 'string', 'New message content', { required: true }),
+          createParameter('channelId', 'string', 'Channel ID', {
+            required: true,
+          }),
+          createParameter('messageId', 'string', 'Message ID', {
+            required: true,
+          }),
+          createParameter('content', 'string', 'New message content', {
+            required: true,
+          }),
         ],
-        { requiredScopes: ['messages:write'] }
+        { requiredScopes: ['messages:write'] },
       ),
       async (params, context) => {
         const body = {
@@ -167,11 +195,11 @@ export class DiscordMCP extends BaseIntegrationMCP {
           context.connectionId,
           'PATCH',
           `${DISCORD_API_BASE}/channels/${params.channelId}/messages/${params.messageId}`,
-          { body, timeout: 300000 } // 5 minutes
+          { body, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Delete message
@@ -182,27 +210,31 @@ export class DiscordMCP extends BaseIntegrationMCP {
         'Delete a message',
         'DELETE',
         [
-          createParameter('channelId', 'string', 'Channel ID', { required: true }),
-          createParameter('messageId', 'string', 'Message ID', { required: true }),
+          createParameter('channelId', 'string', 'Channel ID', {
+            required: true,
+          }),
+          createParameter('messageId', 'string', 'Message ID', {
+            required: true,
+          }),
         ],
         {
           requiredScopes: ['messages:write'],
           dangerous: true,
-        }
+        },
       ),
       async (params, context) => {
         await this.makeRequest(
           context.connectionId,
           'DELETE',
           `${DISCORD_API_BASE}/channels/${params.channelId}/messages/${params.messageId}`,
-          { timeout: 300000 } // 5 minutes
+          { timeout: 300000 }, // 5 minutes
         );
 
         return {
           success: true,
           message: 'Message deleted successfully',
         };
-      }
+      },
     );
 
     // ===== MEMBER OPERATIONS =====
@@ -215,10 +247,12 @@ export class DiscordMCP extends BaseIntegrationMCP {
         'List members in a guild',
         'GET',
         [
-          createParameter('guildId', 'string', 'Guild (server) ID', { required: true }),
+          createParameter('guildId', 'string', 'Guild (server) ID', {
+            required: true,
+          }),
           CommonParameters.limit,
         ],
-        { requiredScopes: ['members:read'] }
+        { requiredScopes: ['members:read'] },
       ),
       async (params, context) => {
         const queryParams: any = {
@@ -229,14 +263,14 @@ export class DiscordMCP extends BaseIntegrationMCP {
           context.connectionId,
           'GET',
           `${DISCORD_API_BASE}/guilds/${params.guildId}/members`,
-          { params: queryParams, timeout: 300000 } // 5 minutes
+          { params: queryParams, timeout: 300000 }, // 5 minutes
         );
 
         return {
           members: data,
           count: data.length,
         };
-      }
+      },
     );
 
     // Kick user
@@ -247,14 +281,18 @@ export class DiscordMCP extends BaseIntegrationMCP {
         'Kick a member from a guild',
         'DELETE',
         [
-          createParameter('guildId', 'string', 'Guild (server) ID', { required: true }),
+          createParameter('guildId', 'string', 'Guild (server) ID', {
+            required: true,
+          }),
           createParameter('userId', 'string', 'User ID', { required: true }),
-          createParameter('reason', 'string', 'Kick reason', { required: false }),
+          createParameter('reason', 'string', 'Kick reason', {
+            required: false,
+          }),
         ],
         {
           requiredScopes: ['members:manage'],
           dangerous: true,
-        }
+        },
       ),
       async (params, context) => {
         const headers: any = {};
@@ -266,14 +304,14 @@ export class DiscordMCP extends BaseIntegrationMCP {
           context.connectionId,
           'DELETE',
           `${DISCORD_API_BASE}/guilds/${params.guildId}/members/${params.userId}`,
-          { headers, timeout: 300000 } // 5 minutes
+          { headers, timeout: 300000 }, // 5 minutes
         );
 
         return {
           success: true,
           message: `User ${params.userId} kicked from guild`,
         };
-      }
+      },
     );
 
     // Ban user
@@ -284,18 +322,27 @@ export class DiscordMCP extends BaseIntegrationMCP {
         'Ban a member from a guild',
         'POST',
         [
-          createParameter('guildId', 'string', 'Guild (server) ID', { required: true }),
-          createParameter('userId', 'string', 'User ID', { required: true }),
-          createParameter('reason', 'string', 'Ban reason', { required: false }),
-          createParameter('deleteMessageDays', 'number', 'Days of messages to delete', {
-            required: false,
-            default: 0,
+          createParameter('guildId', 'string', 'Guild (server) ID', {
+            required: true,
           }),
+          createParameter('userId', 'string', 'User ID', { required: true }),
+          createParameter('reason', 'string', 'Ban reason', {
+            required: false,
+          }),
+          createParameter(
+            'deleteMessageDays',
+            'number',
+            'Days of messages to delete',
+            {
+              required: false,
+              default: 0,
+            },
+          ),
         ],
         {
           requiredScopes: ['members:manage'],
           dangerous: true,
-        }
+        },
       ),
       async (params, context) => {
         const body: any = {
@@ -311,14 +358,14 @@ export class DiscordMCP extends BaseIntegrationMCP {
           context.connectionId,
           'PUT',
           `${DISCORD_API_BASE}/guilds/${params.guildId}/bans/${params.userId}`,
-          { body, headers, timeout: 300000 } // 5 minutes
+          { body, headers, timeout: 300000 }, // 5 minutes
         );
 
         return {
           success: true,
           message: `User ${params.userId} banned from guild`,
         };
-      }
+      },
     );
   }
 }

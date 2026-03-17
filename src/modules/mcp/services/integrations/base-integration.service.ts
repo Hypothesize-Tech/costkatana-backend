@@ -314,7 +314,9 @@ If no suitable tool is found, return: {"error": "no_suitable_tool"}`;
       // Parse AI response
       try {
         const parsed = JSON.parse(
-          typeof aiResponse === 'string' ? aiResponse : aiResponse.response,
+          typeof aiResponse === 'string'
+          ? aiResponse
+          : (aiResponse as { response?: string })?.response ?? '{}',
         );
 
         if (parsed.error === 'no_suitable_tool') {

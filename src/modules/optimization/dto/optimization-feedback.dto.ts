@@ -3,7 +3,14 @@
  * Captures user feedback on an optimization result.
  */
 
-import { IsOptional, IsNumber, IsString, IsBoolean, Min, Max } from 'class-validator';
+import {
+  IsOptional,
+  IsNumber,
+  IsString,
+  IsBoolean,
+  Min,
+  Max,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class OptimizationFeedbackDto {

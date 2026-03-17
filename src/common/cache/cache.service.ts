@@ -83,6 +83,16 @@ const EMPTY_CACHE_STATS: CacheStats = {
   topUsers: [],
 };
 
+let cacheServiceInstance: CacheService | null = null;
+
+/** Get singleton for use outside DI (e.g. cortex, middleware). */
+export function getCacheService(): CacheService {
+  if (!cacheServiceInstance) {
+    throw new Error('CacheService not initialized. Ensure CacheModule is imported.');
+  }
+  return cacheServiceInstance;
+}
+
 /**
  * Unified cache service: Redis primary with in-memory fallback.
  * Used for gateway rate limiting and other cache needs.
@@ -95,6 +105,7 @@ export class CacheService implements OnModuleDestroy {
   private isConnected = false;
 
   constructor(private configService: ConfigService) {
+    cacheServiceInstance = this;
     if (!isRedisEnabled()) {
       this.logger.log('Redis disabled - using in-memory cache only');
       this.redis = null;
@@ -233,6 +244,35 @@ export class CacheService implements OnModuleDestroy {
   /** Alias for del (API compatibility). */
   async delete(key: string): Promise<number> {
     return this.del(key);
+  }
+
+  /**
+   * Set key only if it does not exist, with TTL (atomic SET NX EX).
+   * Returns true if key was set, false if key already existed.
+   */
+  async setIfNotExists(
+    key: string,
+    value: string,
+    ttlSeconds: number,
+  ): Promise<boolean> {
+    if (this.redis) {
+      try {
+        const result = await this.redis.set(key, value, 'EX', ttlSeconds, 'NX');
+        return result === 'OK';
+      } catch (error) {
+        this.logger.debug('Redis set NX failed, using memory', {
+          key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    const entry = this.inMemoryCache.get(key);
+    if (entry && entry.expiry > Date.now()) return false;
+    this.inMemoryCache.set(key, {
+      value,
+      expiry: Date.now() + ttlSeconds * 1000,
+    });
+    return true;
   }
 
   /**
@@ -786,7 +826,13 @@ export class CacheService implements OnModuleDestroy {
     }
   }
 
+  /** Alias for clearCache() - clears all cache entries. Used by cortex. */
+  async clear(): Promise<number> {
+    return this.clearCache({});
+  }
+
   async onModuleDestroy(): Promise<void> {
+    cacheServiceInstance = null;
     if (!this.redis) return;
     try {
       const r = this.redis as Redis & { status?: string };

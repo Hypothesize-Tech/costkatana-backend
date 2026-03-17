@@ -43,6 +43,17 @@ export interface ContextBundle {
   tags: string[];
 }
 
+let contextFileManagerServiceInstance: ContextFileManagerService | null = null;
+
+export function getContextFileManagerService(): ContextFileManagerService {
+  if (!contextFileManagerServiceInstance) {
+    throw new Error(
+      'ContextFileManagerService not initialized. Ensure CommonModule is imported.',
+    );
+  }
+  return contextFileManagerServiceInstance;
+}
+
 @Injectable()
 export class ContextFileManagerService {
   private readonly logger = new Logger(ContextFileManagerService.name);
@@ -52,6 +63,7 @@ export class ContextFileManagerService {
   private readonly contextDir: string;
 
   constructor(private readonly configService: ConfigService) {
+    contextFileManagerServiceInstance = this;
     this.contextDir = this.configService.get<string>(
       'CONTEXT_FILES_DIR',
       './context-files',
@@ -416,6 +428,63 @@ export class ContextFileManagerService {
     });
 
     return toDelete.length;
+  }
+
+  /**
+   * File system tool API: write content to path (relative to context dir)
+   */
+  async writeFile(relativePath: string, content: string): Promise<void> {
+    const filePath = path.join(this.contextDir, relativePath);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, content, 'utf8');
+  }
+
+  /**
+   * File system tool API: read file at path
+   */
+  async readContextFile(relativePath: string): Promise<string> {
+    const filePath = path.join(this.contextDir, relativePath);
+    return fs.readFile(filePath, 'utf8');
+  }
+
+  /**
+   * File system tool API: search for pattern in file
+   */
+  async searchInContextFile(
+    relativePath: string,
+    pattern: string,
+  ): Promise<Array<{ line: number; content: string }>> {
+    const content = await this.readContextFile(relativePath);
+    const lines = content.split('\n');
+    const results: Array<{ line: number; content: string }> = [];
+    lines.forEach((line, i) => {
+      if (new RegExp(pattern, 'gi').test(line)) results.push({ line: i + 1, content: line });
+    });
+    return results;
+  }
+
+  /**
+   * File system tool API: get last N lines of file
+   */
+  async tailContextFile(relativePath: string, lines: number): Promise<string> {
+    const content = await this.readContextFile(relativePath);
+    const allLines = content.split('\n');
+    return allLines.slice(-lines).join('\n');
+  }
+
+  /**
+   * File system tool API: list files in directory
+   */
+  async listFiles(relativeSubDir?: string): Promise<string[]> {
+    const dir = relativeSubDir
+      ? path.join(this.contextDir, relativeSubDir)
+      : this.contextDir;
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      return entries.map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
+    } catch {
+      return [];
+    }
   }
 
   /**

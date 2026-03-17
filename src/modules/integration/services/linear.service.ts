@@ -147,7 +147,9 @@ export class LinearService {
   async listTeamMembers(
     accessToken: string,
     teamId: string,
-  ): Promise<Array<{ id: string; name: string; displayName?: string; email?: string }>> {
+  ): Promise<
+    Array<{ id: string; name: string; displayName?: string; email?: string }>
+  > {
     const data = await this.executeQuery<{
       team: {
         members: {
@@ -180,11 +182,20 @@ export class LinearService {
   async listLabels(
     accessToken: string,
     teamId?: string,
-  ): Promise<Array<{ id: string; name: string; color?: string; description?: string }>> {
+  ): Promise<
+    Array<{ id: string; name: string; color?: string; description?: string }>
+  > {
     if (teamId) {
       const data = await this.executeQuery<{
         team: {
-          labels: { nodes: Array<{ id: string; name: string; color?: string; description?: string }> };
+          labels: {
+            nodes: Array<{
+              id: string;
+              name: string;
+              color?: string;
+              description?: string;
+            }>;
+          };
         };
       }>(
         accessToken,
@@ -194,7 +205,14 @@ export class LinearService {
       return data.team?.labels?.nodes ?? [];
     }
     const data = await this.executeQuery<{
-      issueLabels: { nodes: Array<{ id: string; name: string; color?: string; description?: string }> };
+      issueLabels: {
+        nodes: Array<{
+          id: string;
+          name: string;
+          color?: string;
+          description?: string;
+        }>;
+      };
     }>(
       accessToken,
       `query { issueLabels { nodes { id name color description } } }`,
@@ -205,7 +223,9 @@ export class LinearService {
   async listIterations(
     accessToken: string,
     teamId: string,
-  ): Promise<Array<{ id: string; name: string; startDate?: string; endDate?: string }>> {
+  ): Promise<
+    Array<{ id: string; name: string; startDate?: string; endDate?: string }>
+  > {
     const data = await this.executeQuery<{
       team: {
         cycles: {

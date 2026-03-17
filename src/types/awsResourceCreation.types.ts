@@ -1,6 +1,6 @@
 /**
  * AWS Resource Creation Types
- * 
+ *
  * Comprehensive type definitions for all resource creation operations
  * across EC2, RDS, Lambda, DynamoDB, ECS, and S3 services.
  */
@@ -146,7 +146,13 @@ export interface RDSCreationResult extends ResourceCreationResult {
 
 export interface LambdaCreationConfig {
   functionName: string;
-  runtime?: 'nodejs18.x' | 'nodejs20.x' | 'python3.11' | 'python3.12' | 'java17' | 'go1.x'; // default: nodejs20.x
+  runtime?:
+    | 'nodejs18.x'
+    | 'nodejs20.x'
+    | 'python3.11'
+    | 'python3.12'
+    | 'java17'
+    | 'go1.x'; // default: nodejs20.x
   handler?: string; // default: index.handler
   code?: {
     zipFile?: Buffer;
@@ -219,7 +225,11 @@ export interface DynamoDBCreationConfig {
   };
   globalSecondaryIndexes?: DynamoDBGlobalSecondaryIndex[];
   streamSpecification?: {
-    streamViewType: 'NEW_IMAGE' | 'OLD_IMAGE' | 'NEW_AND_OLD_IMAGES' | 'KEYS_ONLY';
+    streamViewType:
+      | 'NEW_IMAGE'
+      | 'OLD_IMAGE'
+      | 'NEW_AND_OLD_IMAGES'
+      | 'KEYS_ONLY';
   };
   ttlAttributeName?: string;
   sseSpecification?: {

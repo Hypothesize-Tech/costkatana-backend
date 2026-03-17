@@ -6,11 +6,11 @@ import {
   Logger,
   HttpCode,
   HttpStatus,
-  Inject,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 
+import { CacheService } from '../../common/cache/cache.service';
 import { IncrementalIndexService } from './incremental-index.service';
 import { GitHubService } from './github.service';
 import {
@@ -29,11 +29,15 @@ import { GitHubWebhookSignatureError } from './utils/github-errors';
 export class GitHubWebhooksController {
   private readonly logger = new Logger(GitHubWebhooksController.name);
 
+  private static readonly WEBHOOK_DEDUP_TTL = 24 * 60 * 60; // 24 hours
+  private static readonly WEBHOOK_DEDUP_PREFIX = 'github_webhook_delivery:';
+
   constructor(
     private incrementalIndexService: IncrementalIndexService,
     private gitHubService: GitHubService,
     private githubPRIntegrationService: GithubPRIntegrationService,
     private githubCacheInvalidationService: GithubCacheInvalidationService,
+    private cacheService: CacheService,
     @InjectModel(GitHubConnection.name)
     private gitHubConnectionModel: Model<GitHubConnectionDocument>,
     @InjectModel(GitHubIntegration.name)
@@ -79,6 +83,18 @@ export class GitHubWebhooksController {
         )
       ) {
         throw new GitHubWebhookSignatureError();
+      }
+
+      // Deduplicate by delivery ID (Redis SET NX EX - skip if already processed)
+      const dedupKey = `${GitHubWebhooksController.WEBHOOK_DEDUP_PREFIX}${deliveryId}`;
+      const isNew = await this.cacheService.setIfNotExists(
+        dedupKey,
+        '1',
+        GitHubWebhooksController.WEBHOOK_DEDUP_TTL,
+      );
+      if (!isNew) {
+        this.logger.log(`Duplicate webhook delivery skipped: ${deliveryId}`);
+        return { success: true, message: 'Duplicate delivery ignored' };
       }
 
       // Handle different event types

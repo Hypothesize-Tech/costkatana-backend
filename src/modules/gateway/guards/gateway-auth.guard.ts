@@ -560,7 +560,9 @@ export class GatewayAuthGuard implements CanActivate {
       const { proxyKey, providerKey, decryptedApiKey } = result;
 
       // Get user information
-      const user = await this.authService.findUserById(proxyKey.userId.toString());
+      const user = await this.authService.findUserById(
+        proxyKey.userId.toString(),
+      );
       if (!user) {
         this.logger.warn('User not found for proxy key', {
           component: 'GatewayAuthGuard',

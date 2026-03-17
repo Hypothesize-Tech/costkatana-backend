@@ -17,7 +17,7 @@ import { VisualComplianceS3Service } from './visual-compliance-s3.service';
 import { MetaPromptPresetsService } from './meta-prompt-presets.service';
 import { AiCostTrackingService } from './ai-cost-tracking.service';
 import { CheckComplianceDto } from '../dto/visual-compliance.dto';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 export interface VisualComplianceRequest extends CheckComplianceDto {
   userId: string;

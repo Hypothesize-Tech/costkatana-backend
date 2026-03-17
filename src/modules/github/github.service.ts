@@ -606,7 +606,16 @@ export class GitHubService {
     owner: string,
     repo: string,
     options?: { state?: 'open' | 'closed' | 'all'; per_page?: number },
-  ): Promise<Array<{ number: number; title: string; state: string; html_url: string; created_at: string; updated_at: string }>> {
+  ): Promise<
+    Array<{
+      number: number;
+      title: string;
+      state: string;
+      html_url: string;
+      created_at: string;
+      updated_at: string;
+    }>
+  > {
     try {
       const octokit = await this.getOctokitFromConnection(connection);
       const { data } = await octokit.issues.listForRepo({
@@ -624,10 +633,7 @@ export class GitHubService {
         updated_at: issue.updated_at,
       }));
     } catch (error) {
-      this.logger.error(
-        `Failed to list issues ${owner}/${repo}`,
-        error,
-      );
+      this.logger.error(`Failed to list issues ${owner}/${repo}`, error);
       throw fromGitHubError(error);
     }
   }
@@ -651,10 +657,7 @@ export class GitHubService {
         sha: branch.commit?.sha ?? '',
       }));
     } catch (error) {
-      this.logger.error(
-        `Failed to list branches ${owner}/${repo}`,
-        error,
-      );
+      this.logger.error(`Failed to list branches ${owner}/${repo}`, error);
       throw fromGitHubError(error);
     }
   }
@@ -691,10 +694,7 @@ export class GitHubService {
         updated_at: pr.updated_at,
       }));
     } catch (error) {
-      this.logger.error(
-        `Failed to list pull requests ${owner}/${repo}`,
-        error,
-      );
+      this.logger.error(`Failed to list pull requests ${owner}/${repo}`, error);
       throw fromGitHubError(error);
     }
   }
@@ -720,10 +720,7 @@ export class GitHubService {
         title: data.title ?? '',
       };
     } catch (error) {
-      this.logger.error(
-        `Failed to create issue ${owner}/${repo}`,
-        error,
-      );
+      this.logger.error(`Failed to create issue ${owner}/${repo}`, error);
       throw fromGitHubError(error);
     }
   }

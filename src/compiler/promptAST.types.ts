@@ -1,6 +1,6 @@
 /**
  * Prompt Compiler - AST/IR Definitions
- * 
+ *
  * Abstract Syntax Tree and Intermediate Representation for prompts
  * Enables compiler-like optimizations:
  * - Dead code elimination
@@ -183,7 +183,7 @@ export interface ModifierNode extends ASTNode {
 
 /**
  * Intermediate Representation (IR)
- * 
+ *
  * Lower-level representation after optimization passes
  */
 export interface IRProgram {
@@ -221,17 +221,17 @@ export enum IROpcode {
   CONTEXT = 'CONTEXT',
   CONSTRAINT = 'CONSTRAINT',
   OUTPUT = 'OUTPUT',
-  
+
   // Control flow
   BRANCH = 'BRANCH',
   LOOP = 'LOOP',
   CALL = 'CALL',
-  
+
   // Data operations
   LOAD = 'LOAD',
   STORE = 'STORE',
   CONCAT = 'CONCAT',
-  
+
   // Optimization hints
   CACHE = 'CACHE',
   COMPRESS = 'COMPRESS',
@@ -249,7 +249,7 @@ export interface IROperand {
 
 /**
  * IR Parallel Group
- * 
+ *
  * Instructions that can execute in parallel
  */
 export interface IRParallelGroup {
@@ -301,4 +301,3 @@ export interface CompilationError {
   position?: { line: number; column: number };
   severity: 'error' | 'warning';
 }
-

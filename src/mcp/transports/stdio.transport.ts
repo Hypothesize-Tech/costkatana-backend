@@ -5,7 +5,7 @@
 
 import { MCPMessage } from '../types/mcp.types';
 import { BaseTransport } from './base.transport';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 import * as readline from 'readline';
 
 export class StdioTransport extends BaseTransport {
@@ -62,7 +62,7 @@ export class StdioTransport extends BaseTransport {
     try {
       const json = JSON.stringify(message);
       process.stdout.write(json + '\n');
-      
+
       loggingService.debug('MCP stdio sent', {
         method: message.method,
         id: message.id,
@@ -95,7 +95,7 @@ export class StdioTransport extends BaseTransport {
     if (!this.closed) {
       this.rl.close();
       await super.close();
-      
+
       loggingService.info('MCP stdio transport closed');
     }
   }

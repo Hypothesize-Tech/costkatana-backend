@@ -356,7 +356,9 @@ export class OptimizationService implements OnModuleDestroy {
         encoderPrompt: lispInstructions.encoderPrompt,
         coreProcessorPrompt: lispInstructions.coreProcessorPrompt,
         decoderPrompt: lispInstructions.decoderPrompt,
-        model: cortexConfig.instructionGeneration?.model || 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+        model:
+          cortexConfig.instructionGeneration?.model ||
+          'global.anthropic.claude-haiku-4-5-20251001-v1:0',
       });
 
       // Use initialized service or fallback to injected (init may not have completed yet)
@@ -396,7 +398,9 @@ export class OptimizationService implements OnModuleDestroy {
         outputLisp: encodingResult.cortexFrame,
         confidence: encodingResult.confidence,
         processingTime: encodingResult.processingTime || 0,
-        model: cortexConfig.encoding?.model || 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+        model:
+          cortexConfig.encoding?.model ||
+          'global.anthropic.claude-haiku-4-5-20251001-v1:0',
       });
 
       // Step 2: Generate ANSWER in LISP format (NEW ARCHITECTURE)
@@ -519,7 +523,9 @@ export class OptimizationService implements OnModuleDestroy {
         outputText: decodingResult.text,
         style: cortexConfig.outputStyle || 'conversational',
         processingTime: decodingResult.processingTime || 0,
-        model: cortexConfig.decoding?.model || 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+        model:
+          cortexConfig.decoding?.model ||
+          'global.anthropic.claude-haiku-4-5-20251001-v1:0',
       });
 
       // Extract final answer content: prefer raw code/content from the frame
@@ -527,10 +533,18 @@ export class OptimizationService implements OnModuleDestroy {
       // When content is code, wrap in markdown backticks so frontend code snippet components can render it.
       const answerFrame = processingResult.output as any;
       let finalAnswerContent = decodingResult.text; // default to decoded natural language
-      if (answerFrame?.code && typeof answerFrame.code === 'string' && answerFrame.code.trim().length > 20) {
+      if (
+        answerFrame?.code &&
+        typeof answerFrame.code === 'string' &&
+        answerFrame.code.trim().length > 20
+      ) {
         const lang = (answerFrame.language || 'text').toLowerCase();
         finalAnswerContent = `\n\`\`\`${lang}\n${answerFrame.code.trim()}\n\`\`\`\n`;
-      } else if (answerFrame?.content && typeof answerFrame.content === 'string' && answerFrame.content.trim().length > 20) {
+      } else if (
+        answerFrame?.content &&
+        typeof answerFrame.content === 'string' &&
+        answerFrame.content.trim().length > 20
+      ) {
         const lang = (answerFrame.language || 'text').toLowerCase();
         finalAnswerContent = `\n\`\`\`${lang}\n${answerFrame.content.trim()}\n\`\`\`\n`;
       } else if (
@@ -1595,7 +1609,8 @@ REPLY FORMAT (JSON only):
         meta.cortex?.processingTime ?? doc.cortexProcessingTime,
       cortexSemanticIntegrity:
         meta.cortex?.semanticIntegrity ?? doc.cortexSemanticIntegrity,
-      cortexTokenReduction: meta.cortex?.tokenReduction ?? doc.cortexTokenReduction,
+      cortexTokenReduction:
+        meta.cortex?.tokenReduction ?? doc.cortexTokenReduction,
       costSavings: costSaved,
       percentageSavings: doc.improvementPercentage ?? 0,
       ...(doc.requestTracking && { requestTracking: doc.requestTracking }),
@@ -1610,7 +1625,9 @@ REPLY FORMAT (JSON only):
   async createOptimization(
     userIdOrDto: string | CreateOptimizationDto,
     dtoOrPreview?: CreateOptimizationDto | boolean,
-    previewOrContext?: boolean | { req: Request; startTime: number; frontendRequestTracking?: unknown },
+    previewOrContext?:
+      | boolean
+      | { req: Request; startTime: number; frontendRequestTracking?: unknown },
   ): Promise<OptimizationResultDto> {
     const createDto: CreateOptimizationDto =
       typeof userIdOrDto === 'string' &&
@@ -1635,7 +1652,6 @@ REPLY FORMAT (JSON only):
           ? dtoOrPreview
           : !!previewOrContext;
 
-
     try {
       this.logger.log('🚀 Starting optimization creation', {
         userId: createDto.userId,
@@ -1659,6 +1675,7 @@ REPLY FORMAT (JSON only):
           userId: createDto.userId,
         });
 
+        const cortexStartTime = Date.now();
         try {
           await this.initializeCortexServices();
 
@@ -1713,7 +1730,7 @@ REPLY FORMAT (JSON only):
             cortexMetadata: {
               error: `Advanced Cortex Streaming failed: ${error instanceof Error ? error.message : String(error)}`,
               fallbackUsed: true,
-              processingTime: Date.now() - Date.now(),
+              processingTime: Date.now() - cortexStartTime,
               circuitBreakerTriggered: this.isCortexCircuitBreakerOpen(),
               cortexModel: {
                 encoder: 'anthropic.claude-3-5-haiku-20241022-v1:0',
@@ -1728,6 +1745,7 @@ REPLY FORMAT (JSON only):
           '🚀 Lightweight Cortex optimization (Cortex not enabled)',
           { userId: createDto.userId },
         );
+        const cortexStartTime = Date.now();
         try {
           cortexResult = await this.processLightweightCortexOptimization(
             createDto.prompt,
@@ -1754,7 +1772,7 @@ REPLY FORMAT (JSON only):
             cortexMetadata: {
               error: `Lightweight Cortex processing failed: ${error instanceof Error ? error.message : String(error)}`,
               fallbackUsed: true,
-              processingTime: Date.now() - Date.now(),
+              processingTime: Date.now() - cortexStartTime,
               cortexModel: {
                 encoder: 'anthropic.claude-3-5-haiku-20241022-v1:0',
                 core: 'amazon.nova-pro-v1',
@@ -1774,7 +1792,8 @@ REPLY FORMAT (JSON only):
 
       const COMPLETION_TOKENS_ESTIMATE = 150;
       // Express: originalTotalTokens = prompt + completion (for comparison)
-      const totalOriginalTokens = originalPromptTokens + COMPLETION_TOKENS_ESTIMATE;
+      const totalOriginalTokens =
+        originalPromptTokens + COMPLETION_TOKENS_ESTIMATE;
       const rawOriginalEstimate = this.pricingService.estimateCost(
         createDto.model,
         originalPromptTokens,
@@ -1813,10 +1832,10 @@ REPLY FORMAT (JSON only):
         originalSimpleEstimate = {
           inputCost:
             (originalPromptTokens / 1_000_000) *
-              fallbackPolicy.pricingRates.inputCostPer1M,
+            fallbackPolicy.pricingRates.inputCostPer1M,
           outputCost:
             (COMPLETION_TOKENS_ESTIMATE / 1_000_000) *
-              fallbackPolicy.pricingRates.outputCostPer1M,
+            fallbackPolicy.pricingRates.outputCostPer1M,
           totalCost:
             (originalPromptTokens / 1_000_000) *
               fallbackPolicy.pricingRates.inputCostPer1M +
@@ -1918,8 +1937,6 @@ REPLY FORMAT (JSON only):
           (optimizedPrompt.length < 20 ||
             optimizedPrompt.includes('error') ||
             optimizedPrompt.includes('failed'));
-
-
 
         if (shouldUseFallback) {
           this.logger.warn(
@@ -2044,7 +2061,9 @@ REPLY FORMAT (JSON only):
       // Inline unified calculation (mirrors Express calculationUtils.calculateUnifiedSavings)
       const originalCost = originalEstimate.totalCost;
       const optimizedCost = optimizedEstimate.totalCost;
-      const displayTokensSaved = Math.abs(totalOriginalTokens - optimizedTokens);
+      const displayTokensSaved = Math.abs(
+        totalOriginalTokens - optimizedTokens,
+      );
       const displayCostSaved = Math.abs(originalCost - optimizedCost);
       const displayPercentage =
         totalOriginalTokens > 0
@@ -2106,10 +2125,7 @@ REPLY FORMAT (JSON only):
       };
 
       if (unifiedCalc.isIncrease) {
-        const minimalFee = Math.max(
-          0.0001,
-          unifiedCalc.originalCost * 0.1,
-        );
+        const minimalFee = Math.max(0.0001, unifiedCalc.originalCost * 0.1);
         metadata.isAdjusted = true;
         metadata.minimalFee = minimalFee;
         metadata.adjustedCostIncrease = minimalFee;
@@ -2190,7 +2206,8 @@ REPLY FORMAT (JSON only):
           : (await this.generatePromptCachingSuggestions(createDto)).map(
               (s: any) => ({
                 type: s.type,
-                description: s.description ?? 'Enable caching to reduce token costs',
+                description:
+                  s.description ?? 'Enable caching to reduce token costs',
                 impact: s.impact ?? 'medium',
                 implemented: false,
               }),
@@ -2826,14 +2843,11 @@ REPLY FORMAT (JSON only):
     startDate: Date,
     endDate: Date,
   ): Promise<any> {
-      const docs = await this.optimizationModel
-        .find({
-          $or: [
-            { userId: new mongoose.Types.ObjectId(userId) },
-            { userId },
-          ],
-          createdAt: { $gte: startDate, $lte: endDate },
-        })
+    const docs = await this.optimizationModel
+      .find({
+        $or: [{ userId: new mongoose.Types.ObjectId(userId) }, { userId }],
+        createdAt: { $gte: startDate, $lte: endDate },
+      })
       .sort({ costSaved: -1, createdAt: -1 })
       .limit(500)
       .lean()
@@ -2846,7 +2860,8 @@ REPLY FORMAT (JSON only):
     let totalSaved = 0;
     let totalTokensSaved = 0;
     let totalImprovement = 0;
-    const byCategory: Record<string, { count: number; avgSavings: number }> = {};
+    const byCategory: Record<string, { count: number; avgSavings: number }> =
+      {};
     let cortexCount = 0;
 
     for (const doc of docs as any[]) {

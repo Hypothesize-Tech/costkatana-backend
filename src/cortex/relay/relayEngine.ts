@@ -3,23 +3,30 @@
  * Orchestrates the complete Cortex processing pipeline using AWS Bedrock
  */
 
-import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import { 
-  CortexQuery, 
-  CortexResponse, 
+import {
+  BedrockRuntimeClient,
+  InvokeModelCommand,
+} from '@aws-sdk/client-bedrock-runtime';
+import {
+  CortexQuery,
+  CortexResponse,
   ModelSelection,
   ResponseMetrics,
-  ExecutionTrace 
+  ExecutionTrace,
 } from '../types';
 import { CortexEncoder } from '../core/encoder';
 import { CortexDecoder } from '../core/decoder';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 import { RetryWithBackoff } from '../../utils/retryWithBackoff';
 import { calculateCost } from '../../utils/pricing';
 import { BedrockModelFormatter } from '../utils/bedrockModelFormatter';
 import { primitiveLearner } from '../learning/primitiveLearner';
 import { ModelRouter, modelRouter } from './modelRouter';
-import { encodeToTOON, decodeFromTOON, extractStructuredData } from '../../utils/toon.utils';
+import {
+  encodeToTOON,
+  decodeFromTOON,
+  extractStructuredData,
+} from '../../utils/toon.utils';
 
 export class CortexRelayEngine {
   private bedrockClient: BedrockRuntimeClient;
@@ -28,47 +35,51 @@ export class CortexRelayEngine {
   private modelRouter: ModelRouter;
   private coreModelId: string;
   private executionTraces: ExecutionTrace[] = [];
-  
+
   constructor() {
     this.bedrockClient = new BedrockRuntimeClient({
-      region: process.env.AWS_REGION || 'us-east-1'
+      region: process.env.AWS_REGION || 'us-east-1',
     });
-    
+
     this.encoder = new CortexEncoder();
     this.decoder = new CortexDecoder();
     this.modelRouter = modelRouter; // Use singleton instance
-    
-    this.coreModelId = process.env.CORTEX_CORE_MODEL || 'global.anthropic.claude-haiku-4-5-20251001-v1:0';
+
+    this.coreModelId =
+      process.env.CORTEX_CORE_MODEL ||
+      'global.anthropic.claude-haiku-4-5-20251001-v1:0';
   }
 
-  
   /**
    * Execute the complete Cortex relay pipeline
    */
-  public async execute(input: string, options?: {
-    coreModel?: string;
-    encoderModel?: string;
-    decoderModel?: string;
-    format?: string;
-    style?: string;
-  }): Promise<{ response: string; metrics: ResponseMetrics }> {
+  public async execute(
+    input: string,
+    options?: {
+      coreModel?: string;
+      encoderModel?: string;
+      decoderModel?: string;
+      format?: string;
+      style?: string;
+    },
+  ): Promise<{ response: string; metrics: ResponseMetrics }> {
     const startTime = Date.now();
     this.executionTraces = [];
-    
+
     try {
       // Step 1: Encode natural language to Cortex (with optional model override)
       this.addTrace('encoding_start');
       const cortexQuery = await this.encoder.encode(input, {
         compressionLevel: 'aggressive',
         preserveContext: true,
-        modelOverride: options?.encoderModel
+        modelOverride: options?.encoderModel,
       });
       this.addTrace('encoding_complete');
-      
+
       // Step 2: Route to appropriate model (or use override)
       this.addTrace('routing_start');
-      const modelSelection = options?.coreModel 
-        ? {
+      const modelSelection = options?.coreModel
+        ? ({
             modelId: options.coreModel,
             provider: 'bedrock' as const,
             capabilities: {
@@ -76,14 +87,14 @@ export class CortexRelayEngine {
               supportedLanguages: ['en'],
               specializations: ['general'],
               costPerToken: 0.001,
-              averageLatency: 1000
+              averageLatency: 1000,
             },
             estimatedCost: 0.01,
             estimatedLatency: 1000,
             confidence: 1.0,
-            reasoning: 'User specified model override'
-          } as ModelSelection
-        : {
+            reasoning: 'User specified model override',
+          } as ModelSelection)
+        : ({
             // Use configured core model instead of router selection
             modelId: this.coreModelId,
             provider: 'bedrock' as const,
@@ -92,174 +103,205 @@ export class CortexRelayEngine {
               supportedLanguages: ['en'],
               specializations: ['general'],
               costPerToken: 0.003,
-              averageLatency: 1500
+              averageLatency: 1500,
             },
             estimatedCost: 0.015,
             estimatedLatency: 1500,
             confidence: 1.0,
-            reasoning: 'Using configured core model'
-          } as ModelSelection;
+            reasoning: 'Using configured core model',
+          } as ModelSelection);
       this.addTrace('routing_complete', { model: modelSelection.modelId });
-      
+
       // Step 3: Predict response quality if enabled
       if (process.env.CORTEX_RESPONSE_QUALITY_PREDICTION === 'true') {
-        const qualityPrediction = await this.predictResponseQuality(cortexQuery, modelSelection);
-        
+        const qualityPrediction = await this.predictResponseQuality(
+          cortexQuery,
+          modelSelection,
+        );
+
         // Early termination if quality is predicted to be poor
-        if (qualityPrediction.score < parseFloat(process.env.CORTEX_QUALITY_THRESHOLD || '0.85')) {
+        if (
+          qualityPrediction.score <
+          parseFloat(process.env.CORTEX_QUALITY_THRESHOLD || '0.85')
+        ) {
           if (process.env.CORTEX_QUALITY_EARLY_TERMINATION === 'true') {
-            this.addTrace('early_termination', { 
+            this.addTrace('early_termination', {
               predictedScore: qualityPrediction.score,
-              reason: qualityPrediction.reason 
+              reason: qualityPrediction.reason,
             });
-            
+
             // Return error response
             return {
               response: `Response quality predicted to be insufficient (${qualityPrediction.score.toFixed(2)}). ${qualityPrediction.reason}`,
               metrics: {
-                ...(await this.calculateMetrics(input, cortexQuery, { frame: 'error', roles: {}, status: 'error' } as CortexResponse, modelSelection, startTime)),
+                ...(await this.calculateMetrics(
+                  input,
+                  cortexQuery,
+                  {
+                    frame: 'error',
+                    roles: {},
+                    status: 'error',
+                  } as CortexResponse,
+                  modelSelection,
+                  startTime,
+                )),
                 earlyTermination: true,
-                qualityPrediction
-              }
+                qualityPrediction,
+              },
             };
           }
         }
-        
+
         this.addTrace('quality_prediction', qualityPrediction);
       }
-      
+
       // Step 4: Check for parallel execution opportunities
       let cortexResponse: CortexResponse;
-      
-      if (process.env.CORTEX_DISTRIBUTED_EXECUTION === 'true' && this.canExecuteInParallel(cortexQuery)) {
+
+      if (
+        process.env.CORTEX_DISTRIBUTED_EXECUTION === 'true' &&
+        this.canExecuteInParallel(cortexQuery)
+      ) {
         this.addTrace('parallel_execution_start');
-        cortexResponse = await this.executeInParallel(cortexQuery, modelSelection);
+        cortexResponse = await this.executeInParallel(
+          cortexQuery,
+          modelSelection,
+        );
         this.addTrace('parallel_execution_complete');
       } else {
         // Process with selected Bedrock model
         this.addTrace('processing_start');
-        cortexResponse = await this.processWithBedrock(cortexQuery, modelSelection);
-      }
-      
-      // Apply self-critique loop if enabled
-      if (process.env.CORTEX_SELF_CRITIQUE_LOOP === 'true') {
-        const maxIterations = parseInt(process.env.CORTEX_CRITIQUE_ITERATIONS || '2');
-        cortexResponse = await this.applySelfCritique(
-          cortexQuery, 
-          cortexResponse, 
+        cortexResponse = await this.processWithBedrock(
+          cortexQuery,
           modelSelection,
-          maxIterations
         );
       }
-      
+
+      // Apply self-critique loop if enabled
+      if (process.env.CORTEX_SELF_CRITIQUE_LOOP === 'true') {
+        const maxIterations = parseInt(
+          process.env.CORTEX_CRITIQUE_ITERATIONS || '2',
+        );
+        cortexResponse = await this.applySelfCritique(
+          cortexQuery,
+          cortexResponse,
+          modelSelection,
+          maxIterations,
+        );
+      }
+
       this.addTrace('processing_complete');
-      
+
       // Step 4: Decode back to natural language (with optional model override)
       this.addTrace('decoding_start');
       const decodedResponse = await this.decoder.decode(cortexResponse, {
         format: (options?.format as any) || 'plain',
         style: (options?.style as any) || 'formal',
-        modelOverride: options?.decoderModel
+        modelOverride: options?.decoderModel,
       });
       this.addTrace('decoding_complete');
-      
+
       // Calculate metrics
       const metrics = await this.calculateMetrics(
         input,
         cortexQuery,
         cortexResponse,
         modelSelection,
-        startTime
+        startTime,
       );
-      
+
       // Learn new primitives if enabled
       if (process.env.CORTEX_DYNAMIC_PRIMITIVE_LEARNING === 'true') {
         const learnedPrimitives = await primitiveLearner.analyzeInteraction(
           input,
           cortexQuery,
-          cortexResponse
+          cortexResponse,
         );
-        
+
         if (learnedPrimitives.length > 0) {
           this.addTrace('primitive_learning', {
             learned: learnedPrimitives.length,
-            primitives: learnedPrimitives.map(p => p.name)
+            primitives: learnedPrimitives.map((p) => p.name),
           });
         }
       }
-      
+
       // Log the complete execution
       this.logExecution(input, decodedResponse, metrics);
-      
+
       return {
         response: decodedResponse,
-        metrics
+        metrics,
       };
     } catch (error) {
       loggingService.error('Cortex relay execution failed', { error, input });
       throw error;
     }
   }
-  
+
   /**
    * Process Cortex query with AWS Bedrock
    */
   private async processWithBedrock(
     query: CortexQuery,
-    modelSelection: ModelSelection
+    modelSelection: ModelSelection,
   ): Promise<CortexResponse> {
     const prompt = await this.buildProcessingPrompt(query);
-    
+
     // Use the formatter to create the correct request format for each model
     const isClaude = modelSelection.modelId.includes('anthropic.claude');
-    
+
     const requestBody = BedrockModelFormatter.formatRequestBody({
       modelId: modelSelection.modelId,
       messages: [
         {
           role: 'user',
-          content: isClaude ? `${this.buildSystemPrompt()}\n\n${prompt}` : prompt
-        }
+          content: isClaude
+            ? `${this.buildSystemPrompt()}\n\n${prompt}`
+            : prompt,
+        },
       ],
       systemPrompt: isClaude ? undefined : this.buildSystemPrompt(), // Skip system prompt for Claude
       maxTokens: 4000,
       temperature: modelSelection.modelId.includes('haiku') ? 0.3 : 0.5,
-      topP: 0.95
+      topP: 0.95,
     });
-    
+
     const command = new InvokeModelCommand({
       modelId: modelSelection.modelId,
       contentType: 'application/json',
       accept: 'application/json',
-      body: requestBody
+      body: requestBody,
     });
-    
+
     const response = await RetryWithBackoff.execute(
       async () => this.bedrockClient.send(command),
       {
         maxRetries: 3,
         baseDelay: 1000,
         maxDelay: 10000,
-        backoffMultiplier: 2
-      }
+        backoffMultiplier: 2,
+      },
     );
-    
+
     if (!response.success || !response.result) {
       throw new Error('Failed to process with Bedrock');
     }
-    
-    const responseBody = JSON.parse(new TextDecoder().decode(response.result.body));
-    
+
+    const responseBody = JSON.parse(
+      new TextDecoder().decode(response.result.body),
+    );
+
     // Use the formatter to parse the response based on model type
     const cortexResponseText = BedrockModelFormatter.parseResponseBody(
       modelSelection.modelId,
-      responseBody
+      responseBody,
     );
-    
+
     // Parse the Cortex response (handles both TOON and JSON)
     return await this.parseCortexResponse(cortexResponseText);
   }
-  
+
   /**
    * Build the system prompt for core processing
    */
@@ -283,7 +325,7 @@ items[3]{id,name,value}:
   2,item2,value2
   3,item3,value3`;
   }
-  
+
   /**
    * Build the processing prompt
    */
@@ -292,28 +334,31 @@ items[3]{id,name,value}:
     const simplifiedQuery = {
       frame: query.frame,
       roles: query.roles,
-      metadata: query.metadata?.trueCortexFormat ? { trueCortexFormat: query.metadata.trueCortexFormat } : {}
+      metadata: query.metadata?.trueCortexFormat
+        ? { trueCortexFormat: query.metadata.trueCortexFormat }
+        : {},
     };
-    
+
     // For Claude models, use even simpler format
-    const isClaude = process.env.CORTEX_CORE_MODEL?.includes('anthropic.claude');
-    
+    const isClaude =
+      process.env.CORTEX_CORE_MODEL?.includes('anthropic.claude');
+
     if (isClaude) {
       return `Process this query: ${query.roles?.content || query.frame || 'analyze data'}
 
 Provide a structured analysis.`;
     }
-    
+
     // Convert to TOON format
     const queryString = await encodeToTOON(simplifiedQuery);
-    
+
     return `Process this Cortex query in TOON format:
 
 ${queryString}
 
 Generate a structured response in TOON format ONLY (NO JSON).`;
   }
-  
+
   /**
    * Check if query can be executed in parallel
    */
@@ -322,36 +367,38 @@ Generate a structured response in TOON format ONLY (NO JSON).`;
     if (!query.tasks || query.tasks.length <= 1) {
       return false;
     }
-    
+
     // Check for inter-task dependencies
     const hasDependencies = query.tasks.some((task, index) => {
       const taskStr = JSON.stringify(task);
       // Check if this task references other tasks
       return taskStr.includes('$task_') && !taskStr.includes(`$task_${index}`);
     });
-    
+
     // Can parallelize if no dependencies
     return !hasDependencies;
   }
-  
+
   /**
    * Execute tasks in parallel
    */
   private async executeInParallel(
     query: CortexQuery,
-    modelSelection: ModelSelection
+    modelSelection: ModelSelection,
   ): Promise<CortexResponse> {
-    const maxParallelTasks = parseInt(process.env.CORTEX_PARALLEL_TASK_LIMIT || '10');
+    const maxParallelTasks = parseInt(
+      process.env.CORTEX_PARALLEL_TASK_LIMIT || '10',
+    );
     const tasks = query.tasks || [];
-    
+
     // Split tasks into batches
     const batches: any[][] = [];
     for (let i = 0; i < tasks.length; i += maxParallelTasks) {
       batches.push(tasks.slice(i, i + maxParallelTasks));
     }
-    
+
     const allResults: any[] = [];
-    
+
     // Process each batch in parallel
     for (const batch of batches) {
       const batchPromises = batch.map(async (task, index) => {
@@ -362,66 +409,74 @@ Generate a structured response in TOON format ONLY (NO JSON).`;
           metadata: {
             ...query.metadata,
             taskIndex: index,
-            parallelExecution: true
-          }
+            parallelExecution: true,
+          },
         };
-        
+
         // Process individual task
         try {
-          const response = await this.processWithBedrock(singleTaskQuery, modelSelection);
+          const response = await this.processWithBedrock(
+            singleTaskQuery,
+            modelSelection,
+          );
           return { success: true, response, taskIndex: index };
         } catch (error) {
-          loggingService.warn('Parallel task execution failed', { taskIndex: index, error });
+          loggingService.warn('Parallel task execution failed', {
+            taskIndex: index,
+            error,
+          });
           return { success: false, error, taskIndex: index };
         }
       });
-      
+
       const batchResults = await Promise.all(batchPromises);
       allResults.push(...batchResults);
     }
-    
+
     // Combine results
     return this.combineParallelResults(allResults, query);
   }
-  
+
   /**
    * Combine results from parallel execution
    */
   private combineParallelResults(
     results: any[],
-    _originalQuery: CortexQuery
+    _originalQuery: CortexQuery,
   ): CortexResponse {
-    const successfulResults = results.filter(r => r.success);
-    const failedResults = results.filter(r => !r.success);
-    
+    const successfulResults = results.filter((r) => r.success);
+    const failedResults = results.filter((r) => !r.success);
+
     if (successfulResults.length === 0) {
       return {
         frame: 'error',
         roles: {
           code: 'PARALLEL_EXECUTION_FAILED',
           message: 'All parallel tasks failed',
-          failures: failedResults.map(r => r.error?.message || 'Unknown error')
+          failures: failedResults.map(
+            (r) => r.error?.message || 'Unknown error',
+          ),
         },
-        status: 'error'
+        status: 'error',
       } as CortexResponse;
     }
-    
+
     // Combine successful responses
     const combinedRoles: Record<string, any> = {};
-    
+
     successfulResults.forEach((result, index) => {
       const taskKey = `task_${result.taskIndex || index}`;
       combinedRoles[taskKey] = result.response.roles || result.response;
     });
-    
+
     // Add failed task indicators
-    failedResults.forEach(result => {
+    failedResults.forEach((result) => {
       const taskKey = `task_${result.taskIndex}_error`;
       combinedRoles[taskKey] = {
-        error: result.error?.message || 'Task execution failed'
+        error: result.error?.message || 'Task execution failed',
       };
     });
-    
+
     return {
       frame: 'answer',
       roles: combinedRoles,
@@ -430,24 +485,23 @@ Generate a structured response in TOON format ONLY (NO JSON).`;
         parallelExecution: true,
         totalTasks: results.length,
         successfulTasks: successfulResults.length,
-        failedTasks: failedResults.length
-      }
+        failedTasks: failedResults.length,
+      },
     } as CortexResponse;
   }
-  
 
-  
   /**
    * Predict response quality before generating
    */
   private async predictResponseQuality(
     query: CortexQuery,
-    modelSelection: ModelSelection
+    modelSelection: ModelSelection,
   ): Promise<{ score: number; reason: string; confidence: number }> {
     try {
       // Use a lightweight model for prediction
-      const predictionModel = process.env.CORTEX_QUALITY_PREDICTOR_MODEL || 'amazon.nova-lite-v1:0';
-      
+      const predictionModel =
+        process.env.CORTEX_QUALITY_PREDICTOR_MODEL || 'amazon.nova-lite-v1:0';
+
       const queryTOON = await encodeToTOON(query);
       const predictionPrompt = `Predict the likely quality of response for this Cortex query in TOON format:
 
@@ -469,52 +523,61 @@ Provide prediction in JSON:
   "confidence": 0.0-1.0,
   "potentialIssues": ["issue1", "issue2"]
 }`;
-      
+
       const predictionRequest = BedrockModelFormatter.formatRequestBody({
         modelId: predictionModel,
         messages: [
           {
             role: 'user',
-            content: predictionPrompt
-          }
+            content: predictionPrompt,
+          },
         ],
-        systemPrompt: 'You are a quality predictor for Cortex responses. Analyze queries and predict response quality accurately.',
+        systemPrompt:
+          'You are a quality predictor for Cortex responses. Analyze queries and predict response quality accurately.',
         maxTokens: 500,
-        temperature: 0.3
+        temperature: 0.3,
       });
-      
+
       const predictionResponse = await RetryWithBackoff.execute(
-        () => this.bedrockClient.send(
-          new InvokeModelCommand({
-            modelId: predictionModel,
-            body: JSON.stringify(predictionRequest),
-            contentType: 'application/json',
-            accept: 'application/json'
-          })
-        ),
-        { maxRetries: 1, baseDelay: 500 }
+        () =>
+          this.bedrockClient.send(
+            new InvokeModelCommand({
+              modelId: predictionModel,
+              body: JSON.stringify(predictionRequest),
+              contentType: 'application/json',
+              accept: 'application/json',
+            }),
+          ),
+        { maxRetries: 1, baseDelay: 500 },
       );
-      
+
       if (!predictionResponse.success || !predictionResponse.result) {
         // Default to optimistic prediction if prediction fails
-        return { score: 0.9, reason: 'Prediction unavailable', confidence: 0.5 };
+        return {
+          score: 0.9,
+          reason: 'Prediction unavailable',
+          confidence: 0.5,
+        };
       }
-      
-      const predictionBody = JSON.parse(new TextDecoder().decode(predictionResponse.result.body));
+
+      const predictionBody = JSON.parse(
+        new TextDecoder().decode(predictionResponse.result.body),
+      );
       const predictionText = BedrockModelFormatter.parseResponseBody(
         predictionModel,
-        predictionBody
+        predictionBody,
       );
-      
+
       // Parse prediction
       try {
         // Try TOON decode first
         try {
           const parsed = await decodeFromTOON(predictionText);
+          const o = (parsed?.original ?? parsed) as Record<string, unknown>;
           return {
-            score: parsed.score || 0.8,
-            reason: parsed.reason || 'No specific reason provided',
-            confidence: parsed.confidence || 0.7
+            score: (o.score as number) || 0.8,
+            reason: (o.reason as string) || 'No specific reason provided',
+            confidence: (o.confidence as number) || 0.7,
           };
         } catch {
           // Fallback: try to extract score from text
@@ -522,20 +585,20 @@ Provide prediction in JSON:
           return {
             score: scoreMatch ? parseFloat(scoreMatch[1]) : 0.8,
             reason: 'Prediction parsed from text',
-            confidence: 0.7
+            confidence: 0.7,
           };
         }
       } catch (error) {
         loggingService.warn('Failed to parse quality prediction', { error });
       }
-      
+
       return { score: 0.8, reason: 'Default prediction', confidence: 0.6 };
     } catch (error) {
       loggingService.warn('Quality prediction failed', { error });
       return { score: 0.85, reason: 'Prediction error', confidence: 0.5 };
     }
   }
-  
+
   /**
    * Apply self-critique loop to improve response quality
    */
@@ -543,87 +606,101 @@ Provide prediction in JSON:
     query: CortexQuery,
     initialResponse: CortexResponse,
     modelSelection: ModelSelection,
-    maxIterations: number
+    maxIterations: number,
   ): Promise<CortexResponse> {
     let currentResponse = initialResponse;
     let iteration = 0;
-    
+
     while (iteration < maxIterations) {
       this.addTrace(`critique_iteration_${iteration}_start`);
-      
+
       // Build critique prompt
-      const critiquePrompt = await this.buildCritiquePrompt(query, currentResponse);
-      
+      const critiquePrompt = await this.buildCritiquePrompt(
+        query,
+        currentResponse,
+      );
+
       // Get critique from LLM
       const critiqueRequest = BedrockModelFormatter.formatRequestBody({
         modelId: modelSelection.modelId,
         messages: [
           {
             role: 'user',
-            content: critiquePrompt
-          }
+            content: critiquePrompt,
+          },
         ],
         systemPrompt: this.buildCritiqueSystemPrompt(),
         maxTokens: 1000,
-        temperature: 0.3
+        temperature: 0.3,
       });
-      
+
       const critiqueResponse = await RetryWithBackoff.execute(
-        () => this.bedrockClient.send(
-          new InvokeModelCommand({
-            modelId: modelSelection.modelId,
-            body: JSON.stringify(critiqueRequest),
-            contentType: 'application/json',
-            accept: 'application/json'
-          })
-        ),
-        { maxRetries: 2, baseDelay: 1000 }
+        () =>
+          this.bedrockClient.send(
+            new InvokeModelCommand({
+              modelId: modelSelection.modelId,
+              body: JSON.stringify(critiqueRequest),
+              contentType: 'application/json',
+              accept: 'application/json',
+            }),
+          ),
+        { maxRetries: 2, baseDelay: 1000 },
       );
-      
+
       if (!critiqueResponse.success || !critiqueResponse.result) {
         break; // Skip critique if it fails
       }
-      
-      const critiqueBody = JSON.parse(new TextDecoder().decode(critiqueResponse.result.body));
+
+      const critiqueBody = JSON.parse(
+        new TextDecoder().decode(critiqueResponse.result.body),
+      );
       const critiqueText = BedrockModelFormatter.parseResponseBody(
         modelSelection.modelId,
-        critiqueBody
+        critiqueBody,
       );
-      
+
       // Parse critique result
       const critique = await this.parseCritique(critiqueText);
-      
+
       // If response is good enough, stop
-      if (critique.qualityScore >= (parseFloat(process.env.CORTEX_QUALITY_THRESHOLD || '0.85'))) {
-        this.addTrace(`critique_iteration_${iteration}_passed`, { score: critique.qualityScore });
+      if (
+        critique.qualityScore >=
+        parseFloat(process.env.CORTEX_QUALITY_THRESHOLD || '0.85')
+      ) {
+        this.addTrace(`critique_iteration_${iteration}_passed`, {
+          score: critique.qualityScore,
+        });
         break;
       }
-      
+
       // Apply improvements
       if (critique.improvements && critique.improvements.length > 0) {
         currentResponse = await this.applyImprovements(
           query,
           currentResponse,
           critique.improvements,
-          modelSelection
+          modelSelection,
         );
       }
-      
-      this.addTrace(`critique_iteration_${iteration}_complete`, { 
+
+      this.addTrace(`critique_iteration_${iteration}_complete`, {
         score: critique.qualityScore,
-        improvements: critique.improvements?.length || 0
+        improvements: critique.improvements?.length || 0,
       });
-      
+
       iteration++;
     }
-    
+
     return currentResponse;
   }
-  
+
   /**
    * Build critique prompt
    */
-  private async buildCritiquePrompt(query: CortexQuery, response: CortexResponse): Promise<string> {
+  private async buildCritiquePrompt(
+    query: CortexQuery,
+    response: CortexResponse,
+  ): Promise<string> {
     const queryTOON = await encodeToTOON(query);
     const responseTOON = await encodeToTOON(response);
     return `Analyze the following Cortex query and response for quality and completeness (both in TOON format):
@@ -650,7 +727,7 @@ Provide your analysis in JSON format:
   "recommendRefinement": true/false
 }`;
   }
-  
+
   /**
    * Build critique system prompt
    */
@@ -672,7 +749,7 @@ SCORING:
 
 Be critical but fair. Focus on actionable improvements.`;
   }
-  
+
   /**
    * Parse critique response
    */
@@ -686,23 +763,24 @@ Be critical but fair. Focus on actionable improvements.`;
     try {
       // Try TOON decode
       const parsed = await decodeFromTOON(text);
+      const o = (parsed?.original ?? parsed) as Record<string, unknown>;
       return {
-        qualityScore: parsed.qualityScore || 0.5,
-        strengths: parsed.strengths,
-        weaknesses: parsed.weaknesses,
-        improvements: parsed.improvements,
-        recommendRefinement: parsed.recommendRefinement !== false
+        qualityScore: (o.qualityScore as number) || 0.5,
+        strengths: o.strengths as string[] | undefined,
+        weaknesses: o.weaknesses as string[] | undefined,
+        improvements: o.improvements as string[] | undefined,
+        recommendRefinement: o.recommendRefinement !== false,
       };
     } catch (error) {
       loggingService.warn('Failed to parse critique', { error });
     }
-    
+
     return {
       qualityScore: 0.7,
-      recommendRefinement: false
+      recommendRefinement: false,
     };
   }
-  
+
   /**
    * Apply improvements to response
    */
@@ -710,7 +788,7 @@ Be critical but fair. Focus on actionable improvements.`;
     query: CortexQuery,
     response: CortexResponse,
     improvements: string[],
-    modelSelection: ModelSelection
+    modelSelection: ModelSelection,
   ): Promise<CortexResponse> {
     const queryTOON = await encodeToTOON(query);
     const responseTOON = await encodeToTOON(response);
@@ -726,45 +804,48 @@ REQUIRED IMPROVEMENTS:
 ${improvements.map((imp, i) => `${i + 1}. ${imp}`).join('\n')}
 
 Generate an improved Cortex response that addresses these issues:`;
-    
+
     const refinementRequest = BedrockModelFormatter.formatRequestBody({
       modelId: modelSelection.modelId,
       messages: [
         {
           role: 'user',
-          content: refinementPrompt
-        }
+          content: refinementPrompt,
+        },
       ],
       systemPrompt: this.buildSystemPrompt(),
       maxTokens: 2000,
-      temperature: 0.5
+      temperature: 0.5,
     });
-    
+
     const refinementResponse = await RetryWithBackoff.execute(
-      () => this.bedrockClient.send(
-        new InvokeModelCommand({
-          modelId: modelSelection.modelId,
-          body: JSON.stringify(refinementRequest),
-          contentType: 'application/json',
-          accept: 'application/json'
-        })
-      ),
-      { maxRetries: 2, baseDelay: 1000 }
+      () =>
+        this.bedrockClient.send(
+          new InvokeModelCommand({
+            modelId: modelSelection.modelId,
+            body: JSON.stringify(refinementRequest),
+            contentType: 'application/json',
+            accept: 'application/json',
+          }),
+        ),
+      { maxRetries: 2, baseDelay: 1000 },
     );
-    
+
     if (!refinementResponse.success || !refinementResponse.result) {
       return response; // Return original if refinement fails
     }
-    
-    const refinementBody = JSON.parse(new TextDecoder().decode(refinementResponse.result.body));
+
+    const refinementBody = JSON.parse(
+      new TextDecoder().decode(refinementResponse.result.body),
+    );
     const refinedText = BedrockModelFormatter.parseResponseBody(
       modelSelection.modelId,
-      refinementBody
+      refinementBody,
     );
-    
+
     return await this.parseCortexResponse(refinedText);
   }
-  
+
   /**
    * Parse Cortex response from LLM output
    */
@@ -776,9 +857,9 @@ Generate an improved Cortex response that addresses these issues:`;
         frame: 'error',
         roles: {
           code: 'EMPTY_INPUT',
-          message: 'Empty or invalid input text'
+          message: 'Empty or invalid input text',
         },
-        status: 'error'
+        status: 'error',
       } as CortexResponse;
     }
 
@@ -787,7 +868,7 @@ Generate an improved Cortex response that addresses these issues:`;
     if (text.length > MAX_PARSE_SIZE) {
       loggingService.warn('Text too large for parsing, truncating', {
         size: text.length,
-        maxSize: MAX_PARSE_SIZE
+        maxSize: MAX_PARSE_SIZE,
       });
       text = text.substring(0, MAX_PARSE_SIZE);
     }
@@ -798,7 +879,9 @@ Generate an improved Cortex response that addresses these issues:`;
       if (structuredData && typeof structuredData === 'object') {
         // Edge case: Handle decode errors
         if ('_decodeError' in structuredData) {
-          loggingService.warn('Decode error in structured data, using fallback');
+          loggingService.warn(
+            'Decode error in structured data, using fallback',
+          );
         } else {
           const parsed = structuredData;
           // Ensure it has required fields
@@ -806,46 +889,50 @@ Generate an improved Cortex response that addresses these issues:`;
             frame: parsed.frame || 'answer',
             roles: parsed.roles || { content: text },
             status: parsed.status || 'success',
-            metadata: parsed.metadata
+            metadata: parsed.metadata,
           } as CortexResponse;
         }
       }
-      
+
       // Try direct TOON decode with timeout protection
       try {
         const decodePromise = decodeFromTOON(text);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('TOON decode timeout')), 3000)
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('TOON decode timeout')), 3000),
         );
-        
-        const parsed = await Promise.race([decodePromise, timeoutPromise]) as any;
-        
+
+        const parsed = (await Promise.race([
+          decodePromise,
+          timeoutPromise,
+        ])) as any;
+
         // Edge case: Handle decode errors
         if (parsed && typeof parsed === 'object' && '_decodeError' in parsed) {
           throw new Error('Decode error detected');
         }
-        
+
         if (parsed && typeof parsed === 'object') {
           return {
             frame: parsed.frame || 'answer',
             roles: parsed.roles || { content: text },
             status: parsed.status || 'success',
-            metadata: parsed.metadata
+            metadata: parsed.metadata,
           } as CortexResponse;
         }
       } catch (toonError) {
         // Edge case: Timeout or decode error
-        const isTimeout = toonError instanceof Error && toonError.message.includes('timeout');
+        const isTimeout =
+          toonError instanceof Error && toonError.message.includes('timeout');
         if (isTimeout) {
           loggingService.warn('TOON decode timeout, trying pattern matching', {
-            textLength: text.length
+            textLength: text.length,
           });
         }
 
         // If TOON decode fails, try to find TOON pattern with multiple patterns
         const toonPatterns = [
           /(\w+\[\d+\]\{[^}]+\}:[\s\S]*?)(?=\n\n|\n\w+\[|$)/,
-          /(\w+\s*\[\s*\d+\s*\]\s*\{[^}]+\}\s*:[\s\S]*?)(?=\n\n|\n\w+\s*\[|$)/
+          /(\w+\s*\[\s*\d+\s*\]\s*\{[^}]+\}\s*:[\s\S]*?)(?=\n\n|\n\w+\s*\[|$)/,
         ];
 
         for (const pattern of toonPatterns) {
@@ -853,53 +940,60 @@ Generate an improved Cortex response that addresses these issues:`;
           if (toonMatch?.[1]) {
             try {
               const parsed = await decodeFromTOON(toonMatch[1]);
-              if (parsed && typeof parsed === 'object' && !('_decodeError' in parsed)) {
+              const obj = parsed?.original ?? parsed;
+              if (obj && typeof obj === 'object' && !('_decodeError' in obj)) {
+                const o = obj as Record<string, unknown>;
                 return {
-                  frame: parsed.frame || 'answer',
-                  roles: parsed.roles || { content: text },
-                  status: parsed.status || 'success',
-                  metadata: parsed.metadata
+                  frame: (o.frame as string) || 'answer',
+                  roles: (o.roles as Record<string, unknown>) || {
+                    content: text,
+                  },
+                  status: (o.status as string) || 'success',
+                  metadata: o.metadata,
                 } as CortexResponse;
               }
             } catch (patternError) {
               // Continue to next pattern
               loggingService.debug('Pattern match decode failed', {
-                error: patternError instanceof Error ? patternError.message : String(patternError)
+                error:
+                  patternError instanceof Error
+                    ? patternError.message
+                    : String(patternError),
               });
             }
           }
         }
       }
-      
+
       // Fallback to basic response if TOON parsing fails
-      loggingService.warn('Failed to parse TOON format, using fallback', { 
+      loggingService.warn('Failed to parse TOON format, using fallback', {
         text: text.substring(0, 200),
-        textLength: text.length
+        textLength: text.length,
       });
       return {
         frame: 'answer',
         roles: { content: text },
-        status: 'success'
+        status: 'success',
       } as CortexResponse;
     } catch (error) {
-      loggingService.error('Failed to parse Cortex response', { 
-        text: text.substring(0, 500), 
+      loggingService.error('Failed to parse Cortex response', {
+        text: text.substring(0, 500),
         textLength: text.length,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
-      
+
       return {
         frame: 'error',
         roles: {
           code: 'PARSE_ERROR',
           message: 'Failed to parse Cortex response',
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         },
-        status: 'error'
+        status: 'error',
       } as CortexResponse;
     }
   }
-  
+
   /**
    * Calculate execution metrics
    */
@@ -908,21 +1002,41 @@ Generate an improved Cortex response that addresses these issues:`;
     cortexQuery: CortexQuery,
     cortexResponse: CortexResponse,
     modelSelection: ModelSelection,
-    startTime: number
+    startTime: number,
   ): Promise<ResponseMetrics> {
     const originalTokens = this.estimateTokens(originalInput);
-    const cortexTokens = this.estimateTokens(await encodeToTOON(cortexQuery));
-    const responseTokens = this.estimateTokens(await encodeToTOON(cortexResponse));
-    
-    const tokenReduction = 1 - (cortexTokens / originalTokens);
+    const cortexEncoded = encodeToTOON(cortexQuery);
+    const cortexTokens = this.estimateTokens(
+      typeof cortexEncoded === 'string'
+        ? cortexEncoded
+        : JSON.stringify(cortexEncoded),
+    );
+    const responseEncoded = encodeToTOON(cortexResponse);
+    const responseTokens = this.estimateTokens(
+      typeof responseEncoded === 'string'
+        ? responseEncoded
+        : JSON.stringify(responseEncoded),
+    );
+
+    const tokenReduction = 1 - cortexTokens / originalTokens;
     const processingTime = Date.now() - startTime;
-    
+
     // Calculate cost savings
-    const originalCost = calculateCost(originalTokens, responseTokens, 'aws-bedrock', this.coreModelId);
-    const optimizedCost = calculateCost(cortexTokens, responseTokens, 'aws-bedrock', modelSelection.modelId);
-    
-    const costSavings = 1 - (optimizedCost / originalCost);
-    
+    const originalCost = calculateCost(
+      originalTokens,
+      responseTokens,
+      'aws-bedrock',
+      this.coreModelId,
+    );
+    const optimizedCost = calculateCost(
+      cortexTokens,
+      responseTokens,
+      'aws-bedrock',
+      modelSelection.modelId,
+    );
+
+    const costSavings = 1 - optimizedCost / originalCost;
+
     return {
       originalTokens,
       optimizedTokens: cortexTokens,
@@ -930,10 +1044,10 @@ Generate an improved Cortex response that addresses these issues:`;
       processingTime,
       costSavings,
       modelUsed: modelSelection.modelId,
-      cacheHit: false // Will be implemented with caching system
+      cacheHit: false, // Will be implemented with caching system
     };
   }
-  
+
   /**
    * Estimate token count (rough approximation)
    */
@@ -941,7 +1055,7 @@ Generate an improved Cortex response that addresses these issues:`;
     // Rough estimation: 1 token ≈ 4 characters
     return Math.ceil(text.length / 4);
   }
-  
+
   /**
    * Add execution trace
    */
@@ -949,20 +1063,22 @@ Generate an improved Cortex response that addresses these issues:`;
     this.executionTraces.push({
       step,
       timestamp: Date.now(),
-      duration: this.executionTraces.length > 0 
-        ? Date.now() - this.executionTraces[this.executionTraces.length - 1].timestamp 
-        : 0,
-      details
+      duration:
+        this.executionTraces.length > 0
+          ? Date.now() -
+            this.executionTraces[this.executionTraces.length - 1].timestamp
+          : 0,
+      details,
     });
   }
-  
+
   /**
    * Log execution details
    */
   private logExecution(
     input: string,
     output: string,
-    metrics: ResponseMetrics
+    metrics: ResponseMetrics,
   ): void {
     loggingService.info('Cortex relay execution completed', {
       inputLength: input.length,
@@ -971,45 +1087,51 @@ Generate an improved Cortex response that addresses these issues:`;
       traces: this.executionTraces,
       tokenReduction: `${(metrics.tokenReduction * 100).toFixed(1)}%`,
       costSavings: `${(metrics.costSavings * 100).toFixed(1)}%`,
-      executionTime: `${metrics.processingTime}ms`
+      executionTime: `${metrics.processingTime}ms`,
     });
   }
-  
+
   /**
    * Execute with custom model selection
    */
   public async executeWithModel(
     input: string,
-    modelIdOrOptions: string | {
-      coreModel?: string;
-      encoderModel?: string;
-      decoderModel?: string;
-      format?: string;
-      style?: string;
-    }
+    modelIdOrOptions:
+      | string
+      | {
+          coreModel?: string;
+          encoderModel?: string;
+          decoderModel?: string;
+          format?: string;
+          style?: string;
+        },
   ): Promise<{ response: string; metrics: ResponseMetrics }> {
     // Handle backward compatibility - if string, use as core model
-    const options = typeof modelIdOrOptions === 'string' 
-      ? { coreModel: modelIdOrOptions }
-      : modelIdOrOptions;
-    
+    const options =
+      typeof modelIdOrOptions === 'string'
+        ? { coreModel: modelIdOrOptions }
+        : modelIdOrOptions;
+
     // Delegate to main execute method with options
     return this.execute(input, options);
   }
-  
+
   /**
    * Execute in streaming mode
    */
   public async *streamExecute(input: string): AsyncGenerator<string> {
     // Encode
     const cortexQuery = await this.encoder.encode(input);
-    
+
     // Route
     const modelSelection = await this.modelRouter.selectModel(cortexQuery);
-    
+
     // Process
-    const cortexResponse = await this.processWithBedrock(cortexQuery, modelSelection);
-    
+    const cortexResponse = await this.processWithBedrock(
+      cortexQuery,
+      modelSelection,
+    );
+
     // Stream decode
     const decoder = new CortexDecoder();
     yield* decoder.streamDecode(cortexResponse);

@@ -150,10 +150,7 @@ export function getModelNameVariations(model: string): string[] {
     );
   }
   if (normalized.includes('claude-sonnet-4-6')) {
-    variations.push(
-      'claude-sonnet-4-6',
-      'anthropic.claude-sonnet-4-6',
-    );
+    variations.push('claude-sonnet-4-6', 'anthropic.claude-sonnet-4-6');
   }
   if (normalized.includes('claude-3-opus')) {
     variations.push(

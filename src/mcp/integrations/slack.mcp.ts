@@ -4,7 +4,11 @@
  */
 
 import { BaseIntegrationMCP } from './base-integration.mcp';
-import { createToolSchema, createParameter, CommonParameters } from '../registry/tool-metadata';
+import {
+  createToolSchema,
+  createParameter,
+  CommonParameters,
+} from '../registry/tool-metadata';
 
 const SLACK_API_BASE = 'https://slack.com/api';
 
@@ -30,7 +34,7 @@ export class SlackMCP extends BaseIntegrationMCP {
           }),
           CommonParameters.limit,
         ],
-        { requiredScopes: ['channels:read'] }
+        { requiredScopes: ['channels:read'] },
       ),
       async (params, context) => {
         const queryParams: any = {
@@ -42,14 +46,14 @@ export class SlackMCP extends BaseIntegrationMCP {
           context.connectionId,
           'GET',
           `${SLACK_API_BASE}/conversations.list`,
-          { params: queryParams, timeout: 300000 } // 5 minute timeout
+          { params: queryParams, timeout: 300000 }, // 5 minute timeout
         );
 
         return {
           channels: data.channels || [],
           count: data.channels?.length || 0,
         };
-      }
+      },
     );
 
     // Create channel
@@ -61,9 +65,11 @@ export class SlackMCP extends BaseIntegrationMCP {
         'POST',
         [
           createParameter('name', 'string', 'Channel name', { required: true }),
-          createParameter('isPrivate', 'boolean', 'Make channel private', { default: false }),
+          createParameter('isPrivate', 'boolean', 'Make channel private', {
+            default: false,
+          }),
         ],
-        { requiredScopes: ['channels:write'] }
+        { requiredScopes: ['channels:write'] },
       ),
       async (params, context) => {
         const body = {
@@ -75,11 +81,11 @@ export class SlackMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${SLACK_API_BASE}/conversations.create`,
-          { body, timeout: 300000 } // 5 minute timeout
+          { body, timeout: 300000 }, // 5 minute timeout
         );
 
         return data.channel;
-      }
+      },
     );
 
     // Archive channel
@@ -89,8 +95,12 @@ export class SlackMCP extends BaseIntegrationMCP {
         'slack',
         'Archive a Slack channel',
         'POST',
-        [createParameter('channelId', 'string', 'Channel ID', { required: true })],
-        { requiredScopes: ['channels:write'] }
+        [
+          createParameter('channelId', 'string', 'Channel ID', {
+            required: true,
+          }),
+        ],
+        { requiredScopes: ['channels:write'] },
       ),
       async (params, context) => {
         const body = {
@@ -101,14 +111,14 @@ export class SlackMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${SLACK_API_BASE}/conversations.archive`,
-          { body, timeout: 300000 } // 5 minute timeout
+          { body, timeout: 300000 }, // 5 minute timeout
         );
 
         return {
           success: true,
           message: `Channel ${params.channelId} archived successfully`,
         };
-      }
+      },
     );
 
     // ===== MESSAGE OPERATIONS =====
@@ -121,11 +131,15 @@ export class SlackMCP extends BaseIntegrationMCP {
         'Send a message to a Slack channel',
         'POST',
         [
-          createParameter('channelId', 'string', 'Channel ID', { required: true }),
+          createParameter('channelId', 'string', 'Channel ID', {
+            required: true,
+          }),
           createParameter('text', 'string', 'Message text', { required: true }),
-          createParameter('blocks', 'array', 'Block Kit blocks', { required: false }),
+          createParameter('blocks', 'array', 'Block Kit blocks', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['chat:write'] }
+        { requiredScopes: ['chat:write'] },
       ),
       async (params, context) => {
         const body: any = {
@@ -141,11 +155,11 @@ export class SlackMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${SLACK_API_BASE}/chat.postMessage`,
-          { body, timeout: 300000 } // 5 minute timeout
+          { body, timeout: 300000 }, // 5 minute timeout
         );
 
         return data;
-      }
+      },
     );
 
     // Update message
@@ -156,11 +170,17 @@ export class SlackMCP extends BaseIntegrationMCP {
         'Update an existing message',
         'PUT',
         [
-          createParameter('channelId', 'string', 'Channel ID', { required: true }),
-          createParameter('timestamp', 'string', 'Message timestamp', { required: true }),
-          createParameter('text', 'string', 'New message text', { required: true }),
+          createParameter('channelId', 'string', 'Channel ID', {
+            required: true,
+          }),
+          createParameter('timestamp', 'string', 'Message timestamp', {
+            required: true,
+          }),
+          createParameter('text', 'string', 'New message text', {
+            required: true,
+          }),
         ],
-        { requiredScopes: ['chat:write'] }
+        { requiredScopes: ['chat:write'] },
       ),
       async (params, context) => {
         const body = {
@@ -173,11 +193,11 @@ export class SlackMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${SLACK_API_BASE}/chat.update`,
-          { body, timeout: 300000 } // 5 minute timeout
+          { body, timeout: 300000 }, // 5 minute timeout
         );
 
         return data;
-      }
+      },
     );
 
     // Delete message
@@ -188,13 +208,17 @@ export class SlackMCP extends BaseIntegrationMCP {
         'Delete a message',
         'DELETE',
         [
-          createParameter('channelId', 'string', 'Channel ID', { required: true }),
-          createParameter('timestamp', 'string', 'Message timestamp', { required: true }),
+          createParameter('channelId', 'string', 'Channel ID', {
+            required: true,
+          }),
+          createParameter('timestamp', 'string', 'Message timestamp', {
+            required: true,
+          }),
         ],
         {
           requiredScopes: ['chat:write'],
           dangerous: true,
-        }
+        },
       ),
       async (params, context) => {
         const body = {
@@ -206,14 +230,14 @@ export class SlackMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${SLACK_API_BASE}/chat.delete`,
-          { body, timeout: 300000 } // 5 minute timeout
+          { body, timeout: 300000 }, // 5 minute timeout
         );
 
         return {
           success: true,
           message: 'Message deleted successfully',
         };
-      }
+      },
     );
 
     // ===== USER OPERATIONS =====
@@ -226,7 +250,7 @@ export class SlackMCP extends BaseIntegrationMCP {
         'List Slack workspace users',
         'GET',
         [CommonParameters.limit],
-        { requiredScopes: ['users:read'] }
+        { requiredScopes: ['users:read'] },
       ),
       async (params, context) => {
         const queryParams: any = {
@@ -237,14 +261,14 @@ export class SlackMCP extends BaseIntegrationMCP {
           context.connectionId,
           'GET',
           `${SLACK_API_BASE}/users.list`,
-          { params: queryParams, timeout: 300000 } // 5 minute timeout
+          { params: queryParams, timeout: 300000 }, // 5 minute timeout
         );
 
         return {
           users: data.members || [],
           count: data.members?.length || 0,
         };
-      }
+      },
     );
   }
 }

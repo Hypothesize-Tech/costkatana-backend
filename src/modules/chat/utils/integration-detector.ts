@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 export interface IntegrationIntent {
   needsIntegration: boolean;
@@ -36,14 +36,15 @@ Return a JSON response with:
 
 Only suggest integrations if the message clearly requires them.`;
 
-      const apiResponse = await this.bedrockService.invokeModel(
+      const apiResponse = await BedrockService.invokeModel(
         prompt,
         'global.anthropic.claude-haiku-4-5-20251001-v1:0',
-        { temperature: 0.3, maxTokens: 500 },
       );
 
       try {
-        const result = JSON.parse(apiResponse.response);
+        const result = JSON.parse(
+          typeof apiResponse === 'string' ? apiResponse : String(apiResponse),
+        );
         return {
           needsIntegration: result.needsIntegration || false,
           integrations: result.integrations || [],

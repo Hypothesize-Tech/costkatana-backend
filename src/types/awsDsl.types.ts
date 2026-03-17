@@ -1,9 +1,9 @@
 /**
  * AWS DSL Types - Deterministic Action Domain Specific Language
- * 
+ *
  * This DSL provides a structured, auditable way to define AWS actions.
  * It constrains what the LLM can request, ensuring predictable behavior.
- * 
+ *
  * Security Guarantees:
  * - DSL versions are immutable once released
  * - Executed plans store dslVersion and dslHash
@@ -21,7 +21,7 @@ export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
 export type CostImpact = 'negative' | 'neutral' | 'positive' | 'unknown';
 
-export type ActionCategory = 
+export type ActionCategory =
   | 'read'
   | 'start_stop'
   | 'resize'
@@ -37,21 +37,21 @@ export type ActionCategory =
 
 export interface ActionDefinition {
   // Identity
-  action: string;  // e.g., 'ec2.stop', 's3.lifecycle'
+  action: string; // e.g., 'ec2.stop', 's3.lifecycle'
   version: DSLVersion;
-  
+
   // Metadata
   metadata: ActionMetadata;
-  
+
   // Resource Selection
   selector: ResourceSelector;
-  
+
   // Constraints
   constraints: ActionConstraints;
-  
+
   // Execution
   execution: ExecutionConfig;
-  
+
   // Audit
   audit: AuditConfig;
 }
@@ -63,7 +63,7 @@ export interface ActionMetadata {
   risk: RiskLevel;
   reversible: boolean;
   costImpact: CostImpact;
-  estimatedDuration?: number;  // seconds
+  estimatedDuration?: number; // seconds
   documentation?: string;
   tags?: string[];
 }
@@ -80,7 +80,7 @@ export interface ResourceSelector {
   accounts?: string[];
 }
 
-export type AWSService = 
+export type AWSService =
   | 'ec2'
   | 's3'
   | 'rds'
@@ -97,7 +97,7 @@ export interface ResourceFilter {
   value: string | number | boolean | string[];
 }
 
-export type FilterOperator = 
+export type FilterOperator =
   | 'equals'
   | 'not_equals'
   | 'contains'
@@ -118,30 +118,30 @@ export type FilterOperator =
 export interface ActionConstraints {
   // Resource limits
   maxResources: number;
-  
+
   // Regional limits
   regions: string[];
-  
+
   // Time constraints
   timeWindow?: TimeWindow;
-  
+
   // Approval requirements
   requireApproval: boolean;
   approvalLevel?: 'user' | 'admin' | 'dual';
-  
+
   // Cost constraints
-  maxCostImpact?: number;  // USD
-  
+  maxCostImpact?: number; // USD
+
   // Simulation requirements
   simulationRequired?: boolean;
   simulationPeriodDays?: number;
-  
+
   // Dependencies
-  dependsOn?: string[];  // Other actions that must complete first
-  
+  dependsOn?: string[]; // Other actions that must complete first
+
   // Exclusions
-  excludeResources?: string[];  // Resource IDs to exclude
-  excludeTags?: Record<string, string>;  // Tags that exclude resources
+  excludeResources?: string[]; // Resource IDs to exclude
+  excludeTags?: Record<string, string>; // Tags that exclude resources
 }
 
 export interface TimeWindow {
@@ -149,7 +149,7 @@ export interface TimeWindow {
   timezone?: string;
   startHour?: number;
   endHour?: number;
-  daysOfWeek?: number[];  // 0-6, Sunday-Saturday
+  daysOfWeek?: number[]; // 0-6, Sunday-Saturday
 }
 
 // ============================================================================
@@ -159,16 +159,16 @@ export interface TimeWindow {
 export interface ExecutionConfig {
   // Pre-execution checks
   preChecks: PreCheck[];
-  
+
   // The actual action
   action: AWSAPIAction;
-  
+
   // Post-execution checks
   postChecks: PostCheck[];
-  
+
   // Rollback configuration
   rollback?: RollbackConfig;
-  
+
   // Retry configuration
   retry?: RetryConfig;
 }
@@ -179,7 +179,7 @@ export interface PreCheck {
   failAction: 'abort' | 'warn' | 'skip';
 }
 
-export type PreCheckType = 
+export type PreCheckType =
   | 'verify_backups'
   | 'check_dependencies'
   | 'verify_permissions'
@@ -191,10 +191,10 @@ export type PreCheckType =
 export interface PostCheck {
   type: PostCheckType;
   config?: Record<string, any>;
-  timeout?: number;  // seconds
+  timeout?: number; // seconds
 }
 
-export type PostCheckType = 
+export type PostCheckType =
   | 'verify_state'
   | 'verify_stopped'
   | 'verify_started'
@@ -204,9 +204,9 @@ export type PostCheckType =
   | 'custom';
 
 export interface AWSAPIAction {
-  operation: string;  // AWS API operation name
+  operation: string; // AWS API operation name
   parameters: Record<string, any>;
-  timeout?: number;  // seconds
+  timeout?: number; // seconds
 }
 
 export interface RollbackConfig {
@@ -214,7 +214,7 @@ export interface RollbackConfig {
   operation?: string;
   parameters?: Record<string, any>;
   autoRollbackOnError: boolean;
-  rollbackTimeout?: number;  // seconds
+  rollbackTimeout?: number; // seconds
 }
 
 export interface RetryConfig {
@@ -235,7 +235,7 @@ export interface AuditConfig {
   retentionDays?: number;
 }
 
-export type NotificationTarget = 
+export type NotificationTarget =
   | 'owner'
   | 'admin'
   | 'security_team'
@@ -251,15 +251,15 @@ export type NotificationTarget =
 export interface ParsedAction {
   // The validated DSL
   dsl: ActionDefinition;
-  
+
   // Cryptographic proof
-  hash: string;  // SHA-256 of DSL
-  signature?: string;  // For non-repudiation
-  
+  hash: string; // SHA-256 of DSL
+  signature?: string; // For non-repudiation
+
   // Version tracking
   dslVersion: DSLVersion;
   parsedAt: Date;
-  
+
   // Validation results
   validation: ValidationResult;
 }
@@ -290,23 +290,23 @@ export interface ExecutionPlan {
   planId: string;
   dslHash: string;
   dslVersion: DSLVersion;
-  
+
   // Steps to execute
   steps: ExecutionStep[];
-  
+
   // Summary
   summary: PlanSummary;
-  
+
   // Visualization
-  visualization?: string;  // Mermaid diagram
-  
+  visualization?: string; // Mermaid diagram
+
   // Rollback plan
   rollbackPlan?: ExecutionPlan;
-  
+
   // Timestamps
   createdAt: Date;
   expiresAt: Date;
-  
+
   // Approval status
   approval?: PlanApproval;
 }
@@ -314,32 +314,38 @@ export interface ExecutionPlan {
 export interface ExecutionStep {
   stepId: string;
   order: number;
-  
+
   // Action details
   service: string;
   action: string;
   description: string;
-  
+
   // Resources
   resources: string[];
-  
+
   // Impact assessment
   impact: StepImpact;
-  
+
   // API calls
   apiCalls: APICall[];
-  
+
   // Dependencies
-  dependsOn?: string[];  // Step IDs
-  
+  dependsOn?: string[]; // Step IDs
+
   // Status (for execution tracking)
-  status?: 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'rolled_back';
+  status?:
+    | 'pending'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'skipped'
+    | 'rolled_back';
   result?: StepResult;
 }
 
 export interface StepImpact {
   resourceCount: number;
-  costChange: number;  // USD (negative = savings)
+  costChange: number; // USD (negative = savings)
   reversible: boolean;
   downtime: boolean;
   dataLoss: boolean;
@@ -365,9 +371,9 @@ export interface StepResult {
 
 export interface PlanSummary {
   totalSteps: number;
-  estimatedDuration: number;  // seconds
-  estimatedCostImpact: number;  // USD
-  riskScore: number;  // 0-100
+  estimatedDuration: number; // seconds
+  estimatedCostImpact: number; // USD
+  riskScore: number; // 0-100
   resourcesAffected: number;
   servicesAffected: string[];
   requiresApproval: boolean;
@@ -389,20 +395,20 @@ export interface PlanApproval {
 export interface ParsedIntent {
   originalRequest: string;
   interpretedAction: string;
-  confidence: number;  // 0-1
-  
+  confidence: number; // 0-1
+
   // Extracted entities
   entities: IntentEntities;
-  
+
   // Risk assessment
   riskLevel: RiskLevel;
-  
+
   // Suggested DSL action
   suggestedAction?: string;
-  
+
   // Warnings
   warnings: string[];
-  
+
   // Blocked (if action is not allowed)
   blocked: boolean;
   blockReason?: string;
@@ -487,7 +493,7 @@ export const ALLOWED_ACTIONS: AllowedAction[] = [
       },
     },
   },
-  
+
   // S3 Actions
   {
     action: 's3.lifecycle',
@@ -517,7 +523,8 @@ export const ALLOWED_ACTIONS: AllowedAction[] = [
     template: {
       metadata: {
         name: 'Enable S3 Intelligent Tiering',
-        description: 'Enable intelligent tiering for automatic cost optimization',
+        description:
+          'Enable intelligent tiering for automatic cost optimization',
         category: 'configure',
         risk: 'low',
         reversible: true,
@@ -525,7 +532,7 @@ export const ALLOWED_ACTIONS: AllowedAction[] = [
       },
     },
   },
-  
+
   // RDS Actions
   {
     action: 'rds.stop',
@@ -599,7 +606,7 @@ export const ALLOWED_ACTIONS: AllowedAction[] = [
       },
     },
   },
-  
+
   // Lambda Actions
   {
     action: 'lambda.update_memory',

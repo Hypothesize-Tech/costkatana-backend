@@ -41,6 +41,29 @@ export class MongodbResultFormatterService {
   /**
    * Format as markdown table when documents have consistent keys.
    */
+  /**
+   * Format MCP tool result for chat display.
+   */
+  static formatForChat(result: {
+    content?: Array<{ type?: string; text?: string }>;
+    isError?: boolean;
+  }): { markdown?: string; data?: unknown } {
+    const texts = (result?.content ?? [])
+      .filter((c) => c?.type === 'text' && c?.text != null)
+      .map((c) => (c as { text: string }).text);
+    const joined = texts.join('\n');
+    let data: unknown;
+    try {
+      data = joined ? JSON.parse(joined) : null;
+    } catch {
+      data = joined;
+    }
+    return {
+      markdown: typeof data === 'string' ? data : joined,
+      data,
+    };
+  }
+
   formatAsMarkdownTable(docs: Record<string, unknown>[]): string {
     if (docs.length === 0) return '';
     const keys = Array.from(new Set(docs.flatMap((d) => Object.keys(d)))).slice(

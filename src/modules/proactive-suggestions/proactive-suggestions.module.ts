@@ -29,6 +29,7 @@ import { ProactiveSuggestionsController } from './proactive-suggestions.controll
 import { ProactiveSuggestionsService } from './services/proactive-suggestions.service';
 import { OptimizationFeedbackLoopService } from './services/optimization-feedback-loop.service';
 import { UsageModule } from '../usage/usage.module';
+import { SubscriptionModule } from '../subscription/subscription.module';
 import { CommonModule } from '../../common/common.module';
 import { AuthModule } from '../auth/auth.module';
 
@@ -47,6 +48,7 @@ import { AuthModule } from '../auth/auth.module';
       { name: ModelPerformance.name, schema: ModelPerformanceSchema },
     ]),
     UsageModule,
+    SubscriptionModule,
     CommonModule,
     AuthModule, // JwtService, User model, UserSessionService for JwtAuthGuard
   ],

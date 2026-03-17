@@ -23,36 +23,39 @@ export interface DetailedTokenBreakdown {
 }
 
 export class EnhancedTokenCounter {
-  private static readonly PROVIDER_TOKENIZERS: Record<string, {
-    charsPerToken: number;
-    wordsPerToken: number;
-    overhead: number;
-  }> = {
+  private static readonly PROVIDER_TOKENIZERS: Record<
+    string,
+    {
+      charsPerToken: number;
+      wordsPerToken: number;
+      overhead: number;
+    }
+  > = {
     [AIProvider.OpenAI]: {
       charsPerToken: 4.0,
       wordsPerToken: 0.75,
-      overhead: 3
+      overhead: 3,
     },
     [AIProvider.Anthropic]: {
       charsPerToken: 3.5,
       wordsPerToken: 0.8,
-      overhead: 2
+      overhead: 2,
     },
     [AIProvider.AWSBedrock]: {
       charsPerToken: 3.8,
       wordsPerToken: 0.78,
-      overhead: 2
+      overhead: 2,
     },
     [AIProvider.Google]: {
       charsPerToken: 4.2,
       wordsPerToken: 0.72,
-      overhead: 3
+      overhead: 3,
     },
     [AIProvider.Cohere]: {
       charsPerToken: 4.1,
       wordsPerToken: 0.73,
-      overhead: 3
-    }
+      overhead: 3,
+    },
   };
 
   static countTokens(
@@ -62,30 +65,42 @@ export class EnhancedTokenCounter {
     options: {
       includeOverhead?: boolean;
       estimateOutput?: boolean;
-    } = {}
+    } = {},
   ): TokenCountResult {
     if (!text || typeof text !== 'string') {
       return this.createEmptyResult(provider, model);
     }
 
-    const config = this.PROVIDER_TOKENIZERS[provider] || this.PROVIDER_TOKENIZERS[AIProvider.OpenAI];
-    
+    const config =
+      this.PROVIDER_TOKENIZERS[provider] ||
+      this.PROVIDER_TOKENIZERS[AIProvider.OpenAI];
+
     // Calculate base token count
     const charCount = text.length;
-    const wordCount = text.trim().split(/\s+/).filter(word => word.length > 0).length;
-    
+    const wordCount = text
+      .trim()
+      .split(/\s+/)
+      .filter((word) => word.length > 0).length;
+
     // Use provider-specific tokenization
     const estimatedTokens = Math.max(
       Math.ceil(charCount / config.charsPerToken),
-      Math.ceil(wordCount / config.wordsPerToken)
+      Math.ceil(wordCount / config.wordsPerToken),
     );
 
     // Add overhead if requested
-    const totalTokens = options.includeOverhead ? estimatedTokens + config.overhead : estimatedTokens;
-    
+    const totalTokens = options.includeOverhead
+      ? estimatedTokens + config.overhead
+      : estimatedTokens;
+
     // Estimate cost using dynamic pricing
-    const estimatedCost = this.estimateCost(totalTokens, provider, model, options.estimateOutput);
-    
+    const estimatedCost = this.estimateCost(
+      totalTokens,
+      provider,
+      model,
+      options.estimateOutput,
+    );
+
     // Determine confidence based on text characteristics
     const confidence = this.assessConfidence(text);
 
@@ -96,14 +111,14 @@ export class EnhancedTokenCounter {
       estimatedCost,
       provider,
       model,
-      confidence
+      confidence,
     };
   }
 
   static countConversationTokens(
     messages: Array<{ role: string; content: string }>,
     provider: AIProvider,
-    model: string
+    model: string,
   ): TokenCountResult {
     if (!messages || messages.length === 0) {
       return this.createEmptyResult(provider, model);
@@ -114,17 +129,26 @@ export class EnhancedTokenCounter {
     let totalWords = 0;
 
     for (const message of messages) {
-      const result = this.countTokens(message.content, provider, model, { includeOverhead: false });
+      const result = this.countTokens(message.content, provider, model, {
+        includeOverhead: false,
+      });
       totalTokens += result.tokens;
       totalChars += result.characters;
       totalWords += result.words;
     }
 
     // Add conversation overhead
-    const config = this.PROVIDER_TOKENIZERS[provider] || this.PROVIDER_TOKENIZERS[AIProvider.OpenAI];
+    const config =
+      this.PROVIDER_TOKENIZERS[provider] ||
+      this.PROVIDER_TOKENIZERS[AIProvider.OpenAI];
     totalTokens += config.overhead * messages.length;
 
-    const estimatedCost = this.estimateCost(totalTokens, provider, model, false);
+    const estimatedCost = this.estimateCost(
+      totalTokens,
+      provider,
+      model,
+      false,
+    );
 
     return {
       tokens: totalTokens,
@@ -133,7 +157,7 @@ export class EnhancedTokenCounter {
       estimatedCost,
       provider,
       model,
-      confidence: 'medium'
+      confidence: 'medium',
     };
   }
 
@@ -146,31 +170,53 @@ export class EnhancedTokenCounter {
       conversationHistory?: Array<{ role: string; content: string }>;
       toolCalls?: Array<{ name: string; arguments: string }>;
       metadata?: Record<string, any>;
-    } = {}
+    } = {},
   ): DetailedTokenBreakdown {
     const sections = {
-      system: this.countTokens(options.systemMessage || '', provider, model, { includeOverhead: true }),
-      user: this.countTokens(prompt, provider, model, { includeOverhead: true }),
-      history: this.countConversationTokens(options.conversationHistory || [], provider, model),
-      tools: this.countTokens(
-        (options.toolCalls || []).map(t => `${t.name}: ${t.arguments}`).join('\n'),
+      system: this.countTokens(options.systemMessage || '', provider, model, {
+        includeOverhead: true,
+      }),
+      user: this.countTokens(prompt, provider, model, {
+        includeOverhead: true,
+      }),
+      history: this.countConversationTokens(
+        options.conversationHistory || [],
         provider,
         model,
-        { includeOverhead: false }
+      ),
+      tools: this.countTokens(
+        (options.toolCalls || [])
+          .map((t) => `${t.name}: ${t.arguments}`)
+          .join('\n'),
+        provider,
+        model,
+        { includeOverhead: false },
       ),
       metadata: this.countTokens(
         options.metadata ? JSON.stringify(options.metadata) : '',
         provider,
         model,
-        { includeOverhead: false }
-      )
+        { includeOverhead: false },
+      ),
     };
 
     // Calculate totals
-    const totalTokens = Object.values(sections).reduce((sum, section) => sum + section.tokens, 0);
-    const totalChars = Object.values(sections).reduce((sum, section) => sum + section.characters, 0);
-    const totalWords = Object.values(sections).reduce((sum, section) => sum + section.words, 0);
-    const totalCost = Object.values(sections).reduce((sum, section) => sum + section.estimatedCost, 0);
+    const totalTokens = Object.values(sections).reduce(
+      (sum, section) => sum + section.tokens,
+      0,
+    );
+    const totalChars = Object.values(sections).reduce(
+      (sum, section) => sum + section.characters,
+      0,
+    );
+    const totalWords = Object.values(sections).reduce(
+      (sum, section) => sum + section.words,
+      0,
+    );
+    const totalCost = Object.values(sections).reduce(
+      (sum, section) => sum + section.estimatedCost,
+      0,
+    );
 
     const total: TokenCountResult = {
       tokens: totalTokens,
@@ -179,7 +225,7 @@ export class EnhancedTokenCounter {
       estimatedCost: totalCost,
       provider,
       model,
-      confidence: this.assessOverallConfidence(sections)
+      confidence: this.assessOverallConfidence(sections),
     };
 
     return { total, sections };
@@ -189,7 +235,7 @@ export class EnhancedTokenCounter {
     originalPrompt: string,
     optimizedPrompt: string,
     provider: AIProvider,
-    model: string
+    model: string,
   ): {
     originalTokens: number;
     optimizedTokens: number;
@@ -212,14 +258,14 @@ export class EnhancedTokenCounter {
       savedTokens,
       savingsPercentage,
       costSavings,
-      costSavingsPercentage
+      costSavingsPercentage,
     };
   }
 
   static detectTokenOptimizationOpportunities(
     text: string,
     provider: AIProvider,
-    model: string
+    model: string,
   ): Array<{
     type: 'redundancy' | 'verbosity' | 'structure' | 'formatting';
     description: string;
@@ -248,7 +294,7 @@ export class EnhancedTokenCounter {
         description: `Found ${redundantPhrases.length} redundant phrases`,
         estimatedSavings,
         confidence: 0.9,
-        suggestion: 'Remove or consolidate redundant phrases'
+        suggestion: 'Remove or consolidate redundant phrases',
       });
     }
 
@@ -261,7 +307,7 @@ export class EnhancedTokenCounter {
         description: `Found ${verbosePatterns.length} verbose expressions`,
         estimatedSavings,
         confidence: 0.8,
-        suggestion: 'Use more concise language'
+        suggestion: 'Use more concise language',
       });
     }
 
@@ -273,7 +319,7 @@ export class EnhancedTokenCounter {
         description: `Found ${structureIssues.length} structural inefficiencies`,
         estimatedSavings: structureIssues.length * 3,
         confidence: 0.7,
-        suggestion: 'Restructure for better clarity and efficiency'
+        suggestion: 'Restructure for better clarity and efficiency',
       });
     }
 
@@ -284,7 +330,7 @@ export class EnhancedTokenCounter {
     tokens: number,
     provider: AIProvider,
     model: string,
-    isOutput: boolean = false
+    isOutput: boolean = false,
   ): number {
     try {
       // Use the dynamic pricing system
@@ -294,10 +340,12 @@ export class EnhancedTokenCounter {
       // Fallback to modelPricing if available
       const modelPricing = getModelPricing(provider, model);
       if (modelPricing) {
-        const rate = isOutput ? modelPricing.outputPrice : modelPricing.inputPrice;
+        const rate = isOutput
+          ? modelPricing.outputPrice
+          : modelPricing.inputPrice;
         return (tokens / 1_000_000) * rate;
       }
-      
+
       // Final fallback - conservative estimate
       const baseCostPerToken = 0.0001;
       return tokens * baseCostPerToken;
@@ -307,33 +355,42 @@ export class EnhancedTokenCounter {
   private static assessConfidence(text: string): 'high' | 'medium' | 'low' {
     // High confidence for short, simple text
     if (text.length < 100) return 'high';
-    
+
     // Medium confidence for typical text
     if (text.length < 1000) return 'medium';
-    
+
     // Low confidence for very long or complex text
     if (text.length > 5000) return 'low';
-    
+
     // Check for special content that might affect tokenization
     const hasCode = /```[\s\S]*?```/.test(text);
     const hasJson = /\{[\s\S]*\}/.test(text);
     const hasUrls = /https?:\/\/[^\s]+/.test(text);
-    
+
     if (hasCode || hasJson || hasUrls) return 'medium';
-    
+
     return 'high';
   }
 
-  private static assessOverallConfidence(sections: any): 'high' | 'medium' | 'low' {
+  private static assessOverallConfidence(
+    sections: any,
+  ): 'high' | 'medium' | 'low' {
     const confidences = Object.values(sections).map((s: any) => s.confidence);
-    const avgConfidence = confidences.reduce((sum, c) => sum + (c === 'high' ? 1 : c === 'medium' ? 0.5 : 0), 0) / confidences.length;
-    
+    const avgConfidence =
+      confidences.reduce(
+        (sum, c) => sum + (c === 'high' ? 1 : c === 'medium' ? 0.5 : 0),
+        0,
+      ) / confidences.length;
+
     if (avgConfidence >= 0.8) return 'high';
     if (avgConfidence >= 0.5) return 'medium';
     return 'low';
   }
 
-  private static createEmptyResult(provider: AIProvider, model: string): TokenCountResult {
+  private static createEmptyResult(
+    provider: AIProvider,
+    model: string,
+  ): TokenCountResult {
     return {
       tokens: 0,
       characters: 0,
@@ -341,7 +398,7 @@ export class EnhancedTokenCounter {
       estimatedCost: 0,
       provider,
       model,
-      confidence: 'high'
+      confidence: 'high',
     };
   }
 
@@ -351,11 +408,11 @@ export class EnhancedTokenCounter {
       /(?:in order to|so as to)/gi,
       /(?:due to the fact that|because of the fact that)/gi,
       /(?:at this point in time|at the present time)/gi,
-      /(?:in the event that|if)/gi
+      /(?:in the event that|if)/gi,
     ];
 
     const found: string[] = [];
-    redundantPatterns.forEach(pattern => {
+    redundantPatterns.forEach((pattern) => {
       const matches = text.match(pattern);
       if (matches) {
         found.push(...matches);
@@ -370,11 +427,11 @@ export class EnhancedTokenCounter {
       /(?:I would like to|I want to)/gi,
       /(?:it is important to note that|it should be noted that)/gi,
       /(?:as you can see|as you may know)/gi,
-      /(?:in my opinion|I think that)/gi
+      /(?:in my opinion|I think that)/gi,
     ];
 
     const found: string[] = [];
-    verbosePatterns.forEach(pattern => {
+    verbosePatterns.forEach((pattern) => {
       const matches = text.match(pattern);
       if (matches) {
         found.push(...matches);
@@ -386,19 +443,21 @@ export class EnhancedTokenCounter {
 
   private static findStructureIssues(text: string): string[] {
     const issues: string[] = [];
-    
+
     // Check for excessive line breaks
     if ((text.match(/\n\n\n+/g) || []).length > 0) {
       issues.push('Excessive line breaks');
     }
-    
+
     // Check for repetitive punctuation
     if ((text.match(/[.!?]{3,}/g) || []).length > 0) {
       issues.push('Repetitive punctuation');
     }
-    
+
     // Check for inconsistent formatting
-    if ((text.match(/[A-Z][a-z]*\s+[A-Z][a-z]*\s+[A-Z][a-z]*/g) || []).length > 5) {
+    if (
+      (text.match(/[A-Z][a-z]*\s+[A-Z][a-z]*\s+[A-Z][a-z]*/g) || []).length > 5
+    ) {
       issues.push('Inconsistent capitalization');
     }
 

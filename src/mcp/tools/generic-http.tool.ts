@@ -3,12 +3,16 @@
  * Allows making HTTP requests with security controls
  */
 
+import { Types } from 'mongoose';
 import { createToolSchema, createParameter } from '../registry/tool-metadata';
 import { ToolRegistry } from '../registry/tool-registry';
 import { ToolExecutionContext } from '../types/tool-schema';
-import { createSuccessResponse, createErrorResponse } from '../types/standard-response';
+import {
+  createSuccessResponse,
+  createErrorResponse,
+} from '../types/standard-response';
 import { createMCPError } from '../utils/error-mapper';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 import { redisService } from '../../services/redis.service';
 
 export class GenericHTTPTool {
@@ -35,7 +39,7 @@ export class GenericHTTPTool {
       const hostname = urlObj.hostname;
 
       // Check against allowlist
-      return this.ALLOWED_DOMAINS.some(allowed => {
+      return this.ALLOWED_DOMAINS.some((allowed) => {
         if (allowed.startsWith('.')) {
           return hostname.endsWith(allowed);
         }
@@ -49,9 +53,11 @@ export class GenericHTTPTool {
   /**
    * Check rate limit for HTTP tool
    */
-  private static async checkRateLimit(userId: string): Promise<{ allowed: boolean; retryAfter?: number }> {
+  private static async checkRateLimit(
+    userId: string,
+  ): Promise<{ allowed: boolean; retryAfter?: number }> {
     const key = `ratelimit:http-tool:${userId}`;
-    
+
     try {
       const count = await redisService.incr(key);
 
@@ -84,11 +90,11 @@ export class GenericHTTPTool {
   private static async requestUserApproval(
     userId: string,
     url: string,
-    method: string
+    method: string,
   ): Promise<boolean> {
     // Check if URL is in allowlist first
     const allowed = this.isURLAllowed(url);
-    
+
     if (allowed) {
       loggingService.info('HTTP tool URL auto-approved (allowlist)', {
         userId,
@@ -99,10 +105,12 @@ export class GenericHTTPTool {
     }
 
     // For non-allowlisted URLs, create approval request
-    const { UserApprovalRequest } = await import('../../models/UserApprovalRequest');
-    
-    const approvalRequest = new UserApprovalRequest({
-      userId,
+    const { getUserApprovalRequestModel } =
+      await import('../../common/utils/get-mongoose-models');
+    const UserApprovalRequestModel = getUserApprovalRequestModel();
+
+    const approvalRequest = await UserApprovalRequestModel.create({
+      userId: new Types.ObjectId(userId),
       requestType: 'http_request',
       requestData: {
         url,
@@ -113,16 +121,20 @@ export class GenericHTTPTool {
       expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
     });
 
-    await approvalRequest.save();
+    const approvalId = approvalRequest._id?.toString() ?? '';
 
-    // Notify user via RealtimeUpdateService
-    const { RealtimeUpdateService } = await import('../../services/realtime-update.service');
-    RealtimeUpdateService.broadcastToUser(userId, {
-      type: 'mcp_approval_request',
-      message: `Approve HTTP ${method} request to ${url}?`,
-      approvalId: (approvalRequest._id as any).toString(),
-      requestType: 'http_request',
-    });
+    // Notify user via RealtimeUpdateService when available (Nest DI context)
+    try {
+      const { getRealtimeUpdateService } =
+        await import('../../modules/usage/services/realtime-update.service');
+      await getRealtimeUpdateService().broadcastToUser(userId, 'mcp_approval_request', {
+        message: `Approve HTTP ${method} request to ${url}?`,
+        approvalId,
+        requestType: 'http_request',
+      });
+    } catch {
+      // RealtimeUpdateService may not be initialized; approval flow continues via polling
+    }
 
     // Wait for approval with timeout
     const timeoutMs = 5 * 60 * 1000; // 5 minutes
@@ -130,9 +142,9 @@ export class GenericHTTPTool {
     const maxPolls = timeoutMs / pollInterval;
 
     for (let i = 0; i < maxPolls; i++) {
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
-      
-      const updated = await UserApprovalRequest.findById(approvalRequest._id);
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+
+      const updated = await UserApprovalRequestModel.findById(approvalRequest._id);
       if (!updated) {
         break;
       }
@@ -142,7 +154,7 @@ export class GenericHTTPTool {
           userId,
           url,
           method,
-          approvalId: (approvalRequest._id as any).toString(),
+          approvalId,
         });
         return true;
       }
@@ -152,14 +164,14 @@ export class GenericHTTPTool {
           userId,
           url,
           method,
-          approvalId: (approvalRequest._id as any).toString(),
+          approvalId,
         });
         return false;
       }
     }
 
     // Timeout - mark as expired and deny
-    await UserApprovalRequest.findByIdAndUpdate(approvalRequest._id, {
+    await UserApprovalRequestModel.findByIdAndUpdate(approvalRequest._id, {
       status: 'expired',
     });
 
@@ -167,7 +179,7 @@ export class GenericHTTPTool {
       userId,
       url,
       method,
-      approvalId: (approvalRequest._id as any).toString(),
+      approvalId,
     });
 
     return false;
@@ -176,7 +188,9 @@ export class GenericHTTPTool {
   /**
    * Validate and sanitize headers
    */
-  private static sanitizeHeaders(headers?: Record<string, string>): Record<string, string> {
+  private static sanitizeHeaders(
+    headers?: Record<string, string>,
+  ): Record<string, string> {
     if (!headers) {
       return {};
     }
@@ -210,15 +224,26 @@ export class GenericHTTPTool {
             enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
           }),
           createParameter('url', 'string', 'Target URL', { required: true }),
-          createParameter('headers', 'object', 'Request headers', { required: false }),
-          createParameter('body', 'object', 'Request body (for POST/PUT/PATCH)', { required: false }),
-          createParameter('params', 'object', 'Query parameters', { required: false }),
-          createParameter('auth', 'object', 'Authentication config', { required: false }),
+          createParameter('headers', 'object', 'Request headers', {
+            required: false,
+          }),
+          createParameter(
+            'body',
+            'object',
+            'Request body (for POST/PUT/PATCH)',
+            { required: false },
+          ),
+          createParameter('params', 'object', 'Query parameters', {
+            required: false,
+          }),
+          createParameter('auth', 'object', 'Authentication config', {
+            required: false,
+          }),
         ],
         {
           requiredScopes: [],
           dangerous: false,
-        }
+        },
       ),
       async (params, context: ToolExecutionContext) => {
         const startTime = Date.now();
@@ -240,7 +265,7 @@ export class GenericHTTPTool {
                 permissionChecked: true,
                 dangerousOperation: false,
                 userId: context.userId,
-              }
+              },
             );
           }
 
@@ -262,7 +287,7 @@ export class GenericHTTPTool {
                 permissionChecked: true,
                 dangerousOperation: false,
                 userId: context.userId,
-              }
+              },
             );
           }
 
@@ -270,7 +295,7 @@ export class GenericHTTPTool {
           const approved = await this.requestUserApproval(
             context.userId,
             params.url,
-            params.method
+            params.method,
           );
 
           if (!approved) {
@@ -288,7 +313,7 @@ export class GenericHTTPTool {
                 permissionChecked: true,
                 dangerousOperation: false,
                 userId: context.userId,
-              }
+              },
             );
           }
 
@@ -350,7 +375,7 @@ export class GenericHTTPTool {
               permissionChecked: true,
               dangerousOperation: false,
               userId: context.userId,
-            }
+            },
           );
         } catch (error: any) {
           loggingService.error('HTTP tool request failed', {
@@ -361,24 +386,21 @@ export class GenericHTTPTool {
             status: error.response?.status,
           });
 
-          return createErrorResponse(
-            createMCPError(error),
-            {
-              integration: 'github',
-              operation: 'http_request',
-              latency: Date.now() - startTime,
-              httpMethod: 'POST',
-              permissionChecked: true,
-              dangerousOperation: false,
-              userId: context.userId,
-            }
-          );
+          return createErrorResponse(createMCPError(error), {
+            integration: 'github',
+            operation: 'http_request',
+            latency: Date.now() - startTime,
+            httpMethod: 'POST',
+            permissionChecked: true,
+            dangerousOperation: false,
+            userId: context.userId,
+          });
         }
       },
       {
         enabled: true,
         rateLimitOverride: this.RATE_LIMIT_PER_HOUR,
-      }
+      },
     );
 
     loggingService.info('Generic HTTP tool registered');
@@ -401,7 +423,9 @@ export class GenericHTTPTool {
     const index = this.ALLOWED_DOMAINS.indexOf(domain);
     if (index > -1) {
       this.ALLOWED_DOMAINS.splice(index, 1);
-      loggingService.info('Domain removed from HTTP tool allowlist', { domain });
+      loggingService.info('Domain removed from HTTP tool allowlist', {
+        domain,
+      });
       return true;
     }
     return false;

@@ -8,6 +8,7 @@ import {
 } from '../../../schemas/analytics/proactive-suggestion.schema';
 import { RealtimeUpdateService } from '../../usage/services/realtime-update.service';
 import { CacheService } from '../../../common/cache/cache.service';
+import { SubscriptionService } from '../../subscription/subscription.service';
 import { OptimizationFeedbackLoopService } from './optimization-feedback-loop.service';
 
 export interface CostSavingSuggestion {
@@ -81,6 +82,7 @@ export class ProactiveSuggestionsService {
     private proactiveSuggestionModel: Model<ProactiveSuggestionDocument>,
     private realtimeUpdateService: RealtimeUpdateService,
     private cacheService: CacheService,
+    private subscriptionService: SubscriptionService,
     private optimizationFeedbackLoop: OptimizationFeedbackLoopService,
   ) {}
 
@@ -604,9 +606,10 @@ export class ProactiveSuggestionsService {
       });
       try {
         const details = suggestion.details ?? {};
-        const contextData = this.deriveContextFromSuggestion(
+        const contextData = await this.deriveContextFromSuggestion(
           suggestion,
           details,
+          userId,
         );
         await this.optimizationFeedbackLoop.learnFromUserAction(
           userId,
@@ -614,14 +617,15 @@ export class ProactiveSuggestionsService {
           contextData as import('./optimization-feedback-loop.service').UserContext,
         );
         if (suggestion.id) {
-          const contextData = this.deriveContextFromSuggestion(
+          const contextDataForOutcome = await this.deriveContextFromSuggestion(
             suggestion,
             details,
+            userId,
           );
           await this.optimizationFeedbackLoop.recordOptimizationOutcome(
             suggestion.id,
             userId,
-            contextData as import('./optimization-feedback-loop.service').UserContext,
+            contextDataForOutcome as import('./optimization-feedback-loop.service').UserContext,
             (details.currentModel as string) ?? 'unknown',
             (details.suggestedModel as string) ?? 'unknown',
             {
@@ -687,9 +691,10 @@ export class ProactiveSuggestionsService {
       });
       try {
         const details = suggestion.details ?? {};
-        const contextData = this.deriveContextFromSuggestion(
+        const contextData = await this.deriveContextFromSuggestion(
           suggestion,
           details,
+          userId,
         );
         await this.optimizationFeedbackLoop.learnFromUserAction(
           userId,
@@ -737,24 +742,25 @@ export class ProactiveSuggestionsService {
   /**
    * Derive context data from suggestion for learning
    */
-  private deriveContextFromSuggestion(
+  private async deriveContextFromSuggestion(
     suggestion: any,
     details: any,
-  ): {
+    userId: string,
+  ): Promise<{
     promptComplexity: number;
     userTier: string;
     costBudget: string;
     taskType: string;
     promptLength: number;
-  } {
+  }> {
     // Derive prompt complexity from suggestion type and potential savings
     const promptComplexity = this.calculatePromptComplexity(
       suggestion,
       details,
     );
 
-    // Derive user tier from suggestion details (would need actual user data in production)
-    const userTier = this.deriveUserTier(details);
+    // Get user tier from actual subscription data
+    const userTier = await this.deriveUserTier(userId);
 
     // Derive cost budget from potential savings
     const costBudget = this.deriveCostBudget(suggestion.potentialSavings || 0);
@@ -800,22 +806,20 @@ export class ProactiveSuggestionsService {
     return Math.min(100, Math.max(0, complexity));
   }
 
-  private deriveUserTier(details: any): string {
-    // In production, this would check actual user subscription data
-    // For now, derive from context clues
-    if (
-      details?.currentModel?.includes('claude') ||
-      details?.suggestedModel?.includes('claude')
-    ) {
-      return 'premium';
+  private async deriveUserTier(userId: string): Promise<string> {
+    try {
+      const subscription =
+        await this.subscriptionService.getSubscriptionByUserId(userId);
+      if (subscription?.plan) {
+        return subscription.plan; // e.g. 'free', 'basic', 'pro', 'premium'
+      }
+    } catch (error) {
+      this.logger.warn('Failed to get user subscription for tier', {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
-    if (
-      details?.costBudget === 'high' ||
-      (details?.currentModel && details.currentModel.includes('gpt-4'))
-    ) {
-      return 'pro';
-    }
-    return 'basic';
+    return 'basic'; // Fallback when subscription unavailable
   }
 
   private deriveCostBudget(potentialSavings: number): string {

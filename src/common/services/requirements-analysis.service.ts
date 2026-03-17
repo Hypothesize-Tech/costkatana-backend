@@ -1,5 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
-import { BedrockService } from '../../services/bedrock.service';
+import { BedrockService } from '../../modules/bedrock/bedrock.service';
 
 export interface IntentAnalysis {
   intent:
@@ -106,11 +106,13 @@ Respond with this exact JSON structure:
   "riskLevel": "low" | "medium" | "high"
 }`;
 
-    const response = await this.bedrockService!.invoke([
-      { role: 'user', content: prompt },
-    ]);
+    const response = await BedrockService.invokeModel(
+      prompt,
+      'amazon.nova-pro-v1:0',
+      { useSystemPrompt: false },
+    );
 
-    const text = response.content.trim();
+    const text = (typeof response === 'string' ? response : '').trim();
 
     // Extract JSON from response (handle cases where model wraps in markdown)
     const jsonMatch = text.match(/\{[\s\S]*\}/);

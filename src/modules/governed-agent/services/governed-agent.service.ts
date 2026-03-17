@@ -6,7 +6,6 @@ import {
   AgentMode,
   ScopeAnalysis,
   ExecutionProgress,
-  VerificationResult,
   TaskClassification,
 } from '../interfaces/governed-agent.interfaces';
 import {
@@ -35,7 +34,7 @@ import { IntegrationOrchestratorService } from './integration-orchestrator.servi
 import { UniversalVerificationService } from './universal-verification.service';
 import { FileByFileCodeGeneratorService } from './file-by-file-code-generator.service';
 import { PostDeploymentManagerService } from './post-deployment-manager.service';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { ChatEventsService } from '../../chat/services/chat-events.service';
 
 @Injectable()
@@ -2313,8 +2312,10 @@ If the request is clear and has sufficient details, return {"needsClarification"
         { useSystemPrompt: false },
       );
 
-      // Parse response
-      const cleaned = invokeResult.response
+      // Parse response (invokeModel returns string directly)
+      const rawResponse =
+        typeof invokeResult === 'string' ? invokeResult : String(invokeResult);
+      const cleaned = rawResponse
         .trim()
         .replace(/```json\n?/g, '')
         .replace(/```\n?/g, '')
@@ -2532,7 +2533,7 @@ Provide a helpful, accurate answer based on the task context. Be concise but inf
         { recentMessages: [{ role: 'user', content: prompt }] },
       );
 
-      return result.response.trim();
+      return (typeof result === 'string' ? result : '').trim();
     } catch (error) {
       this.logger.error('Failed to answer question about plan', {
         component: 'GovernedAgentService',
@@ -2607,28 +2608,6 @@ Provide a helpful, accurate answer based on the task context. Be concise but inf
       });
       throw error;
     }
-  }
-
-  /**
-   * Select optimal AI model based on task complexity and type
-   */
-  private selectModelForTask(task: GovernedTask): string {
-    const complexity = task.classification?.complexity;
-    const riskLevel = task.classification?.riskLevel;
-    const type = task.classification?.type;
-
-    // Coding/High Complexity/High Risk → Use Claude Sonnet 4.5 (best for production code & deep reasoning)
-    if (type === 'coding' || complexity === 'high' || riskLevel === 'high') {
-      return 'global.anthropic.claude-sonnet-4-5-20250929-v1:0';
-    }
-
-    // Medium complexity tasks → Use Claude Sonnet 4 (balanced performance)
-    if (complexity === 'medium' || riskLevel === 'medium') {
-      return 'global.anthropic.claude-sonnet-4-20250514-v1:0';
-    }
-
-    // Low complexity or simple tasks → Use Claude Haiku 4.5 (fastest, cost-optimized)
-    return 'global.anthropic.claude-haiku-4-5-20251001-v1:0';
   }
 
   /**

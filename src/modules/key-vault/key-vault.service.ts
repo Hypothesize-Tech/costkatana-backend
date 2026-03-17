@@ -40,6 +40,15 @@ export interface CreateProxyKeyRequest {
   expiresAt?: Date;
 }
 
+let keyVaultServiceInstance: KeyVaultService | null = null;
+
+export function getKeyVaultService(): KeyVaultService {
+  if (!keyVaultServiceInstance) {
+    throw new Error('KeyVaultService not initialized. Ensure KeyVaultModule is imported.');
+  }
+  return keyVaultServiceInstance;
+}
+
 @Injectable()
 export class KeyVaultService {
   private readonly logger = new Logger(KeyVaultService.name);
@@ -49,7 +58,9 @@ export class KeyVaultService {
     @InjectModel(ProviderKey.name) private providerKeyModel: Model<ProviderKey>,
     @InjectModel(Project.name) private projectModel: Model<Project>,
     private readonly configService: ConfigService,
-  ) {}
+  ) {
+    keyVaultServiceInstance = this;
+  }
 
   /**
    * Create a new provider key in the vault
@@ -474,31 +485,36 @@ export class KeyVaultService {
   }> {
     const userIdObj = new Types.ObjectId(userId);
 
-    const [providerKeysRaw, proxyKeysRaw, proxyAnalyticsResult] = await Promise.all([
-      this.providerKeyModel
-        .find({ userId: userIdObj })
-        .select('_id name provider maskedKey description isActive createdAt lastUsed')
-        .sort({ createdAt: -1 })
-        .lean()
-        .exec(),
-      this.getProxyKeys(userId),
-      this.proxyKeyModel.aggregate([
-        { $match: { userId: userIdObj } },
-        {
-          $group: {
-            _id: null,
-            totalKeys: { $sum: 1 },
-            activeKeys: { $sum: { $cond: ['$isActive', 1, 0] } },
-            totalRequests: { $sum: '$usageStats.totalRequests' },
-            totalCost: { $sum: '$usageStats.totalCost' },
-            dailyCost: { $sum: '$usageStats.dailyCost' },
-            monthlyCost: { $sum: '$usageStats.monthlyCost' },
+    const [providerKeysRaw, proxyKeysRaw, proxyAnalyticsResult] =
+      await Promise.all([
+        this.providerKeyModel
+          .find({ userId: userIdObj })
+          .select(
+            '_id name provider maskedKey description isActive createdAt lastUsed',
+          )
+          .sort({ createdAt: -1 })
+          .lean()
+          .exec(),
+        this.getProxyKeys(userId),
+        this.proxyKeyModel.aggregate([
+          { $match: { userId: userIdObj } },
+          {
+            $group: {
+              _id: null,
+              totalKeys: { $sum: 1 },
+              activeKeys: { $sum: { $cond: ['$isActive', 1, 0] } },
+              totalRequests: { $sum: '$usageStats.totalRequests' },
+              totalCost: { $sum: '$usageStats.totalCost' },
+              dailyCost: { $sum: '$usageStats.dailyCost' },
+              monthlyCost: { $sum: '$usageStats.monthlyCost' },
+            },
           },
-        },
-      ]),
-    ]);
+        ]),
+      ]);
 
-    const providerKeysList = (providerKeysRaw ?? []) as Array<Record<string, unknown>>;
+    const providerKeysList = (providerKeysRaw ?? []) as Array<
+      Record<string, unknown>
+    >;
     const totalProviderKeys = providerKeysList.length;
     const totalActiveProviderKeys = providerKeysList.filter(
       (pk) => pk.isActive === true,
@@ -507,7 +523,9 @@ export class KeyVaultService {
     // Map proxy keys: frontend expects providerKey as array, Mongoose populate returns providerKeyId as object
     const proxyKeys = (proxyKeysRaw ?? []).map((pk) => {
       const doc = pk as unknown as Record<string, unknown>;
-      const providerKeyObj = doc.providerKeyId as Record<string, unknown> | undefined;
+      const providerKeyObj = doc.providerKeyId as
+        | Record<string, unknown>
+        | undefined;
       return {
         ...doc,
         providerKey: providerKeyObj ? [providerKeyObj] : [],
@@ -595,7 +613,10 @@ export class KeyVaultService {
     const start = apiKey.slice(0, 4);
     const end = apiKey.slice(-4);
     // Use reasonable mask length (8-12 chars) to prevent layout overflow
-    const middleLen = Math.min(12, Math.max(4, Math.min(apiKey.length - 8, 12)));
+    const middleLen = Math.min(
+      12,
+      Math.max(4, Math.min(apiKey.length - 8, 12)),
+    );
     const middle = '*'.repeat(middleLen);
     return `${start}${middle}${end}`;
   }

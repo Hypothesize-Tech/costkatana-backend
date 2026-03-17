@@ -266,7 +266,9 @@ export class SlackService {
   async listUsers(
     accessToken: string,
     options?: { limit?: number },
-  ): Promise<Array<{ id: string; name: string; real_name?: string; email?: string }>> {
+  ): Promise<
+    Array<{ id: string; name: string; real_name?: string; email?: string }>
+  > {
     const limit = options?.limit ?? 100;
     const { data } = await firstValueFrom(
       this.httpService.get(`${SlackService.SLACK_API_BASE}/users.list`, {
@@ -280,12 +282,19 @@ export class SlackService {
     const members = data.members ?? [];
     return members
       .filter((m: { deleted?: boolean; is_bot?: boolean }) => !m.deleted)
-      .map((m: { id: string; name: string; real_name?: string; profile?: { email?: string } }) => ({
-        id: m.id,
-        name: m.name,
-        real_name: m.real_name,
-        email: m.profile?.email,
-      }));
+      .map(
+        (m: {
+          id: string;
+          name: string;
+          real_name?: string;
+          profile?: { email?: string };
+        }) => ({
+          id: m.id,
+          name: m.name,
+          real_name: m.real_name,
+          email: m.profile?.email,
+        }),
+      );
   }
 
   async testIntegration(

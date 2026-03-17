@@ -1,6 +1,6 @@
 /**
  * Integration Agent Types
- * 
+ *
  * Type definitions for the AI-powered Integration Agent that handles
  * parameter extraction, validation, and interactive selection UI.
  */
@@ -59,12 +59,12 @@ export interface IntegrationAgentResponse {
   data?: Record<string, unknown>;
   /** Error message if operation failed */
   error?: string;
-  
+
   /** Whether the agent needs user selection for missing params */
   requiresSelection?: boolean;
   /** Selection data for interactive UI */
   selection?: IntegrationSelection;
-  
+
   /** Metadata about the operation */
   metadata?: {
     integration: string;
@@ -96,7 +96,7 @@ export interface IntegrationAgentRequest {
 /**
  * Supported integration types
  */
-export type IntegrationType = 
+export type IntegrationType =
   | 'vercel'
   | 'gmail'
   | 'slack'
@@ -114,7 +114,7 @@ export type IntegrationType =
  * Action types for each integration
  */
 export interface IntegrationActions {
-  vercel: 
+  vercel:
     | 'list_projects'
     | 'list_deployments'
     | 'get_logs'
@@ -124,18 +124,11 @@ export interface IntegrationActions {
     | 'deploy'
     | 'rollback'
     | 'get_project';
-  
-  gmail:
-    | 'send'
-    | 'list'
-    | 'search';
-  
-  slack:
-    | 'send_message'
-    | 'list_channels'
-    | 'list_users'
-    | 'create_channel';
-  
+
+  gmail: 'send' | 'list' | 'search';
+
+  slack: 'send_message' | 'list_channels' | 'list_users' | 'create_channel';
+
   discord:
     | 'send_message'
     | 'list_channels'
@@ -143,7 +136,7 @@ export interface IntegrationActions {
     | 'ban_user'
     | 'kick_user'
     | 'create_channel';
-  
+
   jira:
     | 'create_issue'
     | 'list_issues'
@@ -151,7 +144,7 @@ export interface IntegrationActions {
     | 'update_issue'
     | 'add_comment'
     | 'list_projects';
-  
+
   linear:
     | 'create_issue'
     | 'list_issues'
@@ -159,7 +152,7 @@ export interface IntegrationActions {
     | 'update_issue'
     | 'list_teams'
     | 'list_projects';
-  
+
   github:
     | 'list_repos'
     | 'create_issue'
@@ -168,28 +161,14 @@ export interface IntegrationActions {
     | 'list_prs'
     | 'list_branches'
     | 'create_branch';
-  
-  drive:
-    | 'list'
-    | 'search'
-    | 'upload'
-    | 'create_folder'
-    | 'share';
-  
-  sheets:
-    | 'list'
-    | 'export';
-  
-  gdocs:
-    | 'list'
-    | 'read'
-    | 'create';
-  
-  calendar:
-    | 'list'
-    | 'create'
-    | 'update'
-    | 'delete';
+
+  drive: 'list' | 'search' | 'upload' | 'create_folder' | 'share';
+
+  sheets: 'list' | 'export';
+
+  gdocs: 'list' | 'read' | 'create';
+
+  calendar: 'list' | 'create' | 'update' | 'delete';
 }
 
 /**

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { LoggerService } from '../../../common/logger/logger.service';
 import { GoogleSearchService } from '../../utils/services/google-search.service';
 import { RiskAssessorService } from './risk-assessor.service';
@@ -323,8 +323,12 @@ Integrations: ${classification.integrations.join(', ')}
 
 Provide a concise synthesis of the most relevant findings, best practices, and recommendations. Focus on practical, actionable insights.`;
 
-      const synthesis = await this.bedrockService.invokeModel(synthesisPrompt);
-      return synthesis.response || 'Unable to synthesize research findings.';
+      const synthesis = await BedrockService.invokeModel(
+        synthesisPrompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
+      return synthesis || 'Unable to synthesize research findings.';
     } catch (error) {
       this.logger.warn('Failed to synthesize research findings', { error });
       return `Research completed with ${searchResults.length} sources found. Key insights include best practices, documentation, and community solutions.`;
@@ -355,8 +359,12 @@ Focus on:
 
 Respond with a JSON array of strings, each being a concise, actionable finding.`;
 
-      const response = await this.bedrockService.invokeModel(findingsPrompt);
-      const content = response.response || '[]';
+      const response = await BedrockService.invokeModel(
+        findingsPrompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
+      const content = response || '[]';
 
       try {
         const findings = JSON.parse(content.replace(/```json\n?|\n?```/g, ''));
@@ -426,7 +434,9 @@ Respond with a JSON object containing:
       let researchData;
       try {
         researchData = JSON.parse(
-          typeof aiResponse === 'string' ? aiResponse : aiResponse.response,
+          typeof aiResponse === 'string'
+            ? aiResponse
+            : (aiResponse as { response?: string })?.response ?? '{}',
         );
       } catch {
         researchData = {
@@ -514,7 +524,7 @@ Respond with JSON array of strings:
         'amazon.nova-lite-v1:0',
         { useSystemPrompt: false },
       );
-      const response = result.response;
+      const response = typeof result === 'string' ? result : '';
 
       // Parse the response
       try {
@@ -617,10 +627,10 @@ Respond in JSON:
 
       const result = await BedrockService.invokeModel(
         prompt,
-        'amazon.nova-pro-v1:0',
+        'us.anthropic.claude-sonnet-4-6',
         { useSystemPrompt: false },
       );
-      const response = result.response;
+      const response = typeof result === 'string' ? result : '';
 
       // Parse AI response
       try {
@@ -762,10 +772,10 @@ Respond in JSON:
 
       const result = await BedrockService.invokeModel(
         prompt,
-        'amazon.nova-pro-v1:0',
+        'us.anthropic.claude-sonnet-4-6',
         { useSystemPrompt: false },
       );
-      const response = result.response;
+      const response = typeof result === 'string' ? result : '';
 
       try {
         const cleaned = response
@@ -995,10 +1005,10 @@ No markdown, no explanation.`;
 
       const result = await BedrockService.invokeModel(
         prompt,
-        'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+        'us.anthropic.claude-sonnet-4-6',
         { useSystemPrompt: false },
       );
-      const response = result.response;
+      const response = typeof result === 'string' ? result : '';
 
       try {
         let cleaned = response

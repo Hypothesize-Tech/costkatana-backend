@@ -12,15 +12,15 @@ import { BaseMessage } from '@langchain/core/messages';
 
 export type RAGPatternType = 'naive' | 'adaptive' | 'iterative' | 'recursive';
 
-export type RAGModuleType = 
-  | 'routing' 
-  | 'retrieve' 
-  | 'rewrite' 
-  | 'rerank' 
-  | 'read' 
-  | 'predict' 
-  | 'fusion' 
-  | 'demonstrate' 
+export type RAGModuleType =
+  | 'routing'
+  | 'retrieve'
+  | 'rewrite'
+  | 'rerank'
+  | 'read'
+  | 'predict'
+  | 'fusion'
+  | 'demonstrate'
   | 'memory';
 
 // ============================================================================
@@ -302,17 +302,17 @@ export interface EvaluationMetrics {
 export interface IRAGModule {
   name: string;
   type: RAGModuleType;
-  
+
   /**
    * Execute the module's core functionality
    */
   execute(input: RAGModuleInput): Promise<RAGModuleOutput>;
-  
+
   /**
    * Validate module configuration
    */
   validateConfig(): boolean;
-  
+
   /**
    * Get module metadata
    */
@@ -336,12 +336,12 @@ export interface IRAGPattern {
   name: string;
   type: RAGPatternType;
   config: RAGConfig;
-  
+
   /**
    * Execute the pattern with given query and context
    */
   execute(query: string, context: RAGContext): Promise<RAGResult>;
-  
+
   /**
    * Get pattern description
    */
@@ -410,7 +410,7 @@ export class RAGModuleError extends Error {
     public moduleName: string,
     public moduleType: RAGModuleType,
     message: string,
-    public originalError?: Error
+    public originalError?: Error,
   ) {
     super(`[${moduleName}] ${message}`);
     this.name = 'RAGModuleError';
@@ -421,7 +421,7 @@ export class RAGPatternError extends Error {
   constructor(
     public patternType: RAGPatternType,
     message: string,
-    public originalError?: Error
+    public originalError?: Error,
   ) {
     super(`[${patternType}] ${message}`);
     this.name = 'RAGPatternError';
@@ -432,8 +432,4 @@ export class RAGPatternError extends Error {
 // Export all types
 // ============================================================================
 
-export type {
-  Document,
-  BaseMessage,
-};
-
+export type { Document, BaseMessage };

@@ -1,9 +1,9 @@
 import { SpanProcessor, ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { SpanExporter } from '@opentelemetry/sdk-trace-base';
 import { Context } from '@opentelemetry/api';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 import { redisService } from '../services/redis.service';
-import { otelEnricherService } from '../services/otelEnricher.service';
+import { getOtelEnricherService } from '../common/services/otel-enricher.service';
 
 interface BufferedSpan {
   span: ReadableSpan;
@@ -22,49 +22,58 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
   private exportTimer?: NodeJS.Timeout;
 
   constructor(exporter: SpanExporter) {
-    loggingService.info('=== SELF-HEALING SPAN PROCESSOR CONSTRUCTOR STARTED ===', {
-      component: 'SelfHealingSpanProcessor',
-      operation: 'constructor',
-      type: 'span_processor_initialization',
-      step: 'started'
-    });
+    loggingService.info(
+      '=== SELF-HEALING SPAN PROCESSOR CONSTRUCTOR STARTED ===',
+      {
+        component: 'SelfHealingSpanProcessor',
+        operation: 'constructor',
+        type: 'span_processor_initialization',
+        step: 'started',
+      },
+    );
 
     this.exporter = exporter;
-    
+
     loggingService.info('Step 1: Starting export timer', {
       component: 'SelfHealingSpanProcessor',
       operation: 'constructor',
       type: 'span_processor_initialization',
-      step: 'start_export_timer'
+      step: 'start_export_timer',
     });
 
     this.startExportTimer();
-    
+
     loggingService.info('Step 2: Loading buffer from Redis', {
       component: 'SelfHealingSpanProcessor',
       operation: 'constructor',
       type: 'span_processor_initialization',
-      step: 'load_redis_buffer'
+      step: 'load_redis_buffer',
     });
 
     this.loadBufferFromRedis();
 
-    loggingService.info('Self-Healing Span Processor initialized successfully', {
-      component: 'SelfHealingSpanProcessor',
-      operation: 'constructor',
-      type: 'span_processor_initialization',
-      step: 'completed',
-      maxBufferSize: this.maxBufferSize,
-      maxRetries: this.maxRetries,
-      exportInterval: `${this.exportInterval}ms`
-    });
+    loggingService.info(
+      'Self-Healing Span Processor initialized successfully',
+      {
+        component: 'SelfHealingSpanProcessor',
+        operation: 'constructor',
+        type: 'span_processor_initialization',
+        step: 'completed',
+        maxBufferSize: this.maxBufferSize,
+        maxRetries: this.maxRetries,
+        exportInterval: `${this.exportInterval}ms`,
+      },
+    );
 
-    loggingService.info('=== SELF-HEALING SPAN PROCESSOR CONSTRUCTOR COMPLETED ===', {
-      component: 'SelfHealingSpanProcessor',
-      operation: 'constructor',
-      type: 'span_processor_initialization',
-      step: 'completed'
-    });
+    loggingService.info(
+      '=== SELF-HEALING SPAN PROCESSOR CONSTRUCTOR COMPLETED ===',
+      {
+        component: 'SelfHealingSpanProcessor',
+        operation: 'constructor',
+        type: 'span_processor_initialization',
+        step: 'completed',
+      },
+    );
   }
 
   /**
@@ -72,7 +81,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
    */
   onStart(span: ReadableSpan, parentContext: Context): void {
     const startTime = Date.now();
-    
+
     loggingService.debug('=== SPAN START PROCESSING STARTED ===', {
       component: 'SelfHealingSpanProcessor',
       operation: 'onStart',
@@ -80,7 +89,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       step: 'started',
       spanId: span.spanContext().spanId,
       traceId: span.spanContext().traceId,
-      spanName: span.name
+      spanName: span.name,
     });
 
     // Auto-enrich span with AI-inferred attributes
@@ -92,7 +101,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       type: 'span_processing',
       step: 'completed',
       spanId: span.spanContext().spanId,
-      totalTime: `${Date.now() - startTime}ms`
+      totalTime: `${Date.now() - startTime}ms`,
     });
   }
 
@@ -101,7 +110,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
    */
   onEnd(span: ReadableSpan): void {
     const startTime = Date.now();
-    
+
     loggingService.debug('=== SPAN END PROCESSING STARTED ===', {
       component: 'SelfHealingSpanProcessor',
       operation: 'onEnd',
@@ -109,7 +118,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       step: 'started',
       spanId: span.spanContext().spanId,
       traceId: span.spanContext().traceId,
-      spanName: span.name
+      spanName: span.name,
     });
 
     try {
@@ -119,19 +128,19 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         type: 'span_processing',
         step: 'add_to_buffer',
         spanId: span.spanContext().spanId,
-        currentBufferSize: this.buffer.length
+        currentBufferSize: this.buffer.length,
       });
 
       // Add to buffer for resilient export
       this.addToBuffer(span);
-      
+
       loggingService.debug('Step 2: Checking export status', {
         component: 'SelfHealingSpanProcessor',
         operation: 'onEnd',
         type: 'span_processing',
         step: 'check_export_status',
         spanId: span.spanContext().spanId,
-        isExporting: this.isExporting
+        isExporting: this.isExporting,
       });
 
       // Try immediate export if not currently exporting
@@ -141,19 +150,22 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
           operation: 'onEnd',
           type: 'span_processing',
           step: 'trigger_export',
-          spanId: span.spanContext().spanId
+          spanId: span.spanContext().spanId,
         });
 
         this.exportSpans();
       } else {
-        loggingService.debug('Export already in progress, skipping immediate export', {
-          component: 'SelfHealingSpanProcessor',
-          operation: 'onEnd',
-          type: 'span_processing',
-          step: 'export_skipped',
-          spanId: span.spanContext().spanId,
-          reason: 'Export already in progress'
-        });
+        loggingService.debug(
+          'Export already in progress, skipping immediate export',
+          {
+            component: 'SelfHealingSpanProcessor',
+            operation: 'onEnd',
+            type: 'span_processing',
+            step: 'export_skipped',
+            spanId: span.spanContext().spanId,
+            reason: 'Export already in progress',
+          },
+        );
       }
 
       loggingService.debug('Span end processing completed successfully', {
@@ -162,9 +174,8 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         type: 'span_processing',
         step: 'completed',
         spanId: span.spanContext().spanId,
-        totalTime: `${Date.now() - startTime}ms`
+        totalTime: `${Date.now() - startTime}ms`,
       });
-
     } catch (error) {
       loggingService.error('Error in Self-Healing Span Processor onEnd', {
         component: 'SelfHealingSpanProcessor',
@@ -174,7 +185,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         spanId: span.spanContext().spanId,
         error: error instanceof Error ? error.message : 'Unknown error',
         stack: error instanceof Error ? error.stack : undefined,
-        totalTime: `${Date.now() - startTime}ms`
+        totalTime: `${Date.now() - startTime}ms`,
       });
     }
   }
@@ -184,29 +195,32 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
    */
   async shutdown(): Promise<void> {
     const startTime = Date.now();
-    
-    loggingService.info('=== SELF-HEALING SPAN PROCESSOR SHUTDOWN STARTED ===', {
-      component: 'SelfHealingSpanProcessor',
-      operation: 'shutdown',
-      type: 'span_processor_shutdown',
-      step: 'started'
-    });
+
+    loggingService.info(
+      '=== SELF-HEALING SPAN PROCESSOR SHUTDOWN STARTED ===',
+      {
+        component: 'SelfHealingSpanProcessor',
+        operation: 'shutdown',
+        type: 'span_processor_shutdown',
+        step: 'started',
+      },
+    );
 
     loggingService.info('Step 1: Clearing export timer', {
       component: 'SelfHealingSpanProcessor',
       operation: 'shutdown',
       type: 'span_processor_shutdown',
-      step: 'clear_timer'
+      step: 'clear_timer',
     });
 
     if (this.exportTimer) {
       clearInterval(this.exportTimer);
-      
+
       loggingService.info('Export timer cleared successfully', {
         component: 'SelfHealingSpanProcessor',
         operation: 'shutdown',
         type: 'span_processor_shutdown',
-        step: 'timer_cleared'
+        step: 'timer_cleared',
       });
     }
 
@@ -215,37 +229,43 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       operation: 'shutdown',
       type: 'span_processor_shutdown',
       step: 'export_remaining',
-      remainingSpans: this.buffer.length
+      remainingSpans: this.buffer.length,
     });
 
     // Export any remaining spans
     await this.exportSpans();
-    
+
     loggingService.info('Step 3: Shutting down exporter', {
       component: 'SelfHealingSpanProcessor',
       operation: 'shutdown',
       type: 'span_processor_shutdown',
-      step: 'shutdown_exporter'
+      step: 'shutdown_exporter',
     });
 
     // Shutdown the exporter
     await this.exporter.shutdown();
 
-    loggingService.info('Self-Healing Span Processor shutdown completed successfully', {
-      component: 'SelfHealingSpanProcessor',
-      operation: 'shutdown',
-      type: 'span_processor_shutdown',
-      step: 'completed',
-      totalTime: `${Date.now() - startTime}ms`
-    });
+    loggingService.info(
+      'Self-Healing Span Processor shutdown completed successfully',
+      {
+        component: 'SelfHealingSpanProcessor',
+        operation: 'shutdown',
+        type: 'span_processor_shutdown',
+        step: 'completed',
+        totalTime: `${Date.now() - startTime}ms`,
+      },
+    );
 
-    loggingService.info('=== SELF-HEALING SPAN PROCESSOR SHUTDOWN COMPLETED ===', {
-      component: 'SelfHealingSpanProcessor',
-      operation: 'shutdown',
-      type: 'span_processor_shutdown',
-      step: 'completed',
-      totalTime: `${Date.now() - startTime}ms`
-    });
+    loggingService.info(
+      '=== SELF-HEALING SPAN PROCESSOR SHUTDOWN COMPLETED ===',
+      {
+        component: 'SelfHealingSpanProcessor',
+        operation: 'shutdown',
+        type: 'span_processor_shutdown',
+        step: 'completed',
+        totalTime: `${Date.now() - startTime}ms`,
+      },
+    );
   }
 
   /**
@@ -253,13 +273,13 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
    */
   async forceFlush(): Promise<void> {
     const startTime = Date.now();
-    
+
     loggingService.info('=== FORCE FLUSH STARTED ===', {
       component: 'SelfHealingSpanProcessor',
       operation: 'forceFlush',
       type: 'span_flush',
       step: 'started',
-      currentBufferSize: this.buffer.length
+      currentBufferSize: this.buffer.length,
     });
 
     await this.exportSpans();
@@ -269,7 +289,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       operation: 'forceFlush',
       type: 'span_flush',
       step: 'completed',
-      totalTime: `${Date.now() - startTime}ms`
+      totalTime: `${Date.now() - startTime}ms`,
     });
   }
 
@@ -278,20 +298,20 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
    */
   private addToBuffer(span: ReadableSpan): void {
     const startTime = Date.now();
-    
+
     loggingService.debug('=== ADD TO BUFFER STARTED ===', {
       component: 'SelfHealingSpanProcessor',
       operation: 'addToBuffer',
       type: 'buffer_management',
       step: 'started',
       spanId: span.spanContext().spanId,
-      currentBufferSize: this.buffer.length
+      currentBufferSize: this.buffer.length,
     });
 
     const bufferedSpan: BufferedSpan = {
       span,
       timestamp: Date.now(),
-      retryCount: 0
+      retryCount: 0,
     };
 
     this.buffer.push(bufferedSpan);
@@ -302,14 +322,14 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       type: 'buffer_management',
       step: 'buffer_added',
       spanId: span.spanContext().spanId,
-      newBufferSize: this.buffer.length
+      newBufferSize: this.buffer.length,
     });
 
     loggingService.debug('Step 2: Persisting buffer to Redis', {
       component: 'SelfHealingSpanProcessor',
       operation: 'addToBuffer',
       type: 'buffer_management',
-      step: 'redis_persist'
+      step: 'redis_persist',
     });
 
     // Persist to Redis for crash recovery
@@ -321,13 +341,13 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       type: 'buffer_management',
       step: 'overflow_check',
       currentSize: this.buffer.length,
-      maxSize: this.maxBufferSize
+      maxSize: this.maxBufferSize,
     });
 
     // Prevent buffer overflow
     if (this.buffer.length > this.maxBufferSize) {
       const removed = this.buffer.shift();
-      
+
       loggingService.warn('Span buffer overflow, dropping oldest span', {
         component: 'SelfHealingSpanProcessor',
         operation: 'addToBuffer',
@@ -335,7 +355,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         step: 'overflow_handled',
         droppedSpanId: removed?.span.spanContext().spanId,
         droppedTraceId: removed?.span.spanContext().traceId,
-        currentBufferSize: this.buffer.length
+        currentBufferSize: this.buffer.length,
       });
     }
 
@@ -346,7 +366,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       step: 'completed',
       spanId: span.spanContext().spanId,
       finalBufferSize: this.buffer.length,
-      totalTime: `${Date.now() - startTime}ms`
+      totalTime: `${Date.now() - startTime}ms`,
     });
   }
 
@@ -361,7 +381,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
           operation: 'exportSpans',
           type: 'span_export',
           step: 'skipped',
-          reason: 'Export already in progress'
+          reason: 'Export already in progress',
         });
       } else if (this.buffer.length === 0) {
         loggingService.debug('Export skipped - buffer empty', {
@@ -369,36 +389,37 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
           operation: 'exportSpans',
           type: 'span_export',
           step: 'skipped',
-          reason: 'Buffer empty'
+          reason: 'Buffer empty',
         });
       }
       return;
     }
 
     const startTime = Date.now();
-    
+
     loggingService.info('=== SPAN EXPORT STARTED ===', {
       component: 'SelfHealingSpanProcessor',
       operation: 'exportSpans',
       type: 'span_export',
       step: 'started',
-      bufferSize: this.buffer.length
+      bufferSize: this.buffer.length,
     });
 
     this.isExporting = true;
 
+    let spansToExport: BufferedSpan[] = [];
     try {
       loggingService.info('Step 1: Preparing spans for export', {
         component: 'SelfHealingSpanProcessor',
         operation: 'exportSpans',
         type: 'span_export',
         step: 'prepare_spans',
-        totalSpans: this.buffer.length
+        totalSpans: this.buffer.length,
       });
 
       // Get spans to export (up to 100 at a time)
-      const spansToExport = this.buffer.splice(0, 100);
-      const spans = spansToExport.map(bs => bs.span);
+      spansToExport = this.buffer.splice(0, 100);
+      const spans = spansToExport.map((bs) => bs.span);
 
       loggingService.info(`Exporting ${spans.length} spans`, {
         component: 'SelfHealingSpanProcessor',
@@ -406,123 +427,136 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         type: 'span_export',
         step: 'export_attempt',
         spanCount: spans.length,
-        remainingInBuffer: this.buffer.length
+        remainingInBuffer: this.buffer.length,
       });
 
       loggingService.info('Step 2: Attempting export', {
         component: 'SelfHealingSpanProcessor',
         operation: 'exportSpans',
         type: 'span_export',
-        step: 'export_attempt'
+        step: 'export_attempt',
       });
 
-      // Try to export
-      const result = await this.exporter.export(spans);
+      // Try to export (SpanExporter.export uses callback API)
+      await new Promise<void>((resolve, reject) => {
+        this.exporter.export(spans, (result) => {
+          if (result.code === 0) resolve();
+          else reject(new Error(result.error?.message ?? 'Export failed'));
+        });
+      });
 
-      // Check if export was successful (result is void, so we assume success if no error thrown)
-      if (result === undefined) { // SUCCESS
-        loggingService.info(`Successfully exported ${spans.length} spans`, {
+      // SUCCESS
+      loggingService.info(`Successfully exported ${spans.length} spans`, {
+        component: 'SelfHealingSpanProcessor',
+        operation: 'exportSpans',
+        type: 'span_export',
+        step: 'export_success',
+        exportedCount: spans.length,
+        resultCode: 'success',
+      });
+
+      loggingService.info(
+        'Step 3: Updating Redis buffer after successful export',
+        {
           component: 'SelfHealingSpanProcessor',
           operation: 'exportSpans',
           type: 'span_export',
-          step: 'export_success',
-          exportedCount: spans.length,
-          resultCode: 'success'
-        });
+          step: 'update_redis',
+        },
+      );
 
-        loggingService.info('Step 3: Updating Redis buffer after successful export', {
-          component: 'SelfHealingSpanProcessor',
-          operation: 'exportSpans',
-          type: 'span_export',
-          step: 'update_redis'
-        });
+      // Update Redis buffer
+      await this.persistBufferToRedis();
+    } catch (exportError) {
+      // Export failed, add back to buffer with retry logic
+      loggingService.warn(`Export failed, adding spans back to buffer`, {
+        component: 'SelfHealingSpanProcessor',
+        operation: 'exportSpans',
+        type: 'span_export',
+        step: 'export_failed',
+        resultCode: 'failed',
+        spanCount: spansToExport.length,
+      });
 
-        // Update Redis buffer
-        await this.persistBufferToRedis();
-      } else {
-        // Export failed, add back to buffer with retry logic
-        loggingService.warn(`Export failed, adding spans back to buffer`, {
-          component: 'SelfHealingSpanProcessor',
-          operation: 'exportSpans',
-          type: 'span_export',
-          step: 'export_failed',
-          resultCode: 'failed',
-          spanCount: spansToExport.length
-        });
+      loggingService.info('Step 3: Processing failed spans with retry logic', {
+        component: 'SelfHealingSpanProcessor',
+        operation: 'exportSpans',
+        type: 'span_export',
+        step: 'retry_processing',
+      });
 
-        loggingService.info('Step 3: Processing failed spans with retry logic', {
-          component: 'SelfHealingSpanProcessor',
-          operation: 'exportSpans',
-          type: 'span_export',
-          step: 'retry_processing'
-        });
+      for (const bufferedSpan of spansToExport) {
+        if (bufferedSpan.retryCount < this.maxRetries) {
+          bufferedSpan.retryCount++;
+          this.buffer.unshift(bufferedSpan); // Add back to front for retry
 
-        for (const bufferedSpan of spansToExport) {
-          if (bufferedSpan.retryCount < this.maxRetries) {
-            bufferedSpan.retryCount++;
-            this.buffer.unshift(bufferedSpan); // Add back to front for retry
-            
-            loggingService.debug('Span added back to buffer for retry', {
-              component: 'SelfHealingSpanProcessor',
-              operation: 'exportSpans',
-              type: 'span_export',
-              step: 'retry_added',
-              spanId: bufferedSpan.span.spanContext().spanId,
-              retryCount: bufferedSpan.retryCount,
-              maxRetries: this.maxRetries
-            });
-          } else {
-            loggingService.error('Max retries exceeded for span, dropping', {
-              component: 'SelfHealingSpanProcessor',
-              operation: 'exportSpans',
-              type: 'span_export',
-              step: 'max_retries_exceeded',
-              spanId: bufferedSpan.span.spanContext().spanId,
-              traceId: bufferedSpan.span.spanContext().traceId,
-              retryCount: bufferedSpan.retryCount,
-              maxRetries: this.maxRetries
-            });
-          }
+          loggingService.debug('Span added back to buffer for retry', {
+            component: 'SelfHealingSpanProcessor',
+            operation: 'exportSpans',
+            type: 'span_export',
+            step: 'retry_added',
+            spanId: bufferedSpan.span.spanContext().spanId,
+            retryCount: bufferedSpan.retryCount,
+            maxRetries: this.maxRetries,
+          });
+        } else {
+          loggingService.error('Max retries exceeded for span, dropping', {
+            component: 'SelfHealingSpanProcessor',
+            operation: 'exportSpans',
+            type: 'span_export',
+            step: 'max_retries_exceeded',
+            spanId: bufferedSpan.span.spanContext().spanId,
+            traceId: bufferedSpan.span.spanContext().traceId,
+            retryCount: bufferedSpan.retryCount,
+            maxRetries: this.maxRetries,
+          });
         }
+      }
 
-        loggingService.info('Step 4: Persisting updated buffer after failed export', {
+      loggingService.info(
+        'Step 4: Persisting updated buffer after failed export',
+        {
           component: 'SelfHealingSpanProcessor',
           operation: 'exportSpans',
           type: 'span_export',
-          step: 'persist_after_failure'
-        });
+          step: 'persist_after_failure',
+        },
+      );
 
-        // Persist updated buffer
-        await this.persistBufferToRedis();
-      }
-    } catch (error) {
+      // Persist updated buffer
+      await this.persistBufferToRedis();
+
       loggingService.error('Error exporting spans', {
         component: 'SelfHealingSpanProcessor',
         operation: 'exportSpans',
         type: 'span_export',
         step: 'error',
-        error: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined
+        error:
+          exportError instanceof Error ? exportError.message : 'Unknown error',
+        stack: exportError instanceof Error ? exportError.stack : undefined,
       });
-      
+
       // On export error, spans are already back in buffer, just log
-      loggingService.warn(`Export error, ${this.buffer.length} spans remain in buffer`, {
-        component: 'SelfHealingSpanProcessor',
-        operation: 'exportSpans',
-        type: 'span_export',
-        step: 'error_recovery',
-        remainingSpans: this.buffer.length
-      });
+      loggingService.warn(
+        `Export error, ${this.buffer.length} spans remain in buffer`,
+        {
+          component: 'SelfHealingSpanProcessor',
+          operation: 'exportSpans',
+          type: 'span_export',
+          step: 'error_recovery',
+          remainingSpans: this.buffer.length,
+        },
+      );
     } finally {
       this.isExporting = false;
-      
+
       loggingService.info('Span export process completed', {
         component: 'SelfHealingSpanProcessor',
         operation: 'exportSpans',
         type: 'span_export',
         step: 'completed',
         finalBufferSize: this.buffer.length,
-        totalTime: `${Date.now() - startTime}ms`
+        totalTime: `${Date.now() - startTime}ms`,
       });
     }
   }
@@ -532,13 +566,13 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
    */
   private async persistBufferToRedis(): Promise<void> {
     const startTime = Date.now();
-    
+
     loggingService.debug('=== REDIS BUFFER PERSISTENCE STARTED ===', {
       component: 'SelfHealingSpanProcessor',
       operation: 'persistBufferToRedis',
       type: 'redis_persistence',
       step: 'started',
-      bufferSize: this.buffer.length
+      bufferSize: this.buffer.length,
     });
 
     try {
@@ -547,18 +581,18 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
           component: 'SelfHealingSpanProcessor',
           operation: 'persistBufferToRedis',
           type: 'redis_persistence',
-          step: 'clear_empty_buffer'
+          step: 'clear_empty_buffer',
         });
 
         await redisService.del(this.redisBufferKey);
-        
+
         loggingService.debug('Redis buffer key cleared successfully', {
           component: 'SelfHealingSpanProcessor',
           operation: 'persistBufferToRedis',
           type: 'redis_persistence',
-          step: 'redis_cleared'
+          step: 'redis_cleared',
         });
-        
+
         return;
       }
 
@@ -566,14 +600,14 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         component: 'SelfHealingSpanProcessor',
         operation: 'persistBufferToRedis',
         type: 'redis_persistence',
-        step: 'serialize_buffer'
+        step: 'serialize_buffer',
       });
 
       // Serialize buffer (excluding the actual span object to avoid circular refs)
-      const serializedBuffer = this.buffer.map(bs => ({
+      const serializedBuffer = this.buffer.map((bs) => ({
         spanData: this.serializeSpan(bs.span),
         timestamp: bs.timestamp,
-        retryCount: bs.retryCount
+        retryCount: bs.retryCount,
       }));
 
       loggingService.debug('Step 2: Storing serialized buffer in Redis', {
@@ -582,13 +616,13 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         type: 'redis_persistence',
         step: 'store_in_redis',
         serializedSize: serializedBuffer.length,
-        redisKey: this.redisBufferKey
+        redisKey: this.redisBufferKey,
       });
 
       await redisService.set(
         this.redisBufferKey,
         JSON.stringify(serializedBuffer),
-        3600 // 1 hour TTL
+        3600, // 1 hour TTL
       );
 
       loggingService.debug('Buffer persisted to Redis successfully', {
@@ -596,9 +630,8 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         operation: 'persistBufferToRedis',
         type: 'redis_persistence',
         step: 'completed',
-        totalTime: `${Date.now() - startTime}ms`
+        totalTime: `${Date.now() - startTime}ms`,
       });
-
     } catch (error) {
       loggingService.error('Failed to persist span buffer to Redis', {
         component: 'SelfHealingSpanProcessor',
@@ -607,7 +640,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         step: 'error',
         error: error instanceof Error ? error.message : 'Unknown error',
         stack: error instanceof Error ? error.stack : undefined,
-        totalTime: `${Date.now() - startTime}ms`
+        totalTime: `${Date.now() - startTime}ms`,
       });
     }
   }
@@ -617,12 +650,12 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
    */
   private async loadBufferFromRedis(): Promise<void> {
     const startTime = Date.now();
-    
+
     loggingService.info('=== REDIS BUFFER LOADING STARTED ===', {
       component: 'SelfHealingSpanProcessor',
       operation: 'loadBufferFromRedis',
       type: 'redis_recovery',
-      step: 'started'
+      step: 'started',
     });
 
     try {
@@ -631,17 +664,20 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         operation: 'loadBufferFromRedis',
         type: 'redis_recovery',
         step: 'retrieve_from_redis',
-        redisKey: this.redisBufferKey
+        redisKey: this.redisBufferKey,
       });
 
       const serializedBuffer = await redisService.get(this.redisBufferKey);
       if (!serializedBuffer) {
-        loggingService.info('No Redis buffer found, starting with empty buffer', {
-          component: 'SelfHealingSpanProcessor',
-          operation: 'loadBufferFromRedis',
-          type: 'redis_recovery',
-          step: 'no_buffer_found'
-        });
+        loggingService.info(
+          'No Redis buffer found, starting with empty buffer',
+          {
+            component: 'SelfHealingSpanProcessor',
+            operation: 'loadBufferFromRedis',
+            type: 'redis_recovery',
+            step: 'no_buffer_found',
+          },
+        );
         return;
       }
 
@@ -649,26 +685,32 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         component: 'SelfHealingSpanProcessor',
         operation: 'loadBufferFromRedis',
         type: 'redis_recovery',
-        step: 'parse_buffer_data'
+        step: 'parse_buffer_data',
       });
 
       const bufferData = JSON.parse(serializedBuffer);
-      
-      loggingService.info(`Loaded ${bufferData.length} spans from Redis buffer`, {
-        component: 'SelfHealingSpanProcessor',
-        operation: 'loadBufferFromRedis',
-        type: 'redis_recovery',
-        step: 'buffer_loaded',
-        spanCount: bufferData.length
-      });
 
-      loggingService.info('Step 3: Clearing Redis buffer (spans are complex objects)', {
-        component: 'SelfHealingSpanProcessor',
-        operation: 'loadBufferFromRedis',
-        type: 'redis_recovery',
-        step: 'clear_redis_buffer',
-        note: 'In a real implementation, you\'d need to reconstruct ReadableSpan objects'
-      });
+      loggingService.info(
+        `Loaded ${bufferData.length} spans from Redis buffer`,
+        {
+          component: 'SelfHealingSpanProcessor',
+          operation: 'loadBufferFromRedis',
+          type: 'redis_recovery',
+          step: 'buffer_loaded',
+          spanCount: bufferData.length,
+        },
+      );
+
+      loggingService.info(
+        'Step 3: Clearing Redis buffer (spans are complex objects)',
+        {
+          component: 'SelfHealingSpanProcessor',
+          operation: 'loadBufferFromRedis',
+          type: 'redis_recovery',
+          step: 'clear_redis_buffer',
+          note: "In a real implementation, you'd need to reconstruct ReadableSpan objects",
+        },
+      );
 
       // Note: In a real implementation, you'd need to reconstruct ReadableSpan objects
       // For now, we'll just clear the Redis buffer since spans are complex objects
@@ -679,9 +721,8 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         operation: 'loadBufferFromRedis',
         type: 'redis_recovery',
         step: 'completed',
-        totalTime: `${Date.now() - startTime}ms`
+        totalTime: `${Date.now() - startTime}ms`,
       });
-
     } catch (error) {
       loggingService.error('Failed to load span buffer from Redis', {
         component: 'SelfHealingSpanProcessor',
@@ -690,7 +731,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         step: 'error',
         error: error instanceof Error ? error.message : 'Unknown error',
         stack: error instanceof Error ? error.stack : undefined,
-        totalTime: `${Date.now() - startTime}ms`
+        totalTime: `${Date.now() - startTime}ms`,
       });
     }
   }
@@ -700,13 +741,13 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
    */
   private serializeSpan(span: ReadableSpan): any {
     const startTime = Date.now();
-    
+
     loggingService.debug('=== SPAN SERIALIZATION STARTED ===', {
       component: 'SelfHealingSpanProcessor',
       operation: 'serializeSpan',
       type: 'span_serialization',
       step: 'started',
-      spanId: span.spanContext().spanId
+      spanId: span.spanContext().spanId,
     });
 
     const serialized = {
@@ -721,7 +762,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       attributes: span.attributes,
       events: span.events,
       links: span.links,
-      resource: span.resource.attributes
+      resource: span.resource.attributes,
     };
 
     loggingService.debug('Span serialized successfully', {
@@ -730,7 +771,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       type: 'span_serialization',
       step: 'completed',
       spanId: span.spanContext().spanId,
-      totalTime: `${Date.now() - startTime}ms`
+      totalTime: `${Date.now() - startTime}ms`,
     });
 
     return serialized;
@@ -745,7 +786,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       operation: 'startExportTimer',
       type: 'timer_setup',
       step: 'started',
-      exportInterval: `${this.exportInterval}ms`
+      exportInterval: `${this.exportInterval}ms`,
     });
 
     this.exportTimer = setInterval(() => {
@@ -755,9 +796,9 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
           operation: 'startExportTimer',
           type: 'timer_setup',
           step: 'timer_triggered',
-          bufferSize: this.buffer.length
+          bufferSize: this.buffer.length,
         });
-        
+
         this.exportSpans();
       }
     }, this.exportInterval);
@@ -767,7 +808,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       operation: 'startExportTimer',
       type: 'timer_setup',
       step: 'completed',
-      exportInterval: `${this.exportInterval}ms`
+      exportInterval: `${this.exportInterval}ms`,
     });
   }
 
@@ -776,19 +817,19 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
    */
   private async enrichSpanAsync(span: ReadableSpan): Promise<void> {
     const startTime = Date.now();
-    
+
     loggingService.debug('=== SPAN ENRICHMENT STARTED ===', {
       component: 'SelfHealingSpanProcessor',
       operation: 'enrichSpanAsync',
       type: 'span_enrichment',
       step: 'started',
-      spanId: span.spanContext().spanId
+      spanId: span.spanContext().spanId,
     });
 
     try {
       // Don't block span processing, enrich in background
       setImmediate(async () => {
-        await otelEnricherService.autoEnrichSpan(span as any);
+        await getOtelEnricherService().autoEnrichSpan(span as any);
       });
 
       loggingService.debug('Span enrichment scheduled successfully', {
@@ -797,9 +838,8 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         type: 'span_enrichment',
         step: 'scheduled',
         spanId: span.spanContext().spanId,
-        totalTime: `${Date.now() - startTime}ms`
+        totalTime: `${Date.now() - startTime}ms`,
       });
-
     } catch (error) {
       loggingService.error('Error enriching span', {
         component: 'SelfHealingSpanProcessor',
@@ -809,7 +849,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
         spanId: span.spanContext().spanId,
         error: error instanceof Error ? error.message : 'Unknown error',
         stack: error instanceof Error ? error.stack : undefined,
-        totalTime: `${Date.now() - startTime}ms`
+        totalTime: `${Date.now() - startTime}ms`,
       });
     }
   }
@@ -826,7 +866,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
     const stats = {
       bufferSize: this.buffer.length,
       isExporting: this.isExporting,
-      oldestSpanAge: oldestSpan ? Date.now() - oldestSpan.timestamp : 0
+      oldestSpanAge: oldestSpan ? Date.now() - oldestSpan.timestamp : 0,
     };
 
     loggingService.debug('Buffer statistics retrieved', {
@@ -834,7 +874,7 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       operation: 'getBufferStats',
       type: 'buffer_stats',
       step: 'retrieved',
-      ...stats
+      ...stats,
     });
 
     return stats;

@@ -12,7 +12,7 @@ import {
   PatternDescription,
   RAGPatternError,
 } from '../types/rag.types';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 export abstract class BaseRAGPattern implements IRAGPattern {
   public readonly name: string;
@@ -76,7 +76,7 @@ export abstract class BaseRAGPattern implements IRAGPattern {
       throw new RAGPatternError(
         this.type,
         error instanceof Error ? error.message : String(error),
-        error instanceof Error ? error : undefined
+        error instanceof Error ? error : undefined,
       );
     }
   }
@@ -86,7 +86,7 @@ export abstract class BaseRAGPattern implements IRAGPattern {
    */
   protected abstract executePattern(
     query: string,
-    context: RAGContext
+    context: RAGContext,
   ): Promise<RAGResult>;
 
   /**
@@ -120,4 +120,3 @@ export abstract class BaseRAGPattern implements IRAGPattern {
     return { ...this.config };
   }
 }
-

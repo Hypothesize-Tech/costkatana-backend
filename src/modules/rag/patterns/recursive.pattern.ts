@@ -8,7 +8,7 @@ import {
 import { RetrieveModule } from '../modules/retrieve.module';
 import { RerankModule } from '../modules/rerank.module';
 import { ReadModule } from '../modules/read.module';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 interface SubQuestion {
   id: string;
@@ -177,11 +177,13 @@ Provide the sub-questions as a numbered list:
 ...`;
 
     try {
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
       const content =
-        typeof response.content === 'string' ? response.content : '';
+        typeof response === 'string' ? response : '';
 
       // Parse sub-questions
       const lines = content
@@ -314,11 +316,13 @@ Sub-question: ${question}
 Answer:`;
 
     try {
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
-      return typeof response.content === 'string'
-        ? response.content.trim()
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
+      return typeof response === 'string'
+        ? response.trim()
         : 'Unable to generate answer';
     } catch (error) {
       return 'Unable to generate answer due to processing error';
@@ -352,11 +356,13 @@ Sub-questions and answers:${synthesisContext}
 Synthesized comprehensive answer:`;
 
     try {
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
-      return typeof response.content === 'string'
-        ? response.content.trim()
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
+      return typeof response === 'string'
+        ? response.trim()
         : 'Unable to synthesize final answer';
     } catch (error) {
       // Fallback: concatenate sub-answers

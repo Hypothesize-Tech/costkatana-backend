@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { EventEmitter } from 'events';
 import { Types } from 'mongoose';
-import { BedrockService } from '../../services/bedrock.service';
+import { BedrockService } from '../bedrock/bedrock.service';
 import {
   PromptTemplate,
   PromptTemplateDocument,

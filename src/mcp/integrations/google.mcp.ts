@@ -4,7 +4,11 @@
  */
 
 import { BaseIntegrationMCP } from './base-integration.mcp';
-import { createToolSchema, createParameter, CommonParameters } from '../registry/tool-metadata';
+import {
+  createToolSchema,
+  createParameter,
+  CommonParameters,
+} from '../registry/tool-metadata';
 
 const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
 const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4';
@@ -27,24 +31,27 @@ export class GoogleMCP extends BaseIntegrationMCP {
         'GET',
         [
           createParameter('fileId', 'string', 'File ID', { required: true }),
-          createParameter('includeContent', 'boolean', 'Include file content', { default: false }),
+          createParameter('includeContent', 'boolean', 'Include file content', {
+            default: false,
+          }),
         ],
-        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] }
+        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] },
       ),
       async (params, context) => {
         const queryParams: any = {
-          fields: 'id,name,mimeType,createdTime,modifiedTime,size,webViewLink,permissions',
+          fields:
+            'id,name,mimeType,createdTime,modifiedTime,size,webViewLink,permissions',
         };
 
         const data = await this.makeRequest(
           context.connectionId,
           'GET',
           `${DRIVE_API_BASE}/files/${params.fileId}`,
-          { params: queryParams, timeout: 300000 } // 5 minutes
+          { params: queryParams, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Upload file
@@ -56,11 +63,20 @@ export class GoogleMCP extends BaseIntegrationMCP {
         'POST',
         [
           createParameter('name', 'string', 'File name', { required: true }),
-          createParameter('content', 'string', 'File content (text or base64)', { required: true }),
-          createParameter('mimeType', 'string', 'MIME type', { default: 'text/plain' }),
-          createParameter('folderId', 'string', 'Parent folder ID', { required: false }),
+          createParameter(
+            'content',
+            'string',
+            'File content (text or base64)',
+            { required: true },
+          ),
+          createParameter('mimeType', 'string', 'MIME type', {
+            default: 'text/plain',
+          }),
+          createParameter('folderId', 'string', 'Parent folder ID', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] }
+        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] },
       ),
       async (params, context) => {
         const metadata: any = {
@@ -83,11 +99,11 @@ export class GoogleMCP extends BaseIntegrationMCP {
               content: params.content,
             },
             timeout: 300000, // 5 minutes
-          }
+          },
         );
 
         return data;
-      }
+      },
     );
 
     // Update file
@@ -99,10 +115,14 @@ export class GoogleMCP extends BaseIntegrationMCP {
         'PATCH',
         [
           createParameter('fileId', 'string', 'File ID', { required: true }),
-          createParameter('name', 'string', 'New file name', { required: false }),
-          createParameter('content', 'string', 'New content', { required: false }),
+          createParameter('name', 'string', 'New file name', {
+            required: false,
+          }),
+          createParameter('content', 'string', 'New content', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] }
+        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] },
       ),
       async (params, context) => {
         const { fileId, ...updates } = params;
@@ -111,11 +131,11 @@ export class GoogleMCP extends BaseIntegrationMCP {
           context.connectionId,
           'PATCH',
           `${DRIVE_API_BASE}/files/${fileId}`,
-          { body: updates, timeout: 300000 } // 5 minutes
+          { body: updates, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Delete file
@@ -129,21 +149,21 @@ export class GoogleMCP extends BaseIntegrationMCP {
         {
           requiredScopes: ['https://www.googleapis.com/auth/drive.file'],
           dangerous: true,
-        }
+        },
       ),
       async (params, context) => {
         await this.makeRequest(
           context.connectionId,
           'DELETE',
           `${DRIVE_API_BASE}/files/${params.fileId}`,
-          { timeout: 300000 } // 5 minutes
+          { timeout: 300000 }, // 5 minutes
         );
 
         return {
           success: true,
           message: `File ${params.fileId} deleted successfully`,
         };
-      }
+      },
     );
 
     // Create folder
@@ -155,9 +175,11 @@ export class GoogleMCP extends BaseIntegrationMCP {
         'POST',
         [
           createParameter('name', 'string', 'Folder name', { required: true }),
-          createParameter('parentId', 'string', 'Parent folder ID', { required: false }),
+          createParameter('parentId', 'string', 'Parent folder ID', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] }
+        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] },
       ),
       async (params, context) => {
         const metadata: any = {
@@ -173,11 +195,11 @@ export class GoogleMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${DRIVE_API_BASE}/files`,
-          { body: metadata, timeout: 300000 } // 5 minutes
+          { body: metadata, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Share file
@@ -189,14 +211,16 @@ export class GoogleMCP extends BaseIntegrationMCP {
         'POST',
         [
           createParameter('fileId', 'string', 'File ID', { required: true }),
-          createParameter('email', 'string', 'Email address to share with', { required: true }),
+          createParameter('email', 'string', 'Email address to share with', {
+            required: true,
+          }),
           createParameter('role', 'string', 'Permission role', {
             required: false,
             enum: ['reader', 'writer', 'commenter'],
             default: 'reader',
           }),
         ],
-        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] }
+        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] },
       ),
       async (params, context) => {
         const body = {
@@ -209,11 +233,11 @@ export class GoogleMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${DRIVE_API_BASE}/files/${params.fileId}/permissions`,
-          { body, timeout: 300000 } // 5 minutes
+          { body, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // ===== GOOGLE SHEETS OPERATIONS =====
@@ -226,21 +250,25 @@ export class GoogleMCP extends BaseIntegrationMCP {
         'Get values from a spreadsheet range',
         'GET',
         [
-          createParameter('spreadsheetId', 'string', 'Spreadsheet ID', { required: true }),
-          createParameter('range', 'string', 'Range (e.g., Sheet1!A1:B10)', { required: true }),
+          createParameter('spreadsheetId', 'string', 'Spreadsheet ID', {
+            required: true,
+          }),
+          createParameter('range', 'string', 'Range (e.g., Sheet1!A1:B10)', {
+            required: true,
+          }),
         ],
-        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] }
+        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] },
       ),
       async (params, context) => {
         const data = await this.makeRequest(
           context.connectionId,
           'GET',
           `${SHEETS_API_BASE}/spreadsheets/${params.spreadsheetId}/values/${params.range}`,
-          { timeout: 300000 } // 5 minutes
+          { timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Update spreadsheet values
@@ -251,11 +279,17 @@ export class GoogleMCP extends BaseIntegrationMCP {
         'Update values in a spreadsheet range',
         'PUT',
         [
-          createParameter('spreadsheetId', 'string', 'Spreadsheet ID', { required: true }),
-          createParameter('range', 'string', 'Range (e.g., Sheet1!A1:B10)', { required: true }),
-          createParameter('values', 'array', 'Values to write (2D array)', { required: true }),
+          createParameter('spreadsheetId', 'string', 'Spreadsheet ID', {
+            required: true,
+          }),
+          createParameter('range', 'string', 'Range (e.g., Sheet1!A1:B10)', {
+            required: true,
+          }),
+          createParameter('values', 'array', 'Values to write (2D array)', {
+            required: true,
+          }),
         ],
-        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] }
+        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] },
       ),
       async (params, context) => {
         const body = {
@@ -266,11 +300,11 @@ export class GoogleMCP extends BaseIntegrationMCP {
           context.connectionId,
           'PUT',
           `${SHEETS_API_BASE}/spreadsheets/${params.spreadsheetId}/values/${params.range}?valueInputOption=RAW`,
-          { body, timeout: 300000 } // 5 minutes
+          { body, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Append spreadsheet values
@@ -281,11 +315,17 @@ export class GoogleMCP extends BaseIntegrationMCP {
         'Append values to a spreadsheet',
         'POST',
         [
-          createParameter('spreadsheetId', 'string', 'Spreadsheet ID', { required: true }),
-          createParameter('range', 'string', 'Range (e.g., Sheet1!A:B)', { required: true }),
-          createParameter('values', 'array', 'Values to append (2D array)', { required: true }),
+          createParameter('spreadsheetId', 'string', 'Spreadsheet ID', {
+            required: true,
+          }),
+          createParameter('range', 'string', 'Range (e.g., Sheet1!A:B)', {
+            required: true,
+          }),
+          createParameter('values', 'array', 'Values to append (2D array)', {
+            required: true,
+          }),
         ],
-        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] }
+        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] },
       ),
       async (params, context) => {
         const body = {
@@ -296,11 +336,11 @@ export class GoogleMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${SHEETS_API_BASE}/spreadsheets/${params.spreadsheetId}/values/${params.range}:append?valueInputOption=RAW`,
-          { body, timeout: 300000 } // 5 minutes
+          { body, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // ===== GOOGLE DOCS OPERATIONS =====
@@ -312,19 +352,23 @@ export class GoogleMCP extends BaseIntegrationMCP {
         'google',
         'Get content of a Google Doc',
         'GET',
-        [createParameter('documentId', 'string', 'Document ID', { required: true })],
-        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] }
+        [
+          createParameter('documentId', 'string', 'Document ID', {
+            required: true,
+          }),
+        ],
+        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] },
       ),
       async (params, context) => {
         const data = await this.makeRequest(
           context.connectionId,
           'GET',
           `${DOCS_API_BASE}/documents/${params.documentId}`,
-          { timeout: 300000 } // 5 minutes
+          { timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Create document
@@ -336,9 +380,11 @@ export class GoogleMCP extends BaseIntegrationMCP {
         'POST',
         [
           CommonParameters.title,
-          createParameter('content', 'string', 'Initial content', { required: false }),
+          createParameter('content', 'string', 'Initial content', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] }
+        { requiredScopes: ['https://www.googleapis.com/auth/drive.file'] },
       ),
       async (params, context) => {
         const body: any = {
@@ -349,7 +395,7 @@ export class GoogleMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${DOCS_API_BASE}/documents`,
-          { body, timeout: 300000 } // 5 minutes
+          { body, timeout: 300000 }, // 5 minutes
         );
 
         // If content provided, insert it
@@ -370,12 +416,12 @@ export class GoogleMCP extends BaseIntegrationMCP {
                 ],
               },
               timeout: 300000, // 5 minutes
-            }
+            },
           );
         }
 
         return data;
-      }
+      },
     );
   }
 }

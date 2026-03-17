@@ -175,6 +175,54 @@ export function getRedisOptions(isBullMQ: boolean = false): any {
 }
 
 /**
+ * Parse Redis URL into BullMQ connection options.
+ * Use this instead of IORedis instance to avoid ioredis version conflicts with BullMQ.
+ */
+export function getBullMQConnectionOptions(): Record<string, unknown> {
+  const redisUrl = resolveRedisUrl();
+  const useTLS =
+    process.env.REDIS_TLS === '1' ||
+    process.env.REDIS_TLS === 'true' ||
+    redisUrl.startsWith('rediss://');
+
+  let host = '127.0.0.1';
+  let port = 6379;
+  let password: string | undefined = process.env.REDIS_PASSWORD;
+  let username: string | undefined = process.env.REDIS_USERNAME;
+
+  try {
+    const match = redisUrl.match(
+      /^(?:rediss?):\/\/(?:([^:@]*):?([^@]*)@)?([^:]+):?(\d+)?/,
+    );
+    if (match) {
+      username = username || match[1] || undefined;
+      password = password || match[2] || undefined;
+      host = match[3];
+      port = match[4] ? parseInt(match[4], 10) : 6379;
+    }
+  } catch {
+    // Fallback to env or defaults
+    if (process.env.REDIS_HOST) host = process.env.REDIS_HOST;
+    if (process.env.REDIS_PORT) port = parseInt(process.env.REDIS_PORT, 10);
+  }
+
+  return {
+    host,
+    port,
+    username,
+    password,
+    enableReadyCheck: false,
+    maxRetriesPerRequest: null,
+    retryStrategy: (times: number) => {
+      if (times > 5) return null;
+      return Math.min(times * 1000, 10000);
+    },
+    connectTimeout: 10000,
+    ...(useTLS ? { tls: {} } : {}),
+  };
+}
+
+/**
  * Determine if Redis connection error is due to specific causes and provide helpful messages
  */
 export function getRedisErrorDiagnostic(error: any): string {

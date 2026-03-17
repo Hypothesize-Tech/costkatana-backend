@@ -1,5 +1,5 @@
 import { ModelPerformanceFingerprintService } from '../services/modelPerformanceFingerprint.service';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 
 /**
  * Performance Aggregation Job
@@ -20,7 +20,7 @@ export class PerformanceAggregationJob {
     }
 
     loggingService.info('📊 Starting performance aggregation job', {
-      intervalMinutes
+      intervalMinutes,
     });
 
     // Run immediately on start
@@ -29,7 +29,7 @@ export class PerformanceAggregationJob {
     // Schedule periodic runs
     this.intervalId = setInterval(
       () => this.run(),
-      intervalMinutes * 60 * 1000
+      intervalMinutes * 60 * 1000,
     );
   }
 
@@ -49,7 +49,9 @@ export class PerformanceAggregationJob {
    */
   static async run(): Promise<void> {
     if (this.isRunning) {
-      loggingService.warn('Performance aggregation job already running, skipping this cycle');
+      loggingService.warn(
+        'Performance aggregation job already running, skipping this cycle',
+      );
       return;
     }
 
@@ -63,11 +65,11 @@ export class PerformanceAggregationJob {
 
       const duration = Date.now() - startTime;
       loggingService.info('✅ Performance aggregation job completed', {
-        durationMs: duration
+        durationMs: duration,
       });
     } catch (error) {
       loggingService.error('❌ Performance aggregation job failed', {
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
     } finally {
       this.isRunning = false;
@@ -83,7 +85,9 @@ export class PerformanceAggregationJob {
 }
 
 // Auto-start in production (can be controlled via env var)
-if (process.env.NODE_ENV === 'production' && process.env.ENABLE_PERFORMANCE_AGGREGATION !== 'false') {
+if (
+  process.env.NODE_ENV === 'production' &&
+  process.env.ENABLE_PERFORMANCE_AGGREGATION !== 'false'
+) {
   PerformanceAggregationJob.start();
 }
-

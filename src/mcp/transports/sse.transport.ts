@@ -6,7 +6,7 @@
 
 import { MCPMessage } from '../types/mcp.types';
 import { BaseTransport } from './base.transport';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 import { Request, Response } from 'express';
 import { EventEmitter } from 'events';
 
@@ -113,7 +113,7 @@ export class SSETransport extends BaseTransport {
     }
 
     const queue = this.messageQueues.get(connectionId)!;
-    
+
     // If there's a queued message, return it immediately
     if (queue.length > 0) {
       return queue.shift()!;
@@ -153,7 +153,10 @@ export class SSETransport extends BaseTransport {
 
     // Special handling for confirmation responses
     if (message.method === 'confirmation/response') {
-      this.confirmationEmitter.emit(`confirmation:${message.params?.confirmationId}`, message.params);
+      this.confirmationEmitter.emit(
+        `confirmation:${message.params?.confirmationId}`,
+        message.params,
+      );
     }
   }
 
@@ -166,7 +169,7 @@ export class SSETransport extends BaseTransport {
     resource: string,
     action: string,
     impact: string,
-    timeoutSeconds: number = 120
+    timeoutSeconds: number = 120,
   ): Promise<boolean> {
     const connection = this.connections.get(connectionId);
     if (!connection) {
@@ -174,17 +177,20 @@ export class SSETransport extends BaseTransport {
     }
 
     // Send confirmation request
-    await this.send({
-      jsonrpc: '2.0',
-      method: 'confirmation/request',
-      params: {
-        confirmationId,
-        resource,
-        action,
-        impact,
-        expiresIn: timeoutSeconds,
+    await this.send(
+      {
+        jsonrpc: '2.0',
+        method: 'confirmation/request',
+        params: {
+          confirmationId,
+          resource,
+          action,
+          impact,
+          expiresIn: timeoutSeconds,
+        },
       },
-    }, connectionId);
+      connectionId,
+    );
 
     // Wait for confirmation response or timeout
     return new Promise<boolean>((resolve) => {
@@ -302,7 +308,7 @@ export class SSETransport extends BaseTransport {
       }
 
       await super.close();
-      
+
       loggingService.info('MCP SSE transport closed');
     }
   }
@@ -315,7 +321,8 @@ export class SSETransport extends BaseTransport {
     let cleaned = 0;
 
     for (const [connectionId, connection] of this.connections.entries()) {
-      const ageMinutes = (now.getTime() - connection.lastActivity.getTime()) / 1000 / 60;
+      const ageMinutes =
+        (now.getTime() - connection.lastActivity.getTime()) / 1000 / 60;
       if (ageMinutes > maxAgeMinutes) {
         this.handleDisconnect(connectionId);
         cleaned++;
@@ -323,7 +330,9 @@ export class SSETransport extends BaseTransport {
     }
 
     if (cleaned > 0) {
-      loggingService.info('Cleaned up stale SSE connections', { count: cleaned });
+      loggingService.info('Cleaned up stale SSE connections', {
+        count: cleaned,
+      });
     }
 
     return cleaned;

@@ -35,9 +35,7 @@ export class SubscriptionController {
 
   @Get('subscription')
   async getSubscription(@CurrentUser() user: any) {
-    const data = await this.subscriptionService.getSubscriptionForApi(
-      user.id,
-    );
+    const data = await this.subscriptionService.getSubscriptionForApi(user.id);
     return {
       success: true,
       message: 'Subscription retrieved successfully',

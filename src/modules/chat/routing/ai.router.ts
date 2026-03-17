@@ -26,7 +26,7 @@ import {
   ModelSelectionStrategy,
 } from '../../ingestion/services/model-capability-registry.service';
 import { ModelCapability } from '../../ingestion/services/model-registry.service';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 export interface RouterContext {
   userId: string;
@@ -275,27 +275,13 @@ export class AIRouter {
       });
 
       // Invoke the model with the routing prompt
-      const invokeResult = await BedrockService.invokeModel(
+      const aiResponse = await BedrockService.invokeModel(
         routingPrompt,
         selectedModel,
-        {
-          maxTokens: 200,
-          temperature: 0.3, // Lower temperature for more consistent routing decisions
-          userId: routerContext.userId,
-          metadata: {
-            routingAnalysis: true,
-            messageLength: message.length,
-            conversationSubject: conversationContext.currentSubject,
-          },
-        },
+        { useSystemPrompt: true },
       );
-
-      const aiResponse = invokeResult.response;
       this.logger.debug('Received AI routing response', {
         responseLength: aiResponse.length,
-        inputTokens: invokeResult.inputTokens,
-        outputTokens: invokeResult.outputTokens,
-        cost: invokeResult.cost,
       });
 
       // Parse the AI response

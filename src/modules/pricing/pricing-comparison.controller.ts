@@ -8,7 +8,7 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import { BedrockService } from '@/services/bedrock.service';
+import { BedrockService } from '@/modules/bedrock/bedrock.service';
 import { CompareModelsDto } from './dto/compare-models.dto';
 import { RunBenchmarkDto } from './dto/run-benchmark.dto';
 import {
@@ -717,7 +717,7 @@ export class PricingComparisonController {
           continue;
         }
 
-        const result = await this.bedrockService.invokeModelDirectly(
+        const result = await BedrockService.invokeModelDirectly(
           modelId,
           requestBody,
         );
@@ -846,7 +846,7 @@ export class PricingComparisonController {
             continue;
           }
 
-          const result = await this.bedrockService.invokeModelDirectly(
+          const result = await BedrockService.invokeModelDirectly(
             modelId,
             requestBody,
           );

@@ -683,41 +683,100 @@ export class TrendingDetectorService {
   }
 
   /**
-   * Fetch trends from Twitter/X API
+   * Map region to Twitter WOEID (Where On Earth ID)
+   */
+  private mapRegionToWoeid(region?: string): number {
+    const woeidMap: Record<string, number> = {
+      global: 1,
+      worldwide: 1,
+      us: 23424977,
+      uk: 23424975,
+      gb: 23424975,
+      de: 23424829,
+      fr: 23424819,
+      jp: 23424856,
+      ca: 23424775,
+      au: 23424748,
+      in: 23424848,
+      br: 23424768,
+      mx: 23424900,
+      es: 23424950,
+      it: 23424853,
+    };
+    if (!region || region === 'global') return 1;
+    return woeidMap[region.toLowerCase()] ?? 1;
+  }
+
+  /**
+   * Fetch trends from Twitter/X API (legacy trends/place endpoint, supports Bearer token)
    */
   private async fetchTwitterTrends(options: {
     region?: string;
     category?: string;
   }): Promise<TrendData[]> {
-    try {
-      // Currently using mock data for development/testing
-      // Requires Twitter API v2 Bearer Token and proper rate limiting
-      const useMockTwitter =
-        process.env.USE_MOCK_TWITTER === 'true' ||
-        !process.env.TWITTER_API_KEY ||
-        !process.env.TWITTER_API_SECRET;
+    const bearerToken =
+      process.env.TWITTER_BEARER_TOKEN || process.env.TWITTER_API_KEY;
+    const useMockTwitter =
+      process.env.USE_MOCK_TWITTER === 'true' || !bearerToken;
 
-      if (useMockTwitter) {
-        this.logger.debug(
-          'Using mock Twitter trends (real API not configured or disabled)',
-        );
+    if (useMockTwitter) {
+      this.logger.debug(
+        'Using mock Twitter trends (Bearer token not configured or USE_MOCK_TWITTER=true)',
+      );
+      return this.getMockTwitterTrends(options);
+    }
+
+    try {
+      const woeid = this.mapRegionToWoeid(options.region);
+      const response = await firstValueFrom(
+        this.httpService
+          .get(`https://api.twitter.com/1.1/trends/place.json`, {
+            params: { id: woeid },
+            headers: {
+              Authorization: `Bearer ${bearerToken}`,
+            },
+          })
+          .pipe(
+            timeout(this.API_TIMEOUT),
+            catchError((error) => {
+              this.logger.warn('Twitter trends API failed', {
+                error: error?.response?.data || error?.message,
+              });
+              throw error;
+            }),
+          ),
+      );
+
+      const trends: TrendData[] = [];
+      const data = Array.isArray(response.data)
+        ? response.data[0]
+        : response.data;
+      if (data?.trends && Array.isArray(data.trends)) {
+        for (const trend of data.trends.slice(0, 10)) {
+          const tweetVolume = trend.tweet_volume ?? 0;
+          const score = Math.min(100, Math.log10(tweetVolume + 1) * 15) || 50;
+          trends.push({
+            topic: trend.name || '',
+            score,
+            timestamp: new Date(),
+            source: 'twitter',
+            region: options.region,
+            category: options.category,
+          });
+        }
+      }
+
+      if (trends.length === 0) {
+        this.logger.warn('Twitter API returned no trends, using mock fallback');
         return this.getMockTwitterTrends(options);
       }
 
-      // Use Twitter API v2 or a third-party service
-      const twitterApiKey = process.env.TWITTER_API_KEY;
-      const twitterApiSecret = process.env.TWITTER_API_SECRET;
-
-      // For now, use a simplified approach with mock data based on region
-      // In production, you'd implement proper Twitter API v2 calls
-      const mockTwitterTrends = this.getMockTwitterTrends(options);
-
-      return mockTwitterTrends;
+      return trends;
     } catch (error) {
       this.logger.warn('Twitter API failed', {
         error: error instanceof Error ? error.message : String(error),
       });
-      return [];
+      return this.getMockTwitterTrends(options);
     }
   }
 

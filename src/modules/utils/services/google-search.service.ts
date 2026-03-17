@@ -31,6 +31,17 @@ export interface SearchOptions {
   deepContent?: boolean;
 }
 
+let googleSearchServiceInstance: GoogleSearchService | null = null;
+
+export function getGoogleSearchService(): GoogleSearchService {
+  if (!googleSearchServiceInstance) {
+    throw new Error(
+      'GoogleSearchService not initialized. Ensure UtilsModule is imported.',
+    );
+  }
+  return googleSearchServiceInstance;
+}
+
 @Injectable()
 export class GoogleSearchService {
   private readonly logger = new Logger(GoogleSearchService.name);
@@ -77,6 +88,7 @@ export class GoogleSearchService {
     private cacheService: CacheService,
     private loggerService: LoggerService,
   ) {
+    googleSearchServiceInstance = this;
     this.apiKey = this.configService.get<string>('GOOGLE_SEARCH_API_KEY') || '';
     this.searchEngineId =
       this.configService.get<string>('GOOGLE_SEARCH_ENGINE_ID') || '';

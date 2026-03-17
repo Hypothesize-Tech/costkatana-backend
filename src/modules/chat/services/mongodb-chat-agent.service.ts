@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { LoggerService } from '../../../common/logger/logger.service';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -97,6 +97,17 @@ export interface MongoDBSuggestion {
   requiresCollection?: boolean;
 }
 
+let mongoDBChatAgentServiceInstance: MongoDBChatAgentService | null = null;
+
+export function getMongoDBChatAgentService(): MongoDBChatAgentService {
+  if (!mongoDBChatAgentServiceInstance) {
+    throw new Error(
+      'MongoDBChatAgentService not initialized. Ensure ChatModule is imported.',
+    );
+  }
+  return mongoDBChatAgentServiceInstance;
+}
+
 @Injectable()
 export class MongoDBChatAgentService {
   constructor(
@@ -107,7 +118,9 @@ export class MongoDBChatAgentService {
     private readonly mcpIntegrationHandler: McpIntegrationHandlerService,
     private readonly integrationChatService: IntegrationChatService,
     private readonly integrationFormatter: IntegrationFormatterService,
-  ) {}
+  ) {
+    mongoDBChatAgentServiceInstance = this;
+  }
 
   /**
    * Process user message and execute MongoDB operations
@@ -294,7 +307,7 @@ Respond with ONLY a JSON object in this format:
 
 If the query is unclear, respond with: {"action": null}`;
 
-    const response = await this.bedrockService.invokeModelDirectly(
+    const response = await BedrockService.invokeModelDirectly(
       'anthropic.claude-sonnet-4-5-20250929-v1:0', // Use active model instead of nova-lite
       {
         prompt,

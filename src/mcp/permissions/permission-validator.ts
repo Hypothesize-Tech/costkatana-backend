@@ -12,8 +12,12 @@ import {
   PermissionCheckResult,
 } from '../types/permission.types';
 import { ToolExecutionContext } from '../types/tool-schema';
-import { MCPToolResponse, createErrorResponse, createConfirmationResponse } from '../types/standard-response';
-import { loggingService } from '../../services/logging.service';
+import {
+  MCPToolResponse,
+  createErrorResponse,
+  createConfirmationResponse,
+} from '../types/standard-response';
+import { loggingService } from '../../common/services/logging.service';
 
 export class PermissionValidator {
   /**
@@ -25,7 +29,7 @@ export class PermissionValidator {
     integration: IntegrationType,
     context: ToolExecutionContext,
     handler: (context: ToolExecutionContext) => Promise<any>,
-    resourceId?: string
+    resourceId?: string,
   ): Promise<MCPToolResponse> {
     const startTime = Date.now();
 
@@ -41,7 +45,8 @@ export class PermissionValidator {
       };
 
       // Check permissions
-      const permissionResult = await PermissionManager.checkPermission(permissionContext);
+      const permissionResult =
+        await PermissionManager.checkPermission(permissionContext);
 
       if (!permissionResult.allowed) {
         loggingService.warn('Permission denied', {
@@ -67,14 +72,17 @@ export class PermissionValidator {
             dangerousOperation: false,
             userId: context.userId,
             connectionId: context.connectionId,
-          }
+          },
         );
       }
 
       // Check if confirmation is required
       if (permissionResult.requiresConfirmation) {
         // Check if admin can bypass
-        if (context.isAdmin && ConfirmationService.canBypassConfirmation(true)) {
+        if (
+          context.isAdmin &&
+          ConfirmationService.canBypassConfirmation(true)
+        ) {
           loggingService.info('Admin bypassed confirmation', {
             toolName,
             userId: context.userId,
@@ -87,7 +95,7 @@ export class PermissionValidator {
           const impact = ConfirmationService.generateImpactDescription(
             integration,
             toolName,
-            resourceId || 'resource'
+            resourceId || 'resource',
           );
 
           return createConfirmationResponse(
@@ -107,7 +115,7 @@ export class PermissionValidator {
               dangerousOperation: true,
               userId: context.userId,
               connectionId: context.connectionId,
-            }
+            },
           );
         }
       }
@@ -147,7 +155,7 @@ export class PermissionValidator {
           dangerousOperation: false,
           userId: context.userId,
           connectionId: context.connectionId,
-        }
+        },
       );
     }
   }
@@ -160,7 +168,7 @@ export class PermissionValidator {
     httpMethod: HttpMethod,
     integration: IntegrationType,
     context: ToolExecutionContext,
-    resourceId?: string
+    resourceId?: string,
   ): Promise<PermissionCheckResult> {
     const permissionContext: PermissionCheckContext = {
       userId: context.userId,
@@ -180,12 +188,12 @@ export class PermissionValidator {
   static async getUserEffectivePermissions(
     userId: string,
     integration: IntegrationType,
-    connectionId: string
+    connectionId: string,
   ) {
     const permissions = await PermissionManager.getPermissions(
       userId,
       integration,
-      connectionId
+      connectionId,
     );
 
     if (!permissions) {

@@ -17,11 +17,14 @@ import { MCPAuthService, MCPAuthContext } from './auth/mcp-auth';
 import { TokenManager } from './auth/token-manager';
 import { ToolRegistry } from './registry/tool-registry';
 import { validateToolParameters } from './types/tool-schema';
-import { createSuccessResponse, createErrorResponse } from './types/standard-response';
+import {
+  createSuccessResponse,
+  createErrorResponse,
+} from './types/standard-response';
 import { AuditLogger } from './utils/audit-logger';
 import { RateLimiter } from './utils/rate-limiter';
 import { createMCPError } from './utils/error-mapper';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 
 export interface MCPServerConfig {
   name: string;
@@ -252,7 +255,10 @@ export class MCPServer {
     }
 
     const startTime = Date.now();
-    const params = message.params as { name: string; arguments: Record<string, any> };
+    const params = message.params as {
+      name: string;
+      arguments: Record<string, any>;
+    };
     const { name: toolName, arguments: toolArgs } = params;
     let schema: any = null;
 
@@ -260,7 +266,11 @@ export class MCPServer {
       // Get tool
       const tool = ToolRegistry.getTool(toolName);
       if (!tool) {
-        return this.createError(message.id, -32602, `Tool not found: ${toolName}`);
+        return this.createError(
+          message.id,
+          -32602,
+          `Tool not found: ${toolName}`,
+        );
       }
 
       schema = tool.schema;
@@ -269,35 +279,41 @@ export class MCPServer {
       // Validate parameters
       const validation = validateToolParameters(toolArgs, schema);
       if (!validation.valid) {
-        const errors = validation.errors!.map(e => `${e.parameter}: ${e.message}`).join('; ');
-        return this.createError(message.id, -32602, `Invalid parameters: ${errors}`);
+        const errors = validation
+          .errors!.map((e) => `${e.parameter}: ${e.message}`)
+          .join('; ');
+        return this.createError(
+          message.id,
+          -32602,
+          `Invalid parameters: ${errors}`,
+        );
       }
 
       // Check integration access
       const hasAccess = await MCPAuthService.validateIntegrationAccess(
         this.authContext.userId,
-        schema.integration
+        schema.integration,
       );
 
       if (!hasAccess) {
         return this.createError(
           message.id,
           -32001,
-          `No active ${schema.integration} connection`
+          `No active ${schema.integration} connection`,
         );
       }
 
       // Get connection ID
       const connectionId = await MCPAuthService.getConnectionId(
         this.authContext.userId,
-        schema.integration
+        schema.integration,
       );
 
       if (!connectionId) {
         return this.createError(
           message.id,
           -32001,
-          `Could not find ${schema.integration} connection`
+          `Could not find ${schema.integration} connection`,
         );
       }
 
@@ -306,14 +322,14 @@ export class MCPServer {
         this.authContext.userId,
         schema.integration,
         schema.httpMethod,
-        toolName
+        toolName,
       );
 
       if (!rateLimit.allowed) {
         return this.createError(
           message.id,
           429,
-          `Rate limit exceeded. Retry after ${rateLimit.retryAfter} seconds`
+          `Rate limit exceeded. Retry after ${rateLimit.retryAfter} seconds`,
         );
       }
 
@@ -352,7 +368,7 @@ export class MCPServer {
         schema.httpMethod,
         toolArgs,
         toolResponse,
-        { connectionId }
+        { connectionId },
       );
 
       // Convert to MCP response format
@@ -373,23 +389,20 @@ export class MCPServer {
       };
     } catch (error) {
       const latency = Date.now() - startTime;
-      
+
       loggingService.error('Tool execution error', {
         error: error instanceof Error ? error.message : String(error),
         toolName,
         userId: this.authContext.userId,
       });
 
-      const toolResponse = createErrorResponse(
-        createMCPError(error),
-        {
-          integration: schema?.integration || 'unknown',
-          operation: toolName,
-          latency,
-          httpMethod: schema?.httpMethod || 'GET',
-          permissionChecked: true,
-        }
-      );
+      const toolResponse = createErrorResponse(createMCPError(error), {
+        integration: schema?.integration || 'unknown',
+        operation: toolName,
+        latency,
+        httpMethod: schema?.httpMethod || 'GET',
+        permissionChecked: true,
+      });
 
       const mcpResponse: MCPToolCallResponse = {
         content: [

@@ -471,10 +471,30 @@ export class CostAnomalyGuardService {
       if (recentAvg > olderAvg * 1.2) costTrend = 'increasing';
       else if (recentAvg < olderAvg * 0.8) costTrend = 'decreasing';
 
+      // Count anomalies using z-score on historical amounts
+      const amounts = history.map((entry) => entry.amount);
+      const mean =
+        amounts.length > 0
+          ? amounts.reduce((sum, val) => sum + val, 0) / amounts.length
+          : 0;
+      const variance =
+        amounts.length > 1
+          ? amounts.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) /
+            (amounts.length - 1)
+          : 0;
+      const stdDev = Math.sqrt(variance);
+      const anomalyCount =
+        stdDev > 0
+          ? amounts.filter(
+              (a) =>
+                Math.abs((a - mean) / stdDev) >= this.ANOMALY_ZSCORE_THRESHOLD,
+            ).length
+          : 0;
+
       return {
         totalSpend,
         averageDailySpend,
-        anomalyCount: 0, // Would track anomalies in production
+        anomalyCount,
         costTrend,
         confidence: Math.min(1, history.length / 30),
       };

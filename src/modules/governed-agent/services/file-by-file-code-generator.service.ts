@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { LoggerService } from '../../../common/logger/logger.service';
 import { GovernedAgentSseService } from './governed-agent-sse.service';
 import { GitHubMcpService } from '../../mcp/services/integrations/github-mcp.service';
@@ -208,10 +208,10 @@ Prioritize files by creation order (1 = highest priority).`;
 
       const result = await BedrockService.invokeModel(
         prompt,
-        'amazon.nova-pro-v1:0',
+        'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         { useSystemPrompt: false },
       );
-      const response = result.response;
+      const response = typeof result === 'string' ? result : '';
       const plan = this.extractJsonFromAiResponse<{ repositories: any[] }>(
         response,
       );
@@ -593,10 +593,10 @@ ${this.getFileSpecificInstructions(file.path, repo.type)}`;
 
       const result = await BedrockService.invokeModel(
         prompt,
-        'amazon.nova-pro-v1:0',
+        'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         { useSystemPrompt: false },
       );
-      const response = result.response;
+      const response = typeof result === 'string' ? result : '';
 
       // Clean up the response
       const cleaned = response.replace(/```[\w]*\n?/g, '').trim();

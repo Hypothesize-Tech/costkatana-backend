@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { LoggerService } from '../../../common/logger/logger.service';
 import { TaskClassification } from '../interfaces/governed-agent.interfaces';
 
@@ -97,7 +97,7 @@ Route: Use GOVERNED_WORKFLOW for coding, deployment, builds, integrations, resea
         'amazon.nova-lite-v1:0',
         { useSystemPrompt: false },
       );
-      const response = result.response;
+      const response = typeof result === 'string' ? result : '';
 
       // Parse AI response
       let classification: TaskClassification;

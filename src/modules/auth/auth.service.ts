@@ -55,6 +55,17 @@ interface DeviceInfo {
   ipAddress: string;
 }
 
+let authServiceInstance: AuthService | null = null;
+
+export function getAuthService(): AuthService {
+  if (!authServiceInstance) {
+    throw new Error(
+      'AuthService not initialized. Ensure AuthModule is imported.',
+    );
+  }
+  return authServiceInstance;
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -82,7 +93,9 @@ export class AuthService {
     private encryptionService: EncryptionService,
     private mfaService: MfaService,
     private userSessionService: UserSessionService,
-  ) {}
+  ) {
+    authServiceInstance = this;
+  }
 
   generateTokens(user: User, userSessionId?: string): AuthTokens {
     // Use cached user ID string conversion
@@ -206,9 +219,13 @@ export class AuthService {
       }
 
       // MFA tokens use 'sub'; support 'id' for consistency
-      const userId = (payload as { sub?: string; id?: string }).sub ?? (payload as { id?: string }).id;
+      const userId =
+        (payload as { sub?: string; id?: string }).sub ??
+        (payload as { id?: string }).id;
       if (!userId) {
-        throw new UnauthorizedException('Invalid MFA token: missing user identifier');
+        throw new UnauthorizedException(
+          'Invalid MFA token: missing user identifier',
+        );
       }
       return { userId };
     } catch (error) {
@@ -608,7 +625,9 @@ export class AuthService {
     const payload = this.verifyRefreshToken(refreshToken);
 
     // Standard tokens use 'id'; support 'sub' for JWT spec compatibility
-    const userId = (payload as { id?: string; sub?: string }).id ?? (payload as { sub?: string }).sub;
+    const userId =
+      (payload as { id?: string; sub?: string }).id ??
+      (payload as { sub?: string }).sub;
     const user = await this.userModel.findById(userId);
     if (!user) {
       throw new UnauthorizedException('User not found');

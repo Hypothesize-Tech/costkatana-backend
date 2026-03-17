@@ -6,7 +6,8 @@
 export { initializeMCP, isMCPInitialized, resetMCP } from './init';
 
 // Server
-export { MCPServer, MCPServerConfig } from './server';
+export { MCPServer } from './server';
+export type { MCPServerConfig } from './server';
 
 // Types
 export * from './types/mcp.types';
@@ -20,7 +21,8 @@ export { StdioTransport } from './transports/stdio.transport';
 export { SSETransport } from './transports/sse.transport';
 
 // Auth
-export { MCPAuthService, MCPAuthContext } from './auth/mcp-auth';
+export { MCPAuthService } from './auth/mcp-auth';
+export type { MCPAuthContext } from './auth/mcp-auth';
 export { TokenManager } from './auth/token-manager';
 
 // Registry

@@ -20,7 +20,7 @@ export function createToolSchema(
     dangerous?: boolean;
     examples?: string[];
     version?: string;
-  } = {}
+  } = {},
 ): ToolSchema {
   return {
     name,
@@ -47,7 +47,7 @@ export function createParameter(
     default?: any;
     enum?: any[];
     pattern?: string;
-  } = {}
+  } = {},
 ): ToolParameter {
   return {
     name,
@@ -64,20 +64,32 @@ export function createParameter(
  * Common parameter definitions
  */
 export const CommonParameters = {
-  projectId: createParameter('projectId', 'string', 'Project ID or name', { required: true }),
-  projectName: createParameter('projectName', 'string', 'Project name', { required: true }),
-  deploymentId: createParameter('deploymentId', 'string', 'Deployment ID', { required: true }),
-  repoName: createParameter('repoName', 'string', 'Repository name', { required: true }),
-  issueNumber: createParameter('issueNumber', 'number', 'Issue number', { required: true }),
-  title: createParameter('title', 'string', 'Title', { required: true }),
-  description: createParameter('description', 'string', 'Description', { required: false }),
-  limit: createParameter('limit', 'number', 'Maximum number of results', { 
-    required: false, 
-    default: 20 
+  projectId: createParameter('projectId', 'string', 'Project ID or name', {
+    required: true,
   }),
-  state: createParameter('state', 'string', 'State filter', { 
-    required: false, 
-    enum: ['open', 'closed', 'all'] 
+  projectName: createParameter('projectName', 'string', 'Project name', {
+    required: true,
+  }),
+  deploymentId: createParameter('deploymentId', 'string', 'Deployment ID', {
+    required: true,
+  }),
+  repoName: createParameter('repoName', 'string', 'Repository name', {
+    required: true,
+  }),
+  issueNumber: createParameter('issueNumber', 'number', 'Issue number', {
+    required: true,
+  }),
+  title: createParameter('title', 'string', 'Title', { required: true }),
+  description: createParameter('description', 'string', 'Description', {
+    required: false,
+  }),
+  limit: createParameter('limit', 'number', 'Maximum number of results', {
+    required: false,
+    default: 20,
+  }),
+  state: createParameter('state', 'string', 'State filter', {
+    required: false,
+    enum: ['open', 'closed', 'all'],
   }),
 };
 
@@ -103,14 +115,18 @@ export function getToolCategory(toolName: string): string {
   if (toolName.includes('_create')) return ToolCategories.CREATE;
   if (toolName.includes('_update')) return ToolCategories.UPDATE;
   if (toolName.includes('_delete')) return ToolCategories.DELETE;
-  if (toolName.includes('_deploy') || toolName.includes('_rollback')) return ToolCategories.DEPLOY;
+  if (toolName.includes('_deploy') || toolName.includes('_rollback'))
+    return ToolCategories.DEPLOY;
   return ToolCategories.MANAGE;
 }
 
 /**
  * Check if tool is dangerous
  */
-export function isDangerousTool(toolName: string, httpMethod: HttpMethod): boolean {
+export function isDangerousTool(
+  toolName: string,
+  httpMethod: HttpMethod,
+): boolean {
   // DELETE operations are always dangerous
   if (httpMethod === 'DELETE') {
     return true;
@@ -128,5 +144,7 @@ export function isDangerousTool(toolName: string, httpMethod: HttpMethod): boole
     '_kick',
   ];
 
-  return dangerousPatterns.some(pattern => toolName.toLowerCase().includes(pattern));
+  return dangerousPatterns.some((pattern) =>
+    toolName.toLowerCase().includes(pattern),
+  );
 }

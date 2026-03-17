@@ -3,7 +3,7 @@
  * Manages and validates MCP tool permissions
  */
 
-import { McpPermission, IMcpPermission } from '../../models/McpPermission';
+import { IMcpPermission } from '../../schemas/security/mcp-permission.schema';
 import {
   IntegrationType,
   PermissionCheckContext,
@@ -11,9 +11,17 @@ import {
   ToolPermissions,
 } from '../types/permission.types';
 import { OAuthScopeMapper } from './oauth-scope-mapper';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 import { AuditLogger } from '../utils/audit-logger';
 import { Types } from 'mongoose';
+import {
+  getMcpPermissionModel,
+  getGitHubConnectionModel,
+  getGoogleConnectionModel,
+  getMongoDBConnectionModel,
+  getIntegrationModel,
+  getVercelConnectionModel,
+} from '../../common/utils/get-mongoose-models';
 
 export class PermissionManager {
   /**
@@ -28,11 +36,14 @@ export class PermissionManager {
       grantedBy?: 'user' | 'admin';
       expiresAt?: Date;
       resourceRestrictions?: any;
-    } = {}
+    } = {},
   ): Promise<IMcpPermission> {
     // Map scopes to tools and HTTP methods
     const tools = OAuthScopeMapper.getToolsForScopes(integration, scopes);
-    const httpMethods = OAuthScopeMapper.getHttpMethodsForScopes(integration, scopes);
+    const httpMethods = OAuthScopeMapper.getHttpMethodsForScopes(
+      integration,
+      scopes,
+    );
 
     const permissions: ToolPermissions = {
       tools,
@@ -59,7 +70,8 @@ export class PermissionManager {
     });
 
     // Upsert permission
-    const permission = await McpPermission.findOneAndUpdate(
+    const McpPermissionModel = getMcpPermissionModel();
+    const permission = await McpPermissionModel.findOneAndUpdate(
       { userId: userObjectId, integration, connectionId: connectionObjectId },
       {
         userId: userObjectId,
@@ -70,7 +82,7 @@ export class PermissionManager {
         grantedBy: options.grantedBy || 'user',
         expiresAt: options.expiresAt,
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
 
     loggingService.info('MCP permission granted', {
@@ -89,7 +101,7 @@ export class PermissionManager {
    * Check if user has permission for specific tool
    */
   static async checkPermission(
-    context: PermissionCheckContext
+    context: PermissionCheckContext,
   ): Promise<PermissionCheckResult> {
     try {
       // Log what we're receiving
@@ -112,7 +124,8 @@ export class PermissionManager {
       });
 
       // Get permission document
-      const permission = await McpPermission.findOne({
+      const McpPermissionModel = getMcpPermissionModel();
+      const permission = await McpPermissionModel.findOne({
         userId: userObjectId,
         integration: context.integration,
         connectionId: connectionObjectId,
@@ -129,7 +142,7 @@ export class PermissionManager {
           context.userId,
           context.integration,
           context.toolName,
-          'No permission document found'
+          'No permission document found',
         );
 
         return {
@@ -144,7 +157,7 @@ export class PermissionManager {
           context.userId,
           context.integration,
           context.toolName,
-          'Permission expired'
+          'Permission expired',
         );
 
         return {
@@ -157,7 +170,7 @@ export class PermissionManager {
       if (!permission.permissions.tools.includes(context.toolName)) {
         const requiredScope = OAuthScopeMapper.getRequiredScopeForTool(
           context.integration,
-          context.toolName
+          context.toolName,
         );
 
         await AuditLogger.logPermissionDenial(
@@ -165,7 +178,7 @@ export class PermissionManager {
           context.integration,
           context.toolName,
           'Tool not in allowed tools',
-          requiredScope || undefined
+          requiredScope || undefined,
         );
 
         return {
@@ -182,7 +195,7 @@ export class PermissionManager {
           context.userId,
           context.integration,
           context.toolName,
-          `HTTP method '${context.httpMethod}' not allowed`
+          `HTTP method '${context.httpMethod}' not allowed`,
         );
 
         return {
@@ -197,7 +210,7 @@ export class PermissionManager {
           context.resourceId,
           permission.permissions.resources,
           context.userId,
-          context.integration
+          context.integration,
         );
 
         if (!resourceAllowed) {
@@ -205,7 +218,7 @@ export class PermissionManager {
             context.userId,
             context.integration,
             context.toolName,
-            `Resource access denied: ${context.resourceId}`
+            `Resource access denied: ${context.resourceId}`,
           );
 
           return {
@@ -216,7 +229,8 @@ export class PermissionManager {
       }
 
       // Check if dangerous operation requires confirmation
-      const isDangerous = context.httpMethod === 'DELETE' ||
+      const isDangerous =
+        context.httpMethod === 'DELETE' ||
         context.toolName.includes('delete') ||
         context.toolName.includes('remove');
 
@@ -228,12 +242,12 @@ export class PermissionManager {
       }
 
       // Update usage tracking
-      await McpPermission.updateOne(
+      await McpPermissionModel.updateOne(
         { _id: permission._id },
         {
           $set: { lastUsed: new Date() },
           $inc: { usageCount: 1 },
-        }
+        },
       );
 
       return {
@@ -260,11 +274,15 @@ export class PermissionManager {
     resourceId: string,
     restrictions: any,
     userId: string,
-    integration: IntegrationType
+    integration: IntegrationType,
   ): Promise<boolean> {
     // If ownOnly is true, verify ownership
     if (restrictions.ownOnly) {
-      return await this.verifyResourceOwnership(resourceId, userId, integration);
+      return await this.verifyResourceOwnership(
+        resourceId,
+        userId,
+        integration,
+      );
     }
 
     // Check specific resource ID lists
@@ -294,13 +312,12 @@ export class PermissionManager {
   private static async verifyResourceOwnership(
     resourceId: string,
     userId: string,
-    integration: IntegrationType
+    integration: IntegrationType,
   ): Promise<boolean> {
     try {
       switch (integration) {
         case 'vercel': {
-          const { VercelConnection } = await import('../../models/VercelConnection');
-          const conn = await VercelConnection.findOne({
+          const conn = await getVercelConnectionModel().findOne({
             userId,
             'projects.id': resourceId,
           });
@@ -308,8 +325,7 @@ export class PermissionManager {
         }
 
         case 'github': {
-          const { GitHubConnection } = await import('../../models/GitHubConnection');
-          const conn = await GitHubConnection.findOne({
+          const conn = await getGitHubConnectionModel().findOne({
             userId,
             'repositories.id': resourceId,
           });
@@ -317,8 +333,7 @@ export class PermissionManager {
         }
 
         case 'google': {
-          const { GoogleConnection } = await import('../../models/GoogleConnection');
-          const conn = await GoogleConnection.findOne({
+          const conn = await getGoogleConnectionModel().findOne({
             userId,
             'driveFiles.id': resourceId,
           });
@@ -326,20 +341,17 @@ export class PermissionManager {
         }
 
         case 'mongodb': {
-          // For MongoDB, verify the collection exists in user's connection
-          const { MongoDBConnection } = await import('../../models/MongoDBConnection');
-          const conn = await MongoDBConnection.findOne({ userId });
+          const conn = await getMongoDBConnectionModel().findOne({ userId });
           return !!conn;
         }
 
-        default:
-          // For other integrations, use standard Integration model
-          const { Integration } = await import('../../models/Integration');
-          const conn = await Integration.findOne({
+        default: {
+          const conn = await getIntegrationModel().findOne({
             userId,
             type: new RegExp(integration, 'i'),
           });
           return !!conn;
+        }
       }
     } catch (error) {
       loggingService.error('Failed to verify resource ownership', {
@@ -359,9 +371,9 @@ export class PermissionManager {
   static async getPermissions(
     userId: string,
     integration: IntegrationType,
-    connectionId: string
+    connectionId: string,
   ): Promise<ToolPermissions | null> {
-    const permission = await McpPermission.findOne({
+    const permission = await getMcpPermissionModel().findOne({
       userId,
       integration,
       connectionId,
@@ -376,9 +388,9 @@ export class PermissionManager {
   static async revokePermission(
     userId: string,
     integration: IntegrationType,
-    connectionId: string
+    connectionId: string,
   ): Promise<boolean> {
-    const result = await McpPermission.deleteOne({
+    const result = await getMcpPermissionModel().deleteOne({
       userId,
       integration,
       connectionId,
@@ -401,11 +413,11 @@ export class PermissionManager {
     userId: string,
     integration: IntegrationType,
     connectionId: string,
-    restrictions: any
+    restrictions: any,
   ): Promise<boolean> {
-    const result = await McpPermission.updateOne(
+    const result = await getMcpPermissionModel().updateOne(
       { userId, integration, connectionId },
-      { $set: { 'permissions.resources': restrictions } }
+      { $set: { 'permissions.resources': restrictions } },
     );
 
     loggingService.info('MCP resource restrictions updated', {
@@ -422,14 +434,14 @@ export class PermissionManager {
    * Get all permissions for user
    */
   static async getUserPermissions(userId: string): Promise<any[]> {
-    return await McpPermission.find({ userId }).lean();
+    return await getMcpPermissionModel().find({ userId }).lean();
   }
 
   /**
    * Clean up expired permissions
    */
-  static async cleanupExpiredPermissions(): Promise<number> {
-    const result = await McpPermission.deleteMany({
+  static async cleanupExpiredPermissions(  ): Promise<number> {
+    const result = await getMcpPermissionModel().deleteMany({
       expiresAt: { $lt: new Date() },
     });
 
