@@ -4,7 +4,7 @@ import { OrchestratorInput, PatternResult } from '../types/rag.types';
 import { RetrieveModule } from '../modules/retrieve.module';
 import { RerankModule } from '../modules/rerank.module';
 import { ReadModule } from '../modules/read.module';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 interface AdaptiveState {
   query: string;
@@ -172,12 +172,14 @@ Decide if this question requires:
 Respond with ONLY one of these three words: retrieve, parametric, or hybrid`;
 
     try {
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
       const content =
-        typeof response.content === 'string'
-          ? response.content.toLowerCase().trim()
+        typeof response === 'string'
+          ? response.toLowerCase().trim()
           : 'hybrid';
 
       let decision: 'retrieve' | 'parametric' | 'hybrid' = 'hybrid';
@@ -271,11 +273,13 @@ Question: ${query}
 Answer:`;
 
     try {
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
-      return typeof response.content === 'string'
-        ? response.content.trim()
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
+      return typeof response === 'string'
+        ? response.trim()
         : 'Unable to generate response';
     } catch (error) {
       return 'Unable to generate response due to processing error';
@@ -299,11 +303,13 @@ Question: ${query}
 Answer:`;
 
     try {
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
-      return typeof response.content === 'string'
-        ? response.content.trim()
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
+      return typeof response === 'string'
+        ? response.trim()
         : 'Unable to generate response';
     } catch (error) {
       return 'Unable to generate response due to processing error';
@@ -330,11 +336,13 @@ Question: ${query}
 Final integrated answer:`;
 
     try {
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
-      return typeof response.content === 'string'
-        ? response.content.trim()
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
+      return typeof response === 'string'
+        ? response.trim()
         : parametricAnswer;
     } catch (error) {
       return parametricAnswer;

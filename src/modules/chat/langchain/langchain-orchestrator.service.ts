@@ -441,9 +441,10 @@ Your capabilities:
    * Parse natural language time range to start/end dates.
    * Used by get_user_analytics tool so the agent can pass user's NL (e.g. "this month").
    */
-  private parseTimeRangeToDates(
-    timeRange: string,
-  ): { startDate?: Date; endDate?: Date } {
+  private parseTimeRangeToDates(timeRange: string): {
+    startDate?: Date;
+    endDate?: Date;
+  } {
     const t = (timeRange || '').trim().toLowerCase();
     const now = new Date();
 
@@ -856,7 +857,8 @@ Your capabilities:
         ? 'User is asking about Cost Katana AI cost analytics. Use get_user_analytics tool with userId and timeRange from their message, then answer with the real data.'
         : (context.coordinationAnalysis ?? 'N/A');
 
-    const userId = state.userId ?? (state.contextData as { userId?: string })?.userId ?? '';
+    const userId =
+      state.userId ?? (state.contextData as { userId?: string })?.userId ?? '';
     const toolHint =
       isCostAnalyticsQuery && userId
         ? `\n\nFor this cost/analytics query: Call get_user_analytics with userId="${userId}" and timeRange inferred from the user's message (e.g. "this month", "all time"). Use the returned data to answer.`

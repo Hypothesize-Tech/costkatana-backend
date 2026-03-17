@@ -169,7 +169,7 @@ export class ResourceCreationPlanGeneratorService {
     ];
 
     // Cost estimate
-    const costEstimate = this.calculateEC2Cost(finalConfig);
+    const costEstimate = await this.calculateEC2Cost(finalConfig);
 
     // Rollback plan
     const rollbackPlan: RollbackStep[] = [
@@ -287,7 +287,7 @@ export class ResourceCreationPlanGeneratorService {
       },
     ];
 
-    const costEstimate = this.calculateRDSCost(finalConfig);
+    const costEstimate = await this.calculateRDSCost(finalConfig);
 
     const rollbackPlan: RollbackStep[] = [
       {
@@ -516,7 +516,7 @@ export class ResourceCreationPlanGeneratorService {
       },
     ];
 
-    const costEstimate = this.calculateDynamoDBCost(finalConfig);
+    const costEstimate = await this.calculateDynamoDBCost(finalConfig);
 
     const plan: ResourceCreationPlan = {
       planId,
@@ -610,7 +610,7 @@ export class ResourceCreationPlanGeneratorService {
       },
     ];
 
-    const costEstimate = this.calculateECSCost(finalConfig);
+    const costEstimate = await this.calculateECSCost(finalConfig);
 
     const plan: ResourceCreationPlan = {
       planId,
@@ -745,7 +745,7 @@ export class ResourceCreationPlanGeneratorService {
       },
     ];
 
-    const costEstimate = this.calculateS3Cost(finalConfig);
+    const costEstimate = await this.calculateS3Cost(finalConfig);
 
     const plan: ResourceCreationPlan = {
       planId,
@@ -784,9 +784,37 @@ export class ResourceCreationPlanGeneratorService {
     return plan;
   }
 
-  // Cost calculation methods (simplified estimates)
-  private calculateEC2Cost(config: any): CostEstimate {
-    const hourlyRate = config.instanceType === 't3.micro' ? 0.0104 : 0.0208; // Simplified
+  // Cost calculation methods - use AWS Pricing API with fallback
+  private async calculateEC2Cost(config: any): Promise<CostEstimate> {
+    const region = config.region || 'us-east-1';
+    const instanceType = config.instanceType || 't3.micro';
+    let hourlyRate: number;
+
+    try {
+      const pricing = await this.awsPricingService.getEC2Pricing(
+        instanceType,
+        region,
+      );
+      if (pricing?.pricePerHour) {
+        hourlyRate = pricing.pricePerHour;
+      } else {
+        const fallback = this.awsPricingService.getFallbackPricing(
+          'AmazonEC2',
+          instanceType,
+          region,
+        );
+        hourlyRate = fallback.pricePerHour ?? 0.0106;
+      }
+    } catch (error) {
+      this.logger.warn('EC2 pricing API failed, using fallback', { error });
+      const fallback = this.awsPricingService.getFallbackPricing(
+        'AmazonEC2',
+        instanceType,
+        region,
+      );
+      hourlyRate = fallback.pricePerHour ?? 0.0106;
+    }
+
     const monthly = hourlyRate * 24 * 30;
     return {
       hourly: hourlyRate,
@@ -797,11 +825,40 @@ export class ResourceCreationPlanGeneratorService {
     };
   }
 
-  private calculateRDSCost(config: any): CostEstimate {
-    const hourlyRate = config.dbInstanceClass === 'db.t3.micro' ? 0.017 : 0.034; // Simplified
-    const storageRate = 0.115; // per GB/month
+  private async calculateRDSCost(config: any): Promise<CostEstimate> {
+    const region = config.region || 'us-east-1';
+    const dbInstanceClass = config.dbInstanceClass || 'db.t3.micro';
+    const allocatedStorage = config.allocatedStorage ?? 20;
+    const storageRate = 0.115; // per GB/month - RDS storage from API is separate
+    let hourlyRate: number;
+
+    try {
+      const pricing = await this.awsPricingService.getRDSPricing(
+        dbInstanceClass,
+        region,
+      );
+      if (pricing?.pricePerHour) {
+        hourlyRate = pricing.pricePerHour;
+      } else {
+        const fallback = this.awsPricingService.getFallbackPricing(
+          'AmazonRDS',
+          dbInstanceClass,
+          region,
+        );
+        hourlyRate = fallback.pricePerHour ?? 0.017;
+      }
+    } catch (error) {
+      this.logger.warn('RDS pricing API failed, using fallback', { error });
+      const fallback = this.awsPricingService.getFallbackPricing(
+        'AmazonRDS',
+        dbInstanceClass,
+        region,
+      );
+      hourlyRate = fallback.pricePerHour ?? 0.017;
+    }
+
     const computeMonthly = hourlyRate * 24 * 30;
-    const storageMonthly = storageRate * config.allocatedStorage;
+    const storageMonthly = storageRate * allocatedStorage;
     return {
       hourly: hourlyRate,
       monthly: computeMonthly + storageMonthly,
@@ -809,7 +866,11 @@ export class ResourceCreationPlanGeneratorService {
       freeEligible: false,
       breakdown: [
         { component: 'compute', hourly: hourlyRate, monthly: computeMonthly },
-        { component: 'storage', hourly: 0, monthly: storageMonthly },
+        {
+          component: 'storage',
+          hourly: 0,
+          monthly: storageMonthly,
+        },
       ],
     };
   }
@@ -906,41 +967,106 @@ export class ResourceCreationPlanGeneratorService {
     };
   }
 
-  private calculateDynamoDBCost(config: any): CostEstimate {
-    const hourlyRate = config.billingMode === 'PAY_PER_REQUEST' ? 0 : 0.00065; // Simplified
+  private async calculateDynamoDBCost(config: any): Promise<CostEstimate> {
+    const billingMode =
+      config.billingMode === 'PAY_PER_REQUEST'
+        ? 'PAY_PER_REQUEST'
+        : 'PROVISIONED';
+    const region = config.region || 'us-east-1';
+    let hourlyRate: number;
+
+    if (billingMode === 'PAY_PER_REQUEST') {
+      hourlyRate = 0;
+    } else {
+      try {
+        const pricing = await this.awsPricingService.getDynamoDBPricing(
+          region,
+          'PROVISIONED',
+        );
+        if (pricing?.pricePerHour) {
+          const capacityUnits =
+            (config.writeCapacityUnits ?? 5) + (config.readCapacityUnits ?? 5);
+          hourlyRate = pricing.pricePerHour * capacityUnits;
+        } else {
+          const fallback = this.awsPricingService.getFallbackPricing(
+            'AmazonDynamoDB',
+            undefined,
+            region,
+          );
+          hourlyRate = (fallback.pricePerHour ?? 0.00065) * 10;
+        }
+      } catch (error) {
+        this.logger.warn('DynamoDB pricing API failed, using fallback', {
+          error,
+        });
+        const fallback = this.awsPricingService.getFallbackPricing(
+          'AmazonDynamoDB',
+          undefined,
+          region,
+        );
+        hourlyRate = (fallback.pricePerHour ?? 0.00065) * 10;
+      }
+    }
+
     const monthly = hourlyRate * 24 * 30;
     return {
       hourly: hourlyRate,
       monthly,
       currency: 'USD',
-      freeEligible: true,
-      breakdown: [{ component: 'storage', hourly: hourlyRate, monthly }],
+      freeEligible: billingMode === 'PAY_PER_REQUEST',
+      breakdown: [
+        {
+          component:
+            billingMode === 'PAY_PER_REQUEST'
+              ? 'Pay-per-request (usage-based)'
+              : 'Provisioned capacity',
+          hourly: hourlyRate,
+          monthly,
+        },
+      ],
     };
   }
 
-  private calculateECSCost(config: any): CostEstimate {
-    // ECS cluster itself has no charge - only running tasks incur costs
-    // Fargate pricing: per vCPU-hour and per GB-hour
-    // Estimate based on configuration and capacity providers
-
+  private async calculateECSCost(config: any): Promise<CostEstimate> {
+    const region = config.region || 'us-east-1';
     const capacityProviders = config.capacityProviders || ['FARGATE'];
     const hasFargateSpot = capacityProviders.includes('FARGATE_SPOT');
-    const hasFargate = capacityProviders.includes('FARGATE');
+    const estimatedVcpus = config.defaultTaskVcpu ?? 0.25;
+    const estimatedMemory = config.defaultTaskMemory ?? 0.5;
+    const discountFactor = hasFargateSpot ? 0.3 : 1;
 
-    // Estimate: 1 task running continuously with 0.25 vCPU and 0.5 GB memory
-    // Fargate: $0.04048/vCPU-hour + $0.004445/GB-hour
-    // Fargate Spot: ~70% discount
-    const baseVcpuRate = 0.04048;
-    const baseMemoryRate = 0.004445;
-    const estimatedVcpus = config.defaultTaskVcpu || 0.25;
-    const estimatedMemory = config.defaultTaskMemory || 0.5;
-    const discountFactor = hasFargateSpot ? 0.3 : 1; // 70% discount with Spot
+    let baseVcpuRate: number;
+    let baseMemoryRate: number;
 
-    // Calculate hourly cost
+    try {
+      const pricing = await this.awsPricingService.getECSFargatePricing(region);
+      if (pricing?.pricePerVcpuHour && pricing?.pricePerGBHour) {
+        baseVcpuRate = pricing.pricePerVcpuHour;
+        baseMemoryRate = pricing.pricePerGBHour;
+      } else {
+        const fallback = this.awsPricingService.getFallbackPricing(
+          'AmazonECS',
+          undefined,
+          region,
+        );
+        baseVcpuRate = fallback.pricePerVcpuHour ?? 0.04048;
+        baseMemoryRate = fallback.pricePerGBHour ?? 0.004445;
+      }
+    } catch (error) {
+      this.logger.warn('ECS pricing API failed, using fallback', { error });
+      const fallback = this.awsPricingService.getFallbackPricing(
+        'AmazonECS',
+        undefined,
+        region,
+      );
+      baseVcpuRate = fallback.pricePerVcpuHour ?? 0.04048;
+      baseMemoryRate = fallback.pricePerGBHour ?? 0.004445;
+    }
+
     const vcpuCost = estimatedVcpus * baseVcpuRate * discountFactor;
     const memoryCost = estimatedMemory * baseMemoryRate * discountFactor;
     const hourlyTotal = vcpuCost + memoryCost;
-    const monthlyTotal = hourlyTotal * 730; // ~730 hours per month
+    const monthlyTotal = hourlyTotal * 730;
 
     const breakdown: Array<{
       component: string;
@@ -948,7 +1074,7 @@ export class ResourceCreationPlanGeneratorService {
       monthly: number;
     }> = [{ component: 'ECS Cluster (no charge)', hourly: 0, monthly: 0 }];
 
-    if (hasFargateSpot && hasFargate) {
+    if (hasFargateSpot && capacityProviders.includes('FARGATE')) {
       breakdown.push({
         component: 'Fargate/Fargate Spot Tasks (estimated, mixed capacity)',
         hourly: hourlyTotal,
@@ -977,14 +1103,39 @@ export class ResourceCreationPlanGeneratorService {
     };
   }
 
-  private calculateS3Cost(config: any): CostEstimate {
-    // S3 Standard storage: $0.023 per GB/month
-    // Estimate 10GB storage + requests + data transfer
-    const storageSize = config.estimatedStorageGB || 10;
-    const storageRate = 0.023; // per GB/month
-    const requestCost = 0.5; // estimated API requests
-    const transferCost = 1.0; // estimated data transfer
-    const monthlyTotal = storageRate * storageSize + requestCost + transferCost;
+  private async calculateS3Cost(config: any): Promise<CostEstimate> {
+    const region = config.region || 'us-east-1';
+    const storageSize = config.estimatedStorageGB ?? 10;
+    const requestCost = 0.5;
+    const transferCost = 1.0;
+    let storageRate: number;
+
+    try {
+      const pricing = await this.awsPricingService.getS3Pricing(region);
+      if (pricing?.pricePerGBMonth) {
+        storageRate = pricing.pricePerGBMonth;
+      } else if (pricing?.pricePerGBSecond) {
+        storageRate = pricing.pricePerGBSecond * 30 * 24 * 3600;
+      } else {
+        const fallback = this.awsPricingService.getFallbackPricing(
+          'AmazonS3',
+          undefined,
+          region,
+        );
+        storageRate = fallback.pricePerGBMonth ?? 0.023;
+      }
+    } catch (error) {
+      this.logger.warn('S3 pricing API failed, using fallback', { error });
+      const fallback = this.awsPricingService.getFallbackPricing(
+        'AmazonS3',
+        undefined,
+        region,
+      );
+      storageRate = fallback.pricePerGBMonth ?? 0.023;
+    }
+
+    const storageMonthly = storageRate * storageSize;
+    const monthlyTotal = storageMonthly + requestCost + transferCost;
 
     return {
       hourly: 0,
@@ -995,7 +1146,7 @@ export class ResourceCreationPlanGeneratorService {
         {
           component: `S3 Storage (${storageSize}GB)`,
           hourly: 0,
-          monthly: storageRate * storageSize,
+          monthly: storageMonthly,
         },
         { component: 'API Requests', hourly: 0, monthly: requestCost },
         { component: 'Data Transfer', hourly: 0, monthly: transferCost },

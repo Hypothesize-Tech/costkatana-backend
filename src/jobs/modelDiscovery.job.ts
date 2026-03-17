@@ -1,203 +1,226 @@
 import cron from 'node-cron';
 import { ModelDiscoveryService } from '../services/modelDiscovery.service';
 import { ModelDiscoveryFallbackService } from '../services/modelDiscoveryFallback.service';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 
 /**
  * Model Discovery Cron Job
  * Runs monthly (1st of each month at 2 AM UTC) to discover and update AI model pricing
  */
 export class ModelDiscoveryJob {
-    private static isRunning = false;
-    private static lastRun: Date | null = null;
-    private static task: any | null = null;
+  private static isRunning = false;
+  private static lastRun: Date | null = null;
+  private static task: any | null = null;
 
-    // All supported providers
-    private static readonly PROVIDERS = [
-        'openai',
-        'anthropic',
-        'google-ai',
-        'aws-bedrock',
-        'cohere',
-        'mistral',
-        'xai'
-    ];
+  // All supported providers
+  private static readonly PROVIDERS = [
+    'openai',
+    'anthropic',
+    'google-ai',
+    'aws-bedrock',
+    'cohere',
+    'mistral',
+    'xai',
+  ];
 
-    /**
-     * Start the cron job (always on, runs 1st of each month at 2 AM UTC)
-     */
-    static start(): void {
-        const schedule = '0 2 1 * *';
+  /**
+   * Start the cron job (always on, runs 1st of each month at 2 AM UTC)
+   */
+  static start(): void {
+    const schedule = '0 2 1 * *';
 
-        loggingService.info(`Starting model discovery cron job with schedule: ${schedule}`);
+    loggingService.info(
+      `Starting model discovery cron job with schedule: ${schedule}`,
+    );
 
-        this.task = cron.schedule(schedule, async () => {
-            await this.runDiscovery();
-        }, {
-            timezone: 'UTC'
-        });
+    this.task = cron.schedule(
+      schedule,
+      async () => {
+        await this.runDiscovery();
+      },
+      {
+        timezone: 'UTC',
+      },
+    );
 
-        loggingService.info('Model discovery cron job started successfully');
+    loggingService.info('Model discovery cron job started successfully');
+  }
+
+  /**
+   * Stop the cron job
+   */
+  static stop(): void {
+    if (this.task) {
+      this.task.stop();
+      loggingService.info('Model discovery cron job stopped');
+    }
+  }
+
+  /**
+   * Manually trigger discovery (for testing or immediate updates)
+   */
+  static async trigger(): Promise<any> {
+    if (this.isRunning) {
+      const message = 'Model discovery job is already running';
+      loggingService.warn(message);
+      return {
+        success: false,
+        message,
+        lastRun: this.lastRun,
+      };
     }
 
-    /**
-     * Stop the cron job
-     */
-    static stop(): void {
-        if (this.task) {
-            this.task.stop();
-            loggingService.info('Model discovery cron job stopped');
-        }
+    const results = await this.runDiscovery();
+    return {
+      success: true,
+      results,
+      timestamp: new Date(),
+    };
+  }
+
+  /**
+   * Run the discovery process for all providers
+   */
+  private static async runDiscovery(): Promise<any[]> {
+    if (this.isRunning) {
+      loggingService.warn('Discovery job already running, skipping');
+      return [];
     }
 
-    /**
-     * Manually trigger discovery (for testing or immediate updates)
-     */
-    static async trigger(): Promise<any> {
-        if (this.isRunning) {
-            const message = 'Model discovery job is already running';
-            loggingService.warn(message);
-            return {
-                success: false,
-                message,
-                lastRun: this.lastRun
-            };
-        }
+    this.isRunning = true;
+    const startTime = Date.now();
+    const results: any[] = [];
 
-        const results = await this.runDiscovery();
-        return {
-            success: true,
-            results,
-            timestamp: new Date()
-        };
-    }
+    loggingService.info('==== Starting monthly model discovery job ====');
 
-    /**
-     * Run the discovery process for all providers
-     */
-    private static async runDiscovery(): Promise<any[]> {
-        if (this.isRunning) {
-            loggingService.warn('Discovery job already running, skipping');
-            return [];
-        }
-
-        this.isRunning = true;
-        const startTime = Date.now();
-        const results: any[] = [];
-
-        loggingService.info('==== Starting monthly model discovery job ====');
-
+    try {
+      for (const provider of this.PROVIDERS) {
         try {
-            for (const provider of this.PROVIDERS) {
-                try {
-                    loggingService.info(`Processing provider: ${provider}`);
-                    
-                    const result = await ModelDiscoveryService.discoverModelsForProvider(provider);
-                    results.push({
-                        ...result,
-                        success: true
-                    });
+          loggingService.info(`Processing provider: ${provider}`);
 
-                    // If discovery failed, try fallback
-                    if (result.modelsValidated === 0 && result.errors.length > 0) {
-                        loggingService.warn(`Discovery failed for ${provider}, attempting fallback`);
-                        
-                        const fallbackSuccess = await ModelDiscoveryFallbackService.executeFullFallback(
-                            provider,
-                            result.errors.join('; ')
-                        );
+          const result =
+            await ModelDiscoveryService.discoverModelsForProvider(provider);
+          results.push({
+            ...result,
+            success: true,
+          });
 
-                        results[results.length - 1].fallbackExecuted = true;
-                        results[results.length - 1].fallbackSuccess = fallbackSuccess;
-                    }
+          // If discovery failed, try fallback
+          if (result.modelsValidated === 0 && result.errors.length > 0) {
+            loggingService.warn(
+              `Discovery failed for ${provider}, attempting fallback`,
+            );
 
-                    // Add delay between providers to avoid rate limiting
-                    await this.delay(2000);
+            const fallbackSuccess =
+              await ModelDiscoveryFallbackService.executeFullFallback(
+                provider,
+                result.errors.join('; '),
+              );
 
-                } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : String(error);
-                    loggingService.error(`Error discovering models for ${provider}`, {
-                        provider,
-                        error: errorMessage
-                    });
+            results[results.length - 1].fallbackExecuted = true;
+            results[results.length - 1].fallbackSuccess = fallbackSuccess;
+          }
 
-                    results.push({
-                        provider,
-                        success: false,
-                        error: errorMessage,
-                        modelsDiscovered: 0,
-                        modelsValidated: 0,
-                        modelsFailed: 0
-                    });
-
-                    // Try fallback on error
-                    await ModelDiscoveryFallbackService.executeFullFallback(provider, errorMessage);
-                }
-            }
-
-            const duration = Date.now() - startTime;
-            const totalDiscovered = results.reduce((sum, r) => sum + (r.modelsDiscovered || 0), 0);
-            const totalValidated = results.reduce((sum, r) => sum + (r.modelsValidated || 0), 0);
-            const totalFailed = results.reduce((sum, r) => sum + (r.modelsFailed || 0), 0);
-
-            loggingService.info('==== Model discovery job completed ====', {
-                duration,
-                totalDiscovered,
-                totalValidated,
-                totalFailed,
-                results: results.length
-            });
-
-            this.lastRun = new Date();
-
+          // Add delay between providers to avoid rate limiting
+          await this.delay(2000);
         } catch (error) {
-            loggingService.error('Fatal error in model discovery job', {
-                error: error instanceof Error ? error.message : String(error)
-            });
-        } finally {
-            this.isRunning = false;
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          loggingService.error(`Error discovering models for ${provider}`, {
+            provider,
+            error: errorMessage,
+          });
+
+          results.push({
+            provider,
+            success: false,
+            error: errorMessage,
+            modelsDiscovered: 0,
+            modelsValidated: 0,
+            modelsFailed: 0,
+          });
+
+          // Try fallback on error
+          await ModelDiscoveryFallbackService.executeFullFallback(
+            provider,
+            errorMessage,
+          );
         }
+      }
 
-        return results;
+      const duration = Date.now() - startTime;
+      const totalDiscovered = results.reduce(
+        (sum, r) => sum + (r.modelsDiscovered || 0),
+        0,
+      );
+      const totalValidated = results.reduce(
+        (sum, r) => sum + (r.modelsValidated || 0),
+        0,
+      );
+      const totalFailed = results.reduce(
+        (sum, r) => sum + (r.modelsFailed || 0),
+        0,
+      );
+
+      loggingService.info('==== Model discovery job completed ====', {
+        duration,
+        totalDiscovered,
+        totalValidated,
+        totalFailed,
+        results: results.length,
+      });
+
+      this.lastRun = new Date();
+    } catch (error) {
+      loggingService.error('Fatal error in model discovery job', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      this.isRunning = false;
     }
 
-    /**
-     * Get job status
-     */
-    static getStatus(): {
-        isRunning: boolean;
-        lastRun: Date | null;
-        nextRun: Date | null;
-        schedule: string;
-        enabled: boolean;
-    } {
-        const schedule = '0 2 1 * *';
+    return results;
+  }
 
-        // Calculate next run time (approximate)
-        let nextRun: Date | null = null;
-        if (this.task) {
-            // Next run: 1st of (this or next) month at 2 AM UTC
-            const now = new Date();
-            const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 2, 0, 0, 0));
-            if (next <= now) {
-                next.setUTCMonth(next.getUTCMonth() + 1);
-            }
-            nextRun = next;
-        }
+  /**
+   * Get job status
+   */
+  static getStatus(): {
+    isRunning: boolean;
+    lastRun: Date | null;
+    nextRun: Date | null;
+    schedule: string;
+    enabled: boolean;
+  } {
+    const schedule = '0 2 1 * *';
 
-        return {
-            isRunning: this.isRunning,
-            lastRun: this.lastRun,
-            nextRun,
-            schedule,
-            enabled: true
-        };
+    // Calculate next run time (approximate)
+    let nextRun: Date | null = null;
+    if (this.task) {
+      // Next run: 1st of (this or next) month at 2 AM UTC
+      const now = new Date();
+      const next = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 2, 0, 0, 0),
+      );
+      if (next <= now) {
+        next.setUTCMonth(next.getUTCMonth() + 1);
+      }
+      nextRun = next;
     }
 
-    /**
-     * Utility delay function
-     */
-    private static delay(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
+    return {
+      isRunning: this.isRunning,
+      lastRun: this.lastRun,
+      nextRun,
+      schedule,
+      enabled: true,
+    };
+  }
+
+  /**
+   * Utility delay function
+   */
+  private static delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 }

@@ -60,7 +60,9 @@ export class VectorWriteQueueService implements OnModuleDestroy {
 
   constructor(
     private configService: ConfigService,
-    @Inject(forwardRef(() => require('./faiss-vector.service').FaissVectorService))
+    @Inject(
+      forwardRef(() => require('./faiss-vector.service').FaissVectorService),
+    )
     private faissVectorService: FaissVectorService,
   ) {
     this.batchSize = parseInt(this.configService.get('FAISS_BATCH_SIZE', '50'));

@@ -246,3 +246,48 @@ export const extractErrorDetails = (data: any, req: any) => {
     ...errorClassification,
   };
 };
+
+/**
+ * Pagination options for list queries
+ */
+export interface PaginationOptions {
+  page?: number;
+  limit?: number;
+  skip?: number;
+  sort?: Record<string, 1 | -1> | string;
+  order?: 'asc' | 'desc';
+}
+
+/**
+ * Paginate result - wraps data array with pagination metadata
+ */
+export function paginate<T>(
+  data: T[],
+  total: number,
+  options: PaginationOptions,
+): {
+  data: T[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    pages?: number;
+  };
+} {
+  const page = Math.max(1, options.page ?? 1);
+  const limit = Math.min(100, Math.max(1, options.limit ?? 20));
+  const totalPages = Math.ceil(total / limit) || 1;
+  return {
+    data,
+    total,
+    page,
+    limit,
+    totalPages,
+    pagination: { page, limit, total, totalPages, pages: totalPages },
+  };
+}

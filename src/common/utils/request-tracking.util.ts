@@ -26,7 +26,7 @@ function getClientIP(req: Request): string {
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) {
     return (
-      (Array.isArray(forwarded) ? forwarded[0] : forwarded.split(',')[0])
+      Array.isArray(forwarded) ? forwarded[0] : forwarded.split(',')[0]
     ).trim();
   }
   const realIP = req.headers['x-real-ip'];
@@ -88,7 +88,8 @@ export function buildRequestTrackingFromRequest(
   const protocol = req.protocol || 'http';
   const secure = protocol === 'https' || req.secure === true;
   const host =
-    req.headers.host || `${req.hostname || 'localhost'}:${req.socket?.localPort || 80}`;
+    req.headers.host ||
+    `${req.hostname || 'localhost'}:${req.socket?.localPort || 80}`;
   const serverIP = req.socket?.localAddress || '127.0.0.1';
   const serverPort = req.socket?.localPort || (secure ? 443 : 80);
 

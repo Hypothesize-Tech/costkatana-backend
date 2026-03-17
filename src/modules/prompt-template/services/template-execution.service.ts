@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CacheService } from '../../../common/cache/cache.service';
 import { ActivityService } from '../../../modules/activity/activity.service';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { ModelRecommendationService } from './model-recommendation.service';
 import { estimateTokens } from '../../../utils/tokenCounter';
 import { AIProvider } from '../../../types';
@@ -328,19 +328,29 @@ export class TemplateExecutionService {
     // Process variables and fill template
     const filledPrompt = this.fillTemplate(template, request.variables);
 
-    // Execute with AI
-    const aiResult = await BedrockService.invokeModel(filledPrompt, modelId);
+    // Execute with AI (modelId may be undefined from recommendation - use default)
+    const effectiveModelId = modelId || 'amazon.nova-pro-v1:0';
+    const aiResult = await BedrockService.invokeModel(
+      filledPrompt,
+      effectiveModelId,
+    );
 
     const latencyMs = Date.now() - startTime;
 
-    // Extract response and token usage
-    const aiResponse = aiResult.response;
-    const promptTokens = aiResult.inputTokens;
-    const completionTokens = aiResult.outputTokens;
+    // Extract response - invokeModel returns string
+    const aiResponse = typeof aiResult === 'string' ? aiResult : '';
+    const promptTokens = Math.ceil(filledPrompt.length / 4);
+    const completionTokens = Math.ceil(aiResponse.length / 4);
     const totalTokens = promptTokens + completionTokens;
 
-    // Get cost from Bedrock service
-    const actualCost = aiResult.cost;
+    // Estimate cost from token usage
+    const { calculateCost } = await import('@/utils/pricing');
+    const actualCost = calculateCost(
+      promptTokens,
+      completionTokens,
+      'aws-bedrock',
+      effectiveModelId,
+    );
 
     const analysis = this.modelRecommendationService.analyzeTemplate(template);
     const baselineCost =

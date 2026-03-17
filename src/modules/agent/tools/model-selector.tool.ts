@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { BaseAgentTool } from './base-agent.tool';
 import { GatewayAnalyticsService } from '../../gateway/services/gateway-analytics.service';
 import { LatencyRouterService } from '../../utils/services/latency-router.service';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 /**
  * Model Selector Tool Service
@@ -666,6 +666,12 @@ Input should be a JSON string with:
     testScenarios: string[],
     modelInfo: any,
   ): Promise<any | null> {
+    const startTime = Date.now();
+    this.logger.log('Performing real model testing', {
+      model: modelInfo.provider,
+      scenarios: testScenarios.length,
+      startTime,
+    });
     try {
       // Check if real testing is enabled and API keys are available
       const realTestingEnabled =
@@ -716,7 +722,7 @@ Input should be a JSON string with:
             scenario: scenario.substring(0, 100) + '...',
             success: false,
             error: error instanceof Error ? error.message : String(error),
-            latency: Date.now() - Date.now(), // Minimal latency for failed requests
+            latency: Date.now() - startTime,
             tokensUsed: this.estimateTokens(scenario),
             cost: 0,
           });
@@ -889,16 +895,12 @@ Input should be a JSON string with:
    */
   private async callAmazon(scenario: string, modelInfo: any): Promise<string> {
     try {
-      const result = await this.bedrockService.invokeModel(
+      const result = await BedrockService.invokeModel(
         scenario,
         modelInfo.model,
-        {
-          maxTokens: 1000,
-          temperature: 0.7,
-        },
       );
 
-      return result.response;
+      return typeof result === 'string' ? result : (result as { response?: string })?.response ?? '';
     } catch (error) {
       this.logger.error('Bedrock API call failed', {
         model: modelInfo.model,
@@ -1087,25 +1089,17 @@ Input should be a JSON string with:
 
       try {
         // Make actual API call to test the model
-        const response = await this.bedrockService.invokeModel(
+        const responseText = await BedrockService.invokeModel(
           scenario.prompt,
           modelInfo.model,
-          {
-            maxTokens: 1000,
-            temperature: 0.7,
-            userId: 'model-testing-system',
-            metadata: {
-              testScenario: scenario.type,
-              useCase: useCase || 'general',
-              modelTesting: true,
-            },
-          },
         );
 
         const scenarioTime = Date.now() - scenarioStartTime;
         totalTime += scenarioTime;
-        totalTokens += response.inputTokens + response.outputTokens;
-        totalCost += response.cost;
+        const inputTokens = Math.ceil(scenario.prompt.length / 4);
+        const outputTokens = Math.ceil((typeof responseText === 'string' ? responseText : '').length / 4);
+        totalTokens += inputTokens + outputTokens;
+        totalCost += 0; // Cost not returned by invokeModel; use 0 or calculate via pricing util
 
         // Update min/max response times
         testResults.minResponseTime = Math.min(
@@ -1121,10 +1115,10 @@ Input should be a JSON string with:
           scenario: scenario.description,
           success: true,
           responseTime: scenarioTime,
-          tokensUsed: response.inputTokens + response.outputTokens,
-          cost: response.cost,
+          tokensUsed: inputTokens + outputTokens,
+          cost: totalCost,
           quality: this.evaluateResponseQuality(
-            response.response,
+            responseText,
             scenario.expectedQuality,
           ),
         });

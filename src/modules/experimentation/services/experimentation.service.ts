@@ -16,7 +16,7 @@ import { LRUCache } from 'lru-cache';
 // Internal imports
 import { AIRouterService } from '../../../modules/cortex/services/ai-router.service';
 import { PricingService } from '../../../modules/utils/services/pricing.service';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 // Schema imports
 import {
@@ -112,7 +112,9 @@ export class ExperimentationService {
       }
 
       // Extract user ID - standard tokens use 'id'; support 'sub' for JWT spec compatibility
-      const userId = (payload as { id?: string; sub?: string }).id ?? (payload as { sub?: string }).sub;
+      const userId =
+        (payload as { id?: string; sub?: string }).id ??
+        (payload as { sub?: string }).sub;
       if (!userId) {
         return { isValid: false };
       }
@@ -263,6 +265,8 @@ export class ExperimentationService {
     }
 
     try {
+      const experimentStartTime = Date.now();
+
       // Initialize progress
       this.emitProgress(
         sessionId,
@@ -417,7 +421,7 @@ export class ExperimentationService {
           analysis,
         },
         metadata: {
-          duration: Date.now() - Date.now(), // Will be updated
+          duration: Date.now() - experimentStartTime,
           iterations: 1,
           confidence: results.length > 0 ? 0.85 : 0.0,
         },
@@ -714,7 +718,9 @@ export class ExperimentationService {
 
       // Prioritize comparison models first (user-selected, already proven to work in this session)
       const comparisonModelIds =
-        comparisonModels?.map((m) => this.mapToBedrockModelId(m.model, m.provider)) ?? [];
+        comparisonModels?.map((m) =>
+          this.mapToBedrockModelId(m.model, m.provider),
+        ) ?? [];
       const defaultModels = [
         'us.anthropic.claude-3-5-haiku-20241022-v1:0',
         'anthropic.claude-3-haiku-20240307-v1:0',
@@ -738,7 +744,10 @@ export class ExperimentationService {
           break;
         } catch (err) {
           lastError = err instanceof Error ? err : new Error(String(err));
-          this.logger.warn(`Evaluation model ${modelId} failed:`, lastError.message);
+          this.logger.warn(
+            `Evaluation model ${modelId} failed:`,
+            lastError.message,
+          );
           await new Promise((resolve) => setTimeout(resolve, 5000));
         }
       }
@@ -952,11 +961,11 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
     `;
 
     try {
-      
-
       // Prioritize comparison models first (user-selected, already proven to work)
       const comparisonModelIds =
-        comparisonModels?.map((m) => this.mapToBedrockModelId(m.model, m.provider)) ?? [];
+        comparisonModels?.map((m) =>
+          this.mapToBedrockModelId(m.model, m.provider),
+        ) ?? [];
       const defaultModels = [
         'us.anthropic.claude-3-5-haiku-20241022-v1:0',
         'anthropic.claude-3-haiku-20240307-v1:0',
@@ -979,8 +988,12 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
           lastAnalysisError = null;
           break;
         } catch (err) {
-          lastAnalysisError = err instanceof Error ? err : new Error(String(err));
-          this.logger.warn(`Analysis model ${modelId} failed:`, lastAnalysisError.message);
+          lastAnalysisError =
+            err instanceof Error ? err : new Error(String(err));
+          this.logger.warn(
+            `Analysis model ${modelId} failed:`,
+            lastAnalysisError.message,
+          );
           await new Promise((resolve) => setTimeout(resolve, 5000));
         }
       }
@@ -1462,8 +1475,7 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
     recommendation: string;
   } | null {
     if (!raw || typeof raw !== 'object') return null;
-    const overallScore =
-      raw.overallScore ?? raw.overall_score;
+    const overallScore = raw.overallScore ?? raw.overall_score;
     const criteriaScores =
       raw.criteriaScores ?? raw.criteria_scores ?? raw.criterion_scores ?? {};
     const reasoning = raw.reasoning ?? '';
@@ -1631,13 +1643,25 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
     request: ModelComparisonRequest,
   ): Promise<ExperimentResult> {
     // Defensive validation - ensures request passed validation
-    if (!request?.models || !Array.isArray(request.models) || request.models.length === 0) {
+    if (
+      !request?.models ||
+      !Array.isArray(request.models) ||
+      request.models.length === 0
+    ) {
       throw new Error('At least one model is required for comparison');
     }
-    if (!request?.evaluationCriteria || !Array.isArray(request.evaluationCriteria) || request.evaluationCriteria.length === 0) {
+    if (
+      !request?.evaluationCriteria ||
+      !Array.isArray(request.evaluationCriteria) ||
+      request.evaluationCriteria.length === 0
+    ) {
       throw new Error('At least one evaluation criterion is required');
     }
-    if (!request?.prompt || typeof request.prompt !== 'string' || request.prompt.trim().length === 0) {
+    if (
+      !request?.prompt ||
+      typeof request.prompt !== 'string' ||
+      request.prompt.trim().length === 0
+    ) {
       throw new Error('Prompt is required');
     }
 
@@ -2585,13 +2609,11 @@ Return your analysis in JSON format with the following structure:
       const analysisResponse = await BedrockService.invokeModel(
         analysisPrompt,
         'amazon.nova-pro-v1:0',
-        { maxTokens: 1000, temperature: 0.7 },
       );
 
       // Extract and parse JSON response
-      const extractedJson = await BedrockService.extractJson(
-        analysisResponse.response,
-      );
+      const responseStr = typeof analysisResponse === 'string' ? analysisResponse : (analysisResponse as { response?: string })?.response ?? '';
+      const extractedJson = await BedrockService.extractJson(responseStr);
 
       try {
         const parsedAnalysis = JSON.parse(extractedJson);

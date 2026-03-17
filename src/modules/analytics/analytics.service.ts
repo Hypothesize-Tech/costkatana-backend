@@ -451,7 +451,9 @@ export class AnalyticsService {
     return csvRows.join('\n');
   }
 
-  private async getSummary(match: any): Promise<SummaryResult & { averageResponseTime?: number }> {
+  private async getSummary(
+    match: any,
+  ): Promise<SummaryResult & { averageResponseTime?: number }> {
     const result = await this.usageModel.aggregate([
       { $match: match },
       {
@@ -466,23 +468,21 @@ export class AnalyticsService {
       },
     ]);
     const row = result[0] as any;
-    return (
-      row
-        ? {
-            totalCost: row.totalCost ?? 0,
-            totalTokens: row.totalTokens ?? 0,
-            totalRequests: row.totalRequests ?? 0,
-            averageCostPerRequest: row.averageCostPerRequest ?? 0,
-            averageResponseTime: row.averageResponseTime ?? 0,
-          }
-        : {
-            totalCost: 0,
-            totalTokens: 0,
-            totalRequests: 0,
-            averageCostPerRequest: 0,
-            averageResponseTime: 0,
-          }
-    );
+    return row
+      ? {
+          totalCost: row.totalCost ?? 0,
+          totalTokens: row.totalTokens ?? 0,
+          totalRequests: row.totalRequests ?? 0,
+          averageCostPerRequest: row.averageCostPerRequest ?? 0,
+          averageResponseTime: row.averageResponseTime ?? 0,
+        }
+      : {
+          totalCost: 0,
+          totalTokens: 0,
+          totalRequests: 0,
+          averageCostPerRequest: 0,
+          averageResponseTime: 0,
+        };
   }
 
   private async getTimeline(
@@ -628,7 +628,9 @@ export class AnalyticsService {
             $cond: {
               if: { $eq: ['$_id', '___UNASSIGNED___'] },
               then: 'Unassigned',
-              else: { $ifNull: [{ $arrayElemAt: ['$project.name', 0] }, 'Unknown'] },
+              else: {
+                $ifNull: [{ $arrayElemAt: ['$project.name', 0] }, 'Unknown'],
+              },
             },
           },
         },

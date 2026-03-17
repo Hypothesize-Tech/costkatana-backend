@@ -4,7 +4,11 @@
  */
 
 import { BaseIntegrationMCP } from './base-integration.mcp';
-import { createToolSchema, createParameter, CommonParameters } from '../registry/tool-metadata';
+import {
+  createToolSchema,
+  createParameter,
+  CommonParameters,
+} from '../registry/tool-metadata';
 
 const LINEAR_API_BASE = 'https://api.linear.app/graphql';
 
@@ -16,19 +20,18 @@ export class LinearMCP extends BaseIntegrationMCP {
   /**
    * Execute GraphQL query
    */
-  private async executeGraphQL(connectionId: string, query: string, variables?: any): Promise<any> {
-    const data = await this.makeRequest(
-      connectionId,
-      'POST',
-      LINEAR_API_BASE,
-      {
-        body: {
-          query,
-          variables,
-        },
-        timeout: 300000, // 5 minutes
-      }
-    );
+  private async executeGraphQL(
+    connectionId: string,
+    query: string,
+    variables?: any,
+  ): Promise<any> {
+    const data = await this.makeRequest(connectionId, 'POST', LINEAR_API_BASE, {
+      body: {
+        query,
+        variables,
+      },
+      timeout: 300000, // 5 minutes
+    });
 
     if (data.errors) {
       throw new Error(`GraphQL Error: ${JSON.stringify(data.errors)}`);
@@ -48,7 +51,7 @@ export class LinearMCP extends BaseIntegrationMCP {
         'List Linear teams',
         'GET',
         [CommonParameters.limit],
-        { requiredScopes: ['read'] }
+        { requiredScopes: ['read'] },
       ),
       async (params, context) => {
         const query = `
@@ -73,7 +76,7 @@ export class LinearMCP extends BaseIntegrationMCP {
           teams: data.teams.nodes,
           count: data.teams.nodes.length,
         };
-      }
+      },
     );
 
     // ===== PROJECT OPERATIONS =====
@@ -86,7 +89,7 @@ export class LinearMCP extends BaseIntegrationMCP {
         'List Linear projects',
         'GET',
         [CommonParameters.limit],
-        { requiredScopes: ['read'] }
+        { requiredScopes: ['read'] },
       ),
       async (params, context) => {
         const query = `
@@ -113,7 +116,7 @@ export class LinearMCP extends BaseIntegrationMCP {
           projects: data.projects.nodes,
           count: data.projects.nodes.length,
         };
-      }
+      },
     );
 
     // ===== ISSUE OPERATIONS =====
@@ -130,15 +133,15 @@ export class LinearMCP extends BaseIntegrationMCP {
           CommonParameters.state,
           CommonParameters.limit,
         ],
-        { requiredScopes: ['read'] }
+        { requiredScopes: ['read'] },
       ),
       async (params, context) => {
         const filter: any = {};
-        
+
         if (params.teamId) {
           filter.team = { id: { eq: params.teamId } };
         }
-        
+
         if (params.state) {
           filter.state = { name: { eq: params.state } };
         }
@@ -177,7 +180,7 @@ export class LinearMCP extends BaseIntegrationMCP {
           issues: data.issues.nodes,
           count: data.issues.nodes.length,
         };
-      }
+      },
     );
 
     // Get issue
@@ -188,7 +191,7 @@ export class LinearMCP extends BaseIntegrationMCP {
         'Get details of a specific issue',
         'GET',
         [createParameter('issueId', 'string', 'Issue ID', { required: true })],
-        { requiredScopes: ['read'] }
+        { requiredScopes: ['read'] },
       ),
       async (params, context) => {
         const query = `
@@ -233,7 +236,7 @@ export class LinearMCP extends BaseIntegrationMCP {
         });
 
         return data.issue;
-      }
+      },
     );
 
     // Create issue
@@ -247,10 +250,14 @@ export class LinearMCP extends BaseIntegrationMCP {
           createParameter('teamId', 'string', 'Team ID', { required: true }),
           CommonParameters.title,
           CommonParameters.description,
-          createParameter('priority', 'number', 'Priority (0-4)', { required: false }),
-          createParameter('assigneeId', 'string', 'Assignee user ID', { required: false }),
+          createParameter('priority', 'number', 'Priority (0-4)', {
+            required: false,
+          }),
+          createParameter('assigneeId', 'string', 'Assignee user ID', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['write'] }
+        { requiredScopes: ['write'] },
       ),
       async (params, context) => {
         const query = `
@@ -281,7 +288,7 @@ export class LinearMCP extends BaseIntegrationMCP {
         });
 
         return data.issueCreate.issue;
-      }
+      },
     );
 
     // Update issue
@@ -294,11 +301,17 @@ export class LinearMCP extends BaseIntegrationMCP {
         [
           createParameter('issueId', 'string', 'Issue ID', { required: true }),
           createParameter('title', 'string', 'New title', { required: false }),
-          createParameter('description', 'string', 'New description', { required: false }),
-          createParameter('priority', 'number', 'New priority (0-4)', { required: false }),
-          createParameter('stateId', 'string', 'New state ID', { required: false }),
+          createParameter('description', 'string', 'New description', {
+            required: false,
+          }),
+          createParameter('priority', 'number', 'New priority (0-4)', {
+            required: false,
+          }),
+          createParameter('stateId', 'string', 'New state ID', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['write'] }
+        { requiredScopes: ['write'] },
       ),
       async (params, context) => {
         const { issueId, ...updates } = params;
@@ -321,7 +334,7 @@ export class LinearMCP extends BaseIntegrationMCP {
         });
 
         return data.issueUpdate.issue;
-      }
+      },
     );
 
     // Delete issue
@@ -335,7 +348,7 @@ export class LinearMCP extends BaseIntegrationMCP {
         {
           requiredScopes: ['write'],
           dangerous: true,
-        }
+        },
       ),
       async (params, context) => {
         const query = `
@@ -354,7 +367,7 @@ export class LinearMCP extends BaseIntegrationMCP {
           success: data.issueDelete.success,
           message: `Issue ${params.issueId} deleted successfully`,
         };
-      }
+      },
     );
   }
 }

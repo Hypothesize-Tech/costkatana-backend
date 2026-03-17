@@ -17,7 +17,7 @@ import { Inject, forwardRef } from '@nestjs/common';
 import type { RealtimeUpdateService } from './realtime-update.service';
 import { SessionReplayService } from './session-replay.service';
 import { CostOptimizationEngineService } from './cost-optimization-engine.service';
-import { BedrockService } from '@/services/bedrock.service';
+import { BedrockService } from '@/modules/bedrock/bedrock.service';
 import { IntegrationService } from '../../integration/integration.service';
 import { calculateCost } from '@/utils/pricing';
 import { sanitizeModelName } from '@/utils/optimizationUtils';
@@ -119,7 +119,11 @@ export class UsageService implements OnModuleDestroy {
     @InjectModel(Alert.name) private alertModel: Model<AlertDocument>,
     @InjectModel(Project.name) private projectModel: Model<ProjectDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
-    @Inject(forwardRef(() => require('./realtime-update.service').RealtimeUpdateService))
+    @Inject(
+      forwardRef(
+        () => require('./realtime-update.service').RealtimeUpdateService,
+      ),
+    )
     private realtimeUpdateService: RealtimeUpdateService,
     private sessionReplayService: SessionReplayService,
     private costOptimizationEngine: CostOptimizationEngineService,
@@ -582,7 +586,8 @@ export class UsageService implements OnModuleDestroy {
     const totalRequests = statsData.totalRequests || 0;
     const successRate =
       totalRequests > 0
-        ? ((statsData.successCount || 0) / totalRequests * 100).toFixed(1) + '%'
+        ? (((statsData.successCount || 0) / totalRequests) * 100).toFixed(1) +
+          '%'
         : '0%';
 
     const requests = (records as any[]).map((r) => ({
@@ -615,9 +620,10 @@ export class UsageService implements OnModuleDestroy {
   /**
    * Parse timeRange string (1h, 24h, 7d, 30d) to start/end dates
    */
-  private parseTimeRange(
-    timeRange: '1h' | '24h' | '7d' | '30d',
-  ): { start: Date; end: Date } {
+  private parseTimeRange(timeRange: '1h' | '24h' | '7d' | '30d'): {
+    start: Date;
+    end: Date;
+  } {
     const end = new Date();
     const start = new Date(end);
 
@@ -846,20 +852,19 @@ Identify any anomalies in cost or token usage patterns. Return a JSON object wit
   "recommendations": ["string array of recommendations"]
 }`;
 
-      const responseResult = await this.bedrockService.invokeModel(
+      const responseResult = await BedrockService.invokeModel(
         analysisPrompt,
         'amazon.nova-lite-v1:0',
         { useSystemPrompt: false },
       );
 
-      // Parse the response
+      // Parse the response - invokeModel returns string
       let anomalyResult;
       try {
-        // Extract JSON from response (responseResult is { response, inputTokens, outputTokens, cost })
         const responseText =
-          typeof responseResult.response === 'string'
-            ? responseResult.response
-            : String(responseResult.response ?? '');
+          typeof responseResult === 'string'
+            ? responseResult
+            : String((responseResult as { response?: string })?.response ?? '');
         const jsonMatch = responseText.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           anomalyResult = JSON.parse(jsonMatch[0]);
@@ -929,9 +934,7 @@ Identify any anomalies in cost or token usage patterns. Return a JSON object wit
       // Build search query
       const searchQuery: any = {
         userId:
-          typeof userId === 'string'
-            ? new Types.ObjectId(userId)
-            : userId,
+          typeof userId === 'string' ? new Types.ObjectId(userId) : userId,
         $or: [
           { prompt: { $regex: query, $options: 'i' } },
           { completion: { $regex: query, $options: 'i' } },

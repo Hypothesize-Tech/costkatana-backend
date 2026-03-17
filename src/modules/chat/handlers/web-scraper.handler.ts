@@ -7,7 +7,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HandlerRequest, HandlerResult } from './types/handler.types';
 import { ConversationContext } from '../context';
 import { WebSearchService } from '../services/web-search.service';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 @Injectable()
 export class WebScraperHandler {
@@ -246,7 +246,7 @@ Based ONLY on the search results above, provide a factual answer:`;
     let aiResponse: string;
     try {
       // Use injected BedrockService for AI synthesis
-      const bedrockResult = await this.bedrockService.invokeModelDirectly(
+      const bedrockResult = await BedrockService.invokeModelDirectly(
         modelId,
         {
           prompt: responsePrompt,

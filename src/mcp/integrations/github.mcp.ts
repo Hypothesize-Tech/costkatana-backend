@@ -4,7 +4,11 @@
  */
 
 import { BaseIntegrationMCP } from './base-integration.mcp';
-import { createToolSchema, createParameter, CommonParameters } from '../registry/tool-metadata';
+import {
+  createToolSchema,
+  createParameter,
+  CommonParameters,
+} from '../registry/tool-metadata';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
@@ -24,24 +28,39 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'List user repositories',
         'GET',
         [
-          createParameter('type', 'string', 'Repository type (all, owner, member)', {
-            required: false,
-            enum: ['all', 'owner', 'member'],
-            default: 'all',
-          }),
-          createParameter('sort', 'string', 'Sort by (created, updated, pushed, full_name)', {
-            required: false,
-            enum: ['created', 'updated', 'pushed', 'full_name'],
-            default: 'updated',
-          }),
-          createParameter('visibility', 'string', 'Repository visibility (all, public, private)', {
-            required: false,
-            enum: ['all', 'public', 'private'],
-            default: 'all',
-          }),
+          createParameter(
+            'type',
+            'string',
+            'Repository type (all, owner, member)',
+            {
+              required: false,
+              enum: ['all', 'owner', 'member'],
+              default: 'all',
+            },
+          ),
+          createParameter(
+            'sort',
+            'string',
+            'Sort by (created, updated, pushed, full_name)',
+            {
+              required: false,
+              enum: ['created', 'updated', 'pushed', 'full_name'],
+              default: 'updated',
+            },
+          ),
+          createParameter(
+            'visibility',
+            'string',
+            'Repository visibility (all, public, private)',
+            {
+              required: false,
+              enum: ['all', 'public', 'private'],
+              default: 'all',
+            },
+          ),
           CommonParameters.limit,
         ],
-        { requiredScopes: ['repo'] }
+        { requiredScopes: ['repo'] },
       ),
       async (params, context) => {
         const queryParams: any = {
@@ -60,7 +79,7 @@ export class GitHubMCP extends BaseIntegrationMCP {
           context.connectionId,
           'GET',
           `${GITHUB_API_BASE}/user/repos`,
-          { params: queryParams, timeout: 300000 } // 5 minute timeout for listing repos
+          { params: queryParams, timeout: 300000 }, // 5 minute timeout for listing repos
         );
 
         return {
@@ -83,7 +102,7 @@ export class GitHubMCP extends BaseIntegrationMCP {
           count: data.length,
           total: data.length,
         };
-      }
+      },
     );
 
     // Create repository
@@ -94,12 +113,18 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'Create a new repository',
         'POST',
         [
-          createParameter('name', 'string', 'Repository name', { required: true }),
+          createParameter('name', 'string', 'Repository name', {
+            required: true,
+          }),
           CommonParameters.description,
-          createParameter('private', 'boolean', 'Make repository private', { default: false }),
-          createParameter('autoInit', 'boolean', 'Initialize with README', { default: false }),
+          createParameter('private', 'boolean', 'Make repository private', {
+            default: false,
+          }),
+          createParameter('autoInit', 'boolean', 'Initialize with README', {
+            default: false,
+          }),
         ],
-        { requiredScopes: ['repo'] }
+        { requiredScopes: ['repo'] },
       ),
       async (params, context) => {
         const body: any = {
@@ -116,11 +141,11 @@ export class GitHubMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${GITHUB_API_BASE}/user/repos`,
-          { body, timeout: 300000 }
+          { body, timeout: 300000 },
         );
 
         return data;
-      }
+      },
     );
 
     // ===== ISSUE OPERATIONS =====
@@ -133,12 +158,14 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'List issues in a repository',
         'GET',
         [
-          createParameter('owner', 'string', 'Repository owner', { required: true }),
+          createParameter('owner', 'string', 'Repository owner', {
+            required: true,
+          }),
           CommonParameters.repoName,
           CommonParameters.state,
           CommonParameters.limit,
         ],
-        { requiredScopes: ['repo'] }
+        { requiredScopes: ['repo'] },
       ),
       async (params, context) => {
         const queryParams: any = {
@@ -150,14 +177,14 @@ export class GitHubMCP extends BaseIntegrationMCP {
           context.connectionId,
           'GET',
           `${GITHUB_API_BASE}/repos/${params.owner}/${params.repoName}/issues`,
-          { params: queryParams, timeout: 300000 } // 5 minutes
+          { params: queryParams, timeout: 300000 }, // 5 minutes
         );
 
         return {
           issues: data,
           count: data.length,
         };
-      }
+      },
     );
 
     // Get issue
@@ -168,22 +195,24 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'Get details of a specific issue',
         'GET',
         [
-          createParameter('owner', 'string', 'Repository owner', { required: true }),
+          createParameter('owner', 'string', 'Repository owner', {
+            required: true,
+          }),
           CommonParameters.repoName,
           CommonParameters.issueNumber,
         ],
-        { requiredScopes: ['repo'] }
+        { requiredScopes: ['repo'] },
       ),
       async (params, context) => {
         const data = await this.makeRequest(
           context.connectionId,
           'GET',
           `${GITHUB_API_BASE}/repos/${params.owner}/${params.repoName}/issues/${params.issueNumber}`,
-          { timeout: 300000 } // 5 minutes
+          { timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Create issue
@@ -194,14 +223,20 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'Create a new issue',
         'POST',
         [
-          createParameter('owner', 'string', 'Repository owner', { required: true }),
+          createParameter('owner', 'string', 'Repository owner', {
+            required: true,
+          }),
           CommonParameters.repoName,
           CommonParameters.title,
           createParameter('body', 'string', 'Issue body', { required: false }),
-          createParameter('labels', 'array', 'Issue labels', { required: false }),
-          createParameter('assignees', 'array', 'Issue assignees', { required: false }),
+          createParameter('labels', 'array', 'Issue labels', {
+            required: false,
+          }),
+          createParameter('assignees', 'array', 'Issue assignees', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['repo'] }
+        { requiredScopes: ['repo'] },
       ),
       async (params, context) => {
         const body: any = {
@@ -216,11 +251,11 @@ export class GitHubMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${GITHUB_API_BASE}/repos/${params.owner}/${params.repoName}/issues`,
-          { body, timeout: 300000 } // 5 minutes
+          { body, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Update issue
@@ -231,7 +266,9 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'Update an existing issue',
         'PATCH',
         [
-          createParameter('owner', 'string', 'Repository owner', { required: true }),
+          createParameter('owner', 'string', 'Repository owner', {
+            required: true,
+          }),
           CommonParameters.repoName,
           CommonParameters.issueNumber,
           createParameter('title', 'string', 'New title', { required: false }),
@@ -240,9 +277,11 @@ export class GitHubMCP extends BaseIntegrationMCP {
             required: false,
             enum: ['open', 'closed'],
           }),
-          createParameter('labels', 'array', 'Issue labels', { required: false }),
+          createParameter('labels', 'array', 'Issue labels', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['repo'] }
+        { requiredScopes: ['repo'] },
       ),
       async (params, context) => {
         const { owner, repoName, issueNumber, ...updates } = params;
@@ -251,11 +290,11 @@ export class GitHubMCP extends BaseIntegrationMCP {
           context.connectionId,
           'PATCH',
           `${GITHUB_API_BASE}/repos/${owner}/${repoName}/issues/${issueNumber}`,
-          { body: updates, timeout: 300000 } // 5 minutes
+          { body: updates, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Close issue
@@ -266,22 +305,24 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'Close an issue',
         'PATCH',
         [
-          createParameter('owner', 'string', 'Repository owner', { required: true }),
+          createParameter('owner', 'string', 'Repository owner', {
+            required: true,
+          }),
           CommonParameters.repoName,
           CommonParameters.issueNumber,
         ],
-        { requiredScopes: ['repo'] }
+        { requiredScopes: ['repo'] },
       ),
       async (params, context) => {
         const data = await this.makeRequest(
           context.connectionId,
           'PATCH',
           `${GITHUB_API_BASE}/repos/${params.owner}/${params.repoName}/issues/${params.issueNumber}`,
-          { body: { state: 'closed' }, timeout: 300000 } // 5 minutes
+          { body: { state: 'closed' }, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // ===== PULL REQUEST OPERATIONS =====
@@ -294,12 +335,14 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'List pull requests in a repository',
         'GET',
         [
-          createParameter('owner', 'string', 'Repository owner', { required: true }),
+          createParameter('owner', 'string', 'Repository owner', {
+            required: true,
+          }),
           CommonParameters.repoName,
           CommonParameters.state,
           CommonParameters.limit,
         ],
-        { requiredScopes: ['repo'] }
+        { requiredScopes: ['repo'] },
       ),
       async (params, context) => {
         const queryParams: any = {
@@ -311,14 +354,14 @@ export class GitHubMCP extends BaseIntegrationMCP {
           context.connectionId,
           'GET',
           `${GITHUB_API_BASE}/repos/${params.owner}/${params.repoName}/pulls`,
-          { params: queryParams, timeout: 300000 } // 5 minutes
+          { params: queryParams, timeout: 300000 }, // 5 minutes
         );
 
         return {
           pullRequests: data,
           count: data.length,
         };
-      }
+      },
     );
 
     // Create pull request
@@ -329,15 +372,25 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'Create a new pull request',
         'POST',
         [
-          createParameter('owner', 'string', 'Repository owner', { required: true }),
+          createParameter('owner', 'string', 'Repository owner', {
+            required: true,
+          }),
           CommonParameters.repoName,
           CommonParameters.title,
-          createParameter('head', 'string', 'Branch to merge from', { required: true }),
-          createParameter('base', 'string', 'Branch to merge into', { required: true }),
-          createParameter('body', 'string', 'PR description', { required: false }),
-          createParameter('draft', 'boolean', 'Create as draft PR', { default: false }),
+          createParameter('head', 'string', 'Branch to merge from', {
+            required: true,
+          }),
+          createParameter('base', 'string', 'Branch to merge into', {
+            required: true,
+          }),
+          createParameter('body', 'string', 'PR description', {
+            required: false,
+          }),
+          createParameter('draft', 'boolean', 'Create as draft PR', {
+            default: false,
+          }),
         ],
-        { requiredScopes: ['repo'] }
+        { requiredScopes: ['repo'] },
       ),
       async (params, context) => {
         const body: any = {
@@ -353,11 +406,11 @@ export class GitHubMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${GITHUB_API_BASE}/repos/${params.owner}/${params.repoName}/pulls`,
-          { body, timeout: 300000 } // 5 minutes
+          { body, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Update pull request
@@ -368,9 +421,13 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'Update an existing pull request',
         'PATCH',
         [
-          createParameter('owner', 'string', 'Repository owner', { required: true }),
+          createParameter('owner', 'string', 'Repository owner', {
+            required: true,
+          }),
           CommonParameters.repoName,
-          createParameter('pullNumber', 'number', 'Pull request number', { required: true }),
+          createParameter('pullNumber', 'number', 'Pull request number', {
+            required: true,
+          }),
           createParameter('title', 'string', 'New title', { required: false }),
           createParameter('body', 'string', 'New body', { required: false }),
           createParameter('state', 'string', 'PR state', {
@@ -378,7 +435,7 @@ export class GitHubMCP extends BaseIntegrationMCP {
             enum: ['open', 'closed'],
           }),
         ],
-        { requiredScopes: ['repo'] }
+        { requiredScopes: ['repo'] },
       ),
       async (params, context) => {
         const { owner, repoName, pullNumber, ...updates } = params;
@@ -387,11 +444,11 @@ export class GitHubMCP extends BaseIntegrationMCP {
           context.connectionId,
           'PATCH',
           `${GITHUB_API_BASE}/repos/${owner}/${repoName}/pulls/${pullNumber}`,
-          { body: updates, timeout: 300000 } // 5 minutes
+          { body: updates, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Merge pull request
@@ -402,17 +459,23 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'Merge a pull request',
         'PUT',
         [
-          createParameter('owner', 'string', 'Repository owner', { required: true }),
+          createParameter('owner', 'string', 'Repository owner', {
+            required: true,
+          }),
           CommonParameters.repoName,
-          createParameter('pullNumber', 'number', 'Pull request number', { required: true }),
-          createParameter('commitMessage', 'string', 'Merge commit message', { required: false }),
+          createParameter('pullNumber', 'number', 'Pull request number', {
+            required: true,
+          }),
+          createParameter('commitMessage', 'string', 'Merge commit message', {
+            required: false,
+          }),
           createParameter('mergeMethod', 'string', 'Merge method', {
             required: false,
             enum: ['merge', 'squash', 'rebase'],
             default: 'merge',
           }),
         ],
-        { requiredScopes: ['repo'] }
+        { requiredScopes: ['repo'] },
       ),
       async (params, context) => {
         const body: any = {
@@ -427,11 +490,11 @@ export class GitHubMCP extends BaseIntegrationMCP {
           context.connectionId,
           'PUT',
           `${GITHUB_API_BASE}/repos/${params.owner}/${params.repoName}/pulls/${params.pullNumber}/merge`,
-          { body, timeout: 300000 } // 5 minutes
+          { body, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // ===== BRANCH OPERATIONS =====
@@ -444,11 +507,13 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'List branches in a repository',
         'GET',
         [
-          createParameter('owner', 'string', 'Repository owner', { required: true }),
+          createParameter('owner', 'string', 'Repository owner', {
+            required: true,
+          }),
           CommonParameters.repoName,
           CommonParameters.limit,
         ],
-        { requiredScopes: ['repo'] }
+        { requiredScopes: ['repo'] },
       ),
       async (params, context) => {
         const queryParams: any = {
@@ -459,14 +524,14 @@ export class GitHubMCP extends BaseIntegrationMCP {
           context.connectionId,
           'GET',
           `${GITHUB_API_BASE}/repos/${params.owner}/${params.repoName}/branches`,
-          { params: queryParams, timeout: 300000 } // 5 minutes
+          { params: queryParams, timeout: 300000 }, // 5 minutes
         );
 
         return {
           branches: data,
           count: data.length,
         };
-      }
+      },
     );
 
     // Create branch
@@ -477,12 +542,18 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'Create a new branch',
         'POST',
         [
-          createParameter('owner', 'string', 'Repository owner', { required: true }),
+          createParameter('owner', 'string', 'Repository owner', {
+            required: true,
+          }),
           CommonParameters.repoName,
-          createParameter('branchName', 'string', 'New branch name', { required: true }),
-          createParameter('fromBranch', 'string', 'Source branch', { default: 'main' }),
+          createParameter('branchName', 'string', 'New branch name', {
+            required: true,
+          }),
+          createParameter('fromBranch', 'string', 'Source branch', {
+            default: 'main',
+          }),
         ],
-        { requiredScopes: ['repo'] }
+        { requiredScopes: ['repo'] },
       ),
       async (params, context) => {
         // First get the SHA of the source branch
@@ -490,7 +561,7 @@ export class GitHubMCP extends BaseIntegrationMCP {
           context.connectionId,
           'GET',
           `${GITHUB_API_BASE}/repos/${params.owner}/${params.repoName}/git/ref/heads/${params.fromBranch || 'main'}`,
-          { timeout: 300000 } // 5 minutes
+          { timeout: 300000 }, // 5 minutes
         );
 
         const sha = refData.object.sha;
@@ -506,11 +577,11 @@ export class GitHubMCP extends BaseIntegrationMCP {
               sha,
             },
             timeout: 300000, // 5 minutes
-          }
+          },
         );
 
         return data;
-      }
+      },
     );
 
     // Delete branch
@@ -521,28 +592,32 @@ export class GitHubMCP extends BaseIntegrationMCP {
         'Delete a branch',
         'DELETE',
         [
-          createParameter('owner', 'string', 'Repository owner', { required: true }),
+          createParameter('owner', 'string', 'Repository owner', {
+            required: true,
+          }),
           CommonParameters.repoName,
-          createParameter('branchName', 'string', 'Branch name to delete', { required: true }),
+          createParameter('branchName', 'string', 'Branch name to delete', {
+            required: true,
+          }),
         ],
         {
           requiredScopes: ['repo:delete'],
           dangerous: true,
-        }
+        },
       ),
       async (params, context) => {
         await this.makeRequest(
           context.connectionId,
           'DELETE',
           `${GITHUB_API_BASE}/repos/${params.owner}/${params.repoName}/git/refs/heads/${params.branchName}`,
-          { timeout: 300000 } // 5 minutes
+          { timeout: 300000 }, // 5 minutes
         );
 
         return {
           success: true,
           message: `Branch ${params.branchName} deleted successfully`,
         };
-      }
+      },
     );
   }
 }

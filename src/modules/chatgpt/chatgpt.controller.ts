@@ -6,11 +6,7 @@ import {
   HttpStatus,
   HttpException,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ChatGPTService } from './chatgpt.service';
 import { LoggerService } from '../../common/logger/logger.service';
 
@@ -48,7 +44,13 @@ interface ChatGPTRequestBody {
     budget_amount?: number;
     budget_period?: 'monthly' | 'quarterly' | 'yearly';
   };
-  action: 'track_usage' | 'create_project' | 'get_projects' | 'get_analytics' | 'generate_magic_link' | 'check_connection';
+  action:
+    | 'track_usage'
+    | 'create_project'
+    | 'get_projects'
+    | 'get_analytics'
+    | 'generate_magic_link'
+    | 'check_connection';
 }
 
 @ApiTags('ChatGPT Integration')
@@ -65,7 +67,8 @@ export class ChatGPTController {
   @Get('health')
   @ApiOperation({
     summary: 'ChatGPT integration health check',
-    description: 'Check if the ChatGPT integration with AI-powered insights is running',
+    description:
+      'Check if the ChatGPT integration with AI-powered insights is running',
   })
   @ApiResponse({ status: 200, description: 'Service is healthy' })
   async healthCheck() {
@@ -73,8 +76,13 @@ export class ChatGPTController {
       success: true,
       message: 'ChatGPT integration with AI-powered insights is running',
       version: '2.0.0',
-      ai_features: ['bedrock_optimization', 'smart_tips', 'usage_analysis', 'automatic_connection_checking'],
-      timestamp: new Date().toISOString()
+      ai_features: [
+        'bedrock_optimization',
+        'smart_tips',
+        'usage_analysis',
+        'automatic_connection_checking',
+      ],
+      timestamp: new Date().toISOString(),
     };
   }
 
@@ -84,7 +92,8 @@ export class ChatGPTController {
   @Post('action')
   @ApiOperation({
     summary: 'Handle ChatGPT Custom GPT actions',
-    description: 'Main endpoint for ChatGPT Custom GPT actions with automatic connection checking',
+    description:
+      'Main endpoint for ChatGPT Custom GPT actions with automatic connection checking',
   })
   @ApiResponse({ status: 200, description: 'Action executed successfully' })
   @ApiResponse({ status: 400, description: 'Invalid action or parameters' })
@@ -101,22 +110,24 @@ export class ChatGPTController {
         const result = await this.chatGPTService.generateMagicLink(
           body.email || body.onboarding?.email || '',
           body.name || body.onboarding?.name,
-          body.source || body.onboarding?.source || 'chatgpt'
+          body.source || body.onboarding?.source || 'chatgpt',
         );
         return result;
       }
 
       // Handle connection check action
       if (action === 'check_connection') {
-        const connectionStatus = await this.chatGPTService.checkConnectionStatus(body);
+        const connectionStatus =
+          await this.chatGPTService.checkConnectionStatus(body);
         return {
           success: true,
-          data: connectionStatus
+          data: connectionStatus,
         };
       }
 
       // For all other actions, automatically check connection status first
-      const connectionStatus = await this.chatGPTService.checkConnectionStatus(body);
+      const connectionStatus =
+        await this.chatGPTService.checkConnectionStatus(body);
 
       // If not connected, guide user through onboarding
       if (!connectionStatus.connected) {
@@ -130,8 +141,9 @@ export class ChatGPTController {
             step1: 'I need your email to create a magic link',
             step2: 'Click the magic link to instantly connect your account',
             step3: 'Come back here and start tracking your AI costs!',
-            example: 'Just say: "My email is john@example.com" and I\'ll create your magic link!'
-          }
+            example:
+              'Just say: "My email is john@example.com" and I\'ll create your magic link!',
+          },
         };
       }
 
@@ -141,44 +153,55 @@ export class ChatGPTController {
       // Route to appropriate handler
       switch (action) {
         case 'track_usage':
-          const usageResult = await this.chatGPTService.trackUsage(userId, body.conversation_data);
+          const usageResult = await this.chatGPTService.trackUsage(
+            userId,
+            body.conversation_data,
+          );
           return {
             success: true,
             message: 'Usage tracked successfully',
-            data: usageResult
+            data: usageResult,
           };
 
         case 'create_project':
-          const projectResult = await this.chatGPTService.createProject(userId, body.project);
+          const projectResult = await this.chatGPTService.createProject(
+            userId,
+            body.project,
+          );
           return {
             success: true,
             message: 'Project created successfully',
-            data: projectResult
+            data: projectResult,
           };
 
         case 'get_projects':
           const projectsResult = await this.chatGPTService.getProjects(userId);
           return {
             success: true,
-            data: projectsResult
+            data: projectsResult,
           };
 
         case 'get_analytics':
-          const analyticsResult = await this.chatGPTService.getAnalytics(userId);
+          const analyticsResult =
+            await this.chatGPTService.getAnalytics(userId);
           return {
             success: true,
-            data: analyticsResult
+            data: analyticsResult,
           };
 
         default:
-          this.logger.warn('ChatGPT action failed - invalid action', { action, userId });
+          this.logger.warn('ChatGPT action failed - invalid action', {
+            action,
+            userId,
+          });
 
           throw new HttpException(
             {
               success: false,
-              error: 'Invalid action. Supported actions: track_usage, create_project, get_projects, get_analytics, generate_magic_link, check_connection'
+              error:
+                'Invalid action. Supported actions: track_usage, create_project, get_projects, get_analytics, generate_magic_link, check_connection',
             },
-            HttpStatus.BAD_REQUEST
+            HttpStatus.BAD_REQUEST,
           );
       }
     } catch (error) {

@@ -48,6 +48,17 @@ export interface RateLimitDecision {
   reason: string;
 }
 
+let adaptiveRateLimitServiceInstance: AdaptiveRateLimitService | null = null;
+
+export function getAdaptiveRateLimitService(): AdaptiveRateLimitService {
+  if (!adaptiveRateLimitServiceInstance) {
+    throw new Error(
+      'AdaptiveRateLimitService not initialized. Ensure CommonModule is imported.',
+    );
+  }
+  return adaptiveRateLimitServiceInstance;
+}
+
 /**
  * Adaptive Rate Limiting Service
  * Dynamically adjusts rate limits based on system load, traffic patterns, and performance metrics
@@ -86,6 +97,7 @@ export class AdaptiveRateLimitService implements OnModuleDestroy {
     private readonly cacheService: CacheService,
     private readonly loggingService: LoggingService,
   ) {
+    adaptiveRateLimitServiceInstance = this;
     this.startSystemMonitoring();
     this.startAdaptationEngine();
   }

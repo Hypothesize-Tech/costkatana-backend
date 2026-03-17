@@ -17,7 +17,7 @@ import { RetrieveModule } from '../modules/retrieve.module';
 import { RerankModule } from '../modules/rerank.module';
 import { ReadModule } from '../modules/read.module';
 import { ChatBedrockConverse } from '@langchain/aws';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 import { Document } from '@langchain/core/documents';
 
 export class RecursiveRAGPattern extends BaseRAGPattern {
@@ -28,11 +28,11 @@ export class RecursiveRAGPattern extends BaseRAGPattern {
 
   constructor(config: RAGConfig) {
     super('RecursiveRAG', 'recursive', config);
-    
+
     this.retrieveModule = new RetrieveModule(config.modules.retrieve);
     this.rerankModule = new RerankModule(config.modules.rerank);
     this.readModule = new ReadModule(config.modules.read);
-    
+
     this.llm = new ChatBedrockConverse({
       model: 'anthropic.claude-3-sonnet-20240229-v1:0',
       region: process.env.AWS_REGION || 'us-east-1',
@@ -43,7 +43,7 @@ export class RecursiveRAGPattern extends BaseRAGPattern {
 
   protected async executePattern(
     query: string,
-    context: RAGContext
+    context: RAGContext,
   ): Promise<RAGResult> {
     const startTime = Date.now();
     const maxDepth = this.config.maxDepth || 2;
@@ -73,18 +73,26 @@ export class RecursiveRAGPattern extends BaseRAGPattern {
       loggingService.info('Recursive RAG: Query decomposed', {
         component: 'RecursiveRAGPattern',
         subQuestionsCount: state.subQuestions.length,
-        subQuestions: state.subQuestions.map(sq => sq.question.substring(0, 50)),
+        subQuestions: state.subQuestions.map((sq) =>
+          sq.question.substring(0, 50),
+        ),
       });
 
       // Step 2: Process sub-questions recursively
       // Process in parallel where possible (no dependencies)
-      const independentQuestions = state.subQuestions.filter(sq => !sq.dependencies || sq.dependencies.length === 0);
-      const dependentQuestions = state.subQuestions.filter(sq => sq.dependencies && sq.dependencies.length > 0);
+      const independentQuestions = state.subQuestions.filter(
+        (sq) => !sq.dependencies || sq.dependencies.length === 0,
+      );
+      const dependentQuestions = state.subQuestions.filter(
+        (sq) => sq.dependencies && sq.dependencies.length > 0,
+      );
 
       // Process independent questions in parallel
       if (independentQuestions.length > 0) {
         const independentResults = await Promise.all(
-          independentQuestions.map(sq => this.processSubQuestion(sq, state, context))
+          independentQuestions.map((sq) =>
+            this.processSubQuestion(sq, state, context),
+          ),
         );
 
         for (let i = 0; i < independentQuestions.length; i++) {
@@ -116,7 +124,7 @@ export class RecursiveRAGPattern extends BaseRAGPattern {
       const finalAnswer = await this.synthesizeAnswer(
         query,
         state.subQuestions,
-        state.results
+        state.results,
       );
       totalGenerationDuration += Date.now() - synthStart;
 
@@ -146,7 +154,8 @@ export class RecursiveRAGPattern extends BaseRAGPattern {
             generationDuration: totalGenerationDuration,
             moduleDurations: {
               subQuestions: state.subQuestions.length,
-              avgSubQuestionTime: (Date.now() - startTime) / state.subQuestions.length,
+              avgSubQuestionTime:
+                (Date.now() - startTime) / state.subQuestions.length,
             },
           },
           cacheHit: false,
@@ -160,7 +169,8 @@ export class RecursiveRAGPattern extends BaseRAGPattern {
 
       return {
         success: false,
-        answer: 'I apologize, but I encountered an error while processing your request.',
+        answer:
+          'I apologize, but I encountered an error while processing your request.',
         documents: [],
         sources: [],
         metadata: {
@@ -196,11 +206,16 @@ Provide the sub-questions as a numbered list:
 ...`;
 
     try {
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      const content = typeof response.content === 'string' ? response.content : '';
-      
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      const content =
+        typeof response.content === 'string' ? response.content : '';
+
       // Parse sub-questions
-      const lines = content.split('\n').filter(line => line.trim().length > 0);
+      const lines = content
+        .split('\n')
+        .filter((line) => line.trim().length > 0);
       const subQuestions: SubQuestion[] = [];
 
       for (const line of lines) {
@@ -217,11 +232,13 @@ Provide the sub-questions as a numbered list:
 
       // If decomposition failed, return original query as single sub-question
       if (subQuestions.length === 0) {
-        return [{
-          id: 'sq_1',
-          question: query,
-          depth: 0,
-        }];
+        return [
+          {
+            id: 'sq_1',
+            question: query,
+            depth: 0,
+          },
+        ];
       }
 
       return subQuestions;
@@ -231,11 +248,13 @@ Provide the sub-questions as a numbered list:
         error: error instanceof Error ? error.message : String(error),
       });
 
-      return [{
-        id: 'sq_1',
-        question: query,
-        depth: 0,
-      }];
+      return [
+        {
+          id: 'sq_1',
+          question: query,
+          depth: 0,
+        },
+      ];
     }
   }
 
@@ -245,7 +264,7 @@ Provide the sub-questions as a numbered list:
   private async processSubQuestion(
     subQuestion: SubQuestion,
     state: RecursiveState,
-    context: RAGContext
+    context: RAGContext,
   ): Promise<SubQuestionResult> {
     loggingService.info('Recursive RAG: Processing sub-question', {
       component: 'RecursiveRAGPattern',
@@ -267,12 +286,18 @@ Provide the sub-questions as a numbered list:
 
       // Retrieve documents for this sub-question
       const retrieveResult = await this.retrieveModule.execute({
-        query: subQuestion.question + (dependencyContext ? `\n\nContext: ${dependencyContext}` : ''),
+        query:
+          subQuestion.question +
+          (dependencyContext ? `\n\nContext: ${dependencyContext}` : ''),
         context,
         config: this.config.modules.retrieve,
       });
 
-      if (!retrieveResult.success || !retrieveResult.documents || retrieveResult.documents.length === 0) {
+      if (
+        !retrieveResult.success ||
+        !retrieveResult.documents ||
+        retrieveResult.documents.length === 0
+      ) {
         // Return empty result if retrieval fails
         return {
           questionId: subQuestion.id,
@@ -289,9 +314,10 @@ Provide the sub-questions as a numbered list:
         config: this.config.modules.rerank,
       });
 
-      const docs = rerankResult.success && rerankResult.documents
-        ? rerankResult.documents
-        : retrieveResult.documents;
+      const docs =
+        rerankResult.success && rerankResult.documents
+          ? rerankResult.documents
+          : retrieveResult.documents;
 
       // Extract context
       const readResult = await this.readModule.execute({
@@ -301,15 +327,18 @@ Provide the sub-questions as a numbered list:
         config: this.config.modules.read,
       });
 
-      const extractedContext = typeof readResult.data === 'object' && readResult.data !== null && 'extractedContext' in readResult.data
-        ? String(readResult.data.extractedContext)
-        : '';
+      const extractedContext =
+        typeof readResult.data === 'object' &&
+        readResult.data !== null &&
+        'extractedContext' in readResult.data
+          ? String(readResult.data.extractedContext)
+          : '';
 
       // Generate answer
       const answer = await this.generateSubAnswer(
         subQuestion.question,
         extractedContext,
-        dependencyContext
+        dependencyContext,
       );
 
       // Calculate confidence based on documents and answer quality
@@ -343,7 +372,7 @@ Provide the sub-questions as a numbered list:
   private async generateSubAnswer(
     subQuestion: string,
     context: string,
-    dependencyContext: string
+    dependencyContext: string,
   ): Promise<string> {
     let prompt = `Answer the following sub-question based on the provided context. Be concise and focused.
 
@@ -357,8 +386,8 @@ ${context}`;
     prompt += `\n\nSub-question: ${subQuestion}\n\nAnswer:`;
 
     const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-    return typeof response.content === 'string' 
-      ? response.content.trim() 
+    return typeof response.content === 'string'
+      ? response.content.trim()
       : 'Unable to generate answer';
   }
 
@@ -368,11 +397,11 @@ ${context}`;
   private async synthesizeAnswer(
     originalQuery: string,
     subQuestions: SubQuestion[],
-    results: Map<string, SubQuestionResult>
+    results: Map<string, SubQuestionResult>,
   ): Promise<string> {
     // Build synthesis prompt with all sub-answers
     let synthesisContext = '';
-    
+
     for (const sq of subQuestions) {
       const result = results.get(sq.id);
       if (result) {
@@ -389,9 +418,11 @@ Sub-questions and answers:${synthesisContext}
 Synthesized comprehensive answer:`;
 
     try {
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      return typeof response.content === 'string' 
-        ? response.content.trim() 
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      return typeof response.content === 'string'
+        ? response.content.trim()
         : 'Unable to synthesize final answer';
     } catch (error) {
       // Fallback: concatenate sub-answers
@@ -414,12 +445,13 @@ Synthesized comprehensive answer:`;
 
     // More documents = higher confidence
     if (documents.length >= 3) confidence += 0.2;
-    
+
     // Longer answer = higher confidence
     if (answer.length > 200) confidence += 0.2;
-    
+
     // Has specific details = higher confidence
-    if (answer.match(/\d+/) || answer.includes('specifically')) confidence += 0.1;
+    if (answer.match(/\d+/) || answer.includes('specifically'))
+      confidence += 0.1;
 
     return Math.min(confidence, 1.0);
   }
@@ -432,7 +464,8 @@ Synthesized comprehensive answer:`;
     const deduplicated: Document[] = [];
 
     for (const doc of documents) {
-      const key = doc.metadata._id as string || doc.pageContent.substring(0, 100);
+      const key =
+        (doc.metadata._id as string) || doc.pageContent.substring(0, 100);
       if (!seen.has(key)) {
         seen.add(key);
         deduplicated.push(doc);
@@ -447,7 +480,7 @@ Synthesized comprehensive answer:`;
    */
   private extractSources(documents: any[]): string[] {
     const sources = new Set<string>();
-    
+
     for (const doc of documents) {
       const source = doc.metadata?.fileName || doc.metadata?.source;
       if (source) {
@@ -462,7 +495,8 @@ Synthesized comprehensive answer:`;
     return {
       name: 'Recursive RAG',
       type: 'recursive',
-      description: 'Decomposes complex questions into sub-questions and synthesizes comprehensive answers',
+      description:
+        'Decomposes complex questions into sub-questions and synthesizes comprehensive answers',
       useCases: [
         'Multi-part analytical queries',
         'Comparative analysis (compare X, Y, Z)',
@@ -475,4 +509,3 @@ Synthesized comprehensive answer:`;
     };
   }
 }
-

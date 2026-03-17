@@ -144,7 +144,9 @@ export class SubscriptionService {
    * Get subscription formatted for API response (matches frontend Subscription type).
    * Creates default subscription if user has none.
    */
-  async getSubscriptionForApi(userId: string): Promise<Record<string, unknown>> {
+  async getSubscriptionForApi(
+    userId: string,
+  ): Promise<Record<string, unknown>> {
     let subscription = await this.getSubscriptionByUserId(userId);
     if (!subscription) {
       this.logger.debug('No subscription found, creating default', { userId });
@@ -152,7 +154,9 @@ export class SubscriptionService {
     }
 
     const subDoc = subscription as SubscriptionDocument & {
-      metadata?: { cortexDailyUsage?: { currentCount?: number; lastResetDate?: Date } };
+      metadata?: {
+        cortexDailyUsage?: { currentCount?: number; lastResetDate?: Date };
+      };
     };
     const planLimits =
       SUBSCRIPTION_PLAN_LIMITS[
@@ -161,8 +165,8 @@ export class SubscriptionService {
     const cortexLimit =
       typeof (planLimits as { cortexDailyUsage?: { limit: number } })
         ?.cortexDailyUsage === 'object'
-        ? (planLimits as { cortexDailyUsage: { limit: number } }).cortexDailyUsage
-            ?.limit ?? 0
+        ? ((planLimits as { cortexDailyUsage: { limit: number } })
+            .cortexDailyUsage?.limit ?? 0)
         : 0;
     const cortex = subDoc.metadata?.cortexDailyUsage ?? {};
     const cortexUsed = cortex.currentCount ?? 0;
@@ -172,15 +176,28 @@ export class SubscriptionService {
       userId: subscription.userId,
       plan: subscription.plan,
       status: subscription.status,
-      startDate: subscription.currentPeriodStart?.toISOString?.() ?? new Date().toISOString(),
+      startDate:
+        subscription.currentPeriodStart?.toISOString?.() ??
+        new Date().toISOString(),
       endDate: subscription.currentPeriodEnd?.toISOString?.() ?? undefined,
-      trialStart: (subDoc.metadata as any)?.trialStart?.toISOString?.() ?? undefined,
-      trialEnd: (subDoc.metadata as any)?.trialEnd?.toISOString?.() ?? undefined,
+      trialStart:
+        (subDoc.metadata as any)?.trialStart?.toISOString?.() ?? undefined,
+      trialEnd:
+        (subDoc.metadata as any)?.trialEnd?.toISOString?.() ?? undefined,
       isTrial: !!(subDoc.metadata as any)?.isTrial,
       limits: {
-        tokensPerMonth: subscription.usageLimits?.tokensPerMonth ?? planLimits.tokensPerMonth ?? 0,
-        requestsPerMonth: subscription.usageLimits?.requestsPerMonth ?? planLimits.requestsPerMonth ?? 0,
-        logsPerMonth: subscription.usageLimits?.logsPerMonth ?? planLimits.logsPerMonth ?? 0,
+        tokensPerMonth:
+          subscription.usageLimits?.tokensPerMonth ??
+          planLimits.tokensPerMonth ??
+          0,
+        requestsPerMonth:
+          subscription.usageLimits?.requestsPerMonth ??
+          planLimits.requestsPerMonth ??
+          0,
+        logsPerMonth:
+          subscription.usageLimits?.logsPerMonth ??
+          planLimits.logsPerMonth ??
+          0,
         projects: (planLimits as { projects?: number }).projects ?? 1,
         agentTraces: (planLimits as { agentTraces?: number }).agentTraces ?? 10,
         seats: (planLimits as { seats?: number }).seats ?? 1,
@@ -202,7 +219,9 @@ export class SubscriptionService {
             amount: subscription.billing.amount ?? 0,
             currency: subscription.billing.currency ?? 'USD',
             interval: subscription.billing.interval ?? 'monthly',
-            nextBillingDate: subscription.billing.nextBillingDate?.toISOString?.() ?? undefined,
+            nextBillingDate:
+              subscription.billing.nextBillingDate?.toISOString?.() ??
+              undefined,
             cancelAtPeriodEnd: subscription.cancelAtPeriodEnd ?? false,
             canceledAt: subscription.cancelledAt?.toISOString?.() ?? undefined,
           }
@@ -213,18 +232,26 @@ export class SubscriptionService {
             cancelAtPeriodEnd: false,
           },
       paymentMethod: subDoc.paymentMethodId
-        ? (typeof subDoc.paymentMethodId === 'object' && subDoc.paymentMethodId !== null
-            ? {
-                paymentGateway: (subDoc.paymentMethodId as any)?.paymentGateway ?? 'none',
-                lastFour: (subDoc.paymentMethodId as any)?.lastFour,
-                brand: (subDoc.paymentMethodId as any)?.brand,
-              }
-            : undefined)
+        ? typeof subDoc.paymentMethodId === 'object' &&
+          subDoc.paymentMethodId !== null
+          ? {
+              paymentGateway:
+                (subDoc.paymentMethodId as any)?.paymentGateway ?? 'none',
+              lastFour: (subDoc.paymentMethodId as any)?.lastFour,
+              brand: (subDoc.paymentMethodId as any)?.brand,
+            }
+          : undefined
         : undefined,
-      allowedModels: (planLimits as { allowedModels?: string[] }).allowedModels ?? [],
-      features: subscription.features ?? (planLimits as { features?: string[] }).features ?? [],
-      createdAt: subscription.createdAt?.toISOString?.() ?? new Date().toISOString(),
-      updatedAt: subscription.updatedAt?.toISOString?.() ?? new Date().toISOString(),
+      allowedModels:
+        (planLimits as { allowedModels?: string[] }).allowedModels ?? [],
+      features:
+        subscription.features ??
+        (planLimits as { features?: string[] }).features ??
+        [],
+      createdAt:
+        subscription.createdAt?.toISOString?.() ?? new Date().toISOString(),
+      updatedAt:
+        subscription.updatedAt?.toISOString?.() ?? new Date().toISOString(),
     };
   }
 

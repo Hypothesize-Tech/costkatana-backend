@@ -10,7 +10,7 @@ import {
   RoutingConfig,
   RouteDefinition,
 } from '../types/rag.types';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 export interface RoutingDecision {
   route: string;
@@ -29,7 +29,7 @@ export class RoutingModule extends BaseRAGModule {
   }
 
   protected async executeInternal(
-    input: RAGModuleInput
+    input: RAGModuleInput,
   ): Promise<RAGModuleOutput> {
     const { query, config } = input;
 
@@ -62,7 +62,7 @@ export class RoutingModule extends BaseRAGModule {
    */
   private async determineRoute(
     query: string,
-    config: RoutingConfig
+    config: RoutingConfig,
   ): Promise<RoutingDecision> {
     const strategy = config.strategy || 'hybrid';
 
@@ -84,7 +84,7 @@ export class RoutingModule extends BaseRAGModule {
    */
   private async semanticRouting(
     query: string,
-    config: RoutingConfig
+    config: RoutingConfig,
   ): Promise<RoutingDecision> {
     const lowerQuery = query.toLowerCase();
 
@@ -125,15 +125,15 @@ export class RoutingModule extends BaseRAGModule {
     // Calculate scores
     const knowledgeScore = this.calculatePatternScore(
       lowerQuery,
-      knowledgePatterns
+      knowledgePatterns,
     );
     const userDataScore = this.calculatePatternScore(
       lowerQuery,
-      userDataPatterns
+      userDataPatterns,
     );
     const realTimeScore = this.calculatePatternScore(
       lowerQuery,
-      realTimePatterns
+      realTimePatterns,
     );
 
     // Determine route based on highest score
@@ -186,7 +186,7 @@ export class RoutingModule extends BaseRAGModule {
    */
   private keywordRouting(
     query: string,
-    config: RoutingConfig
+    config: RoutingConfig,
   ): RoutingDecision {
     const routes = config.routes || this.getDefaultRoutes();
     const lowerQuery = query.toLowerCase();
@@ -216,19 +216,19 @@ export class RoutingModule extends BaseRAGModule {
    */
   private async mlBasedRouting(
     query: string,
-    config: RoutingConfig
+    config: RoutingConfig,
   ): Promise<RoutingDecision> {
     // Use semantic analysis as ML-based approach
     const semanticDecision = await this.semanticRouting(query, config);
     const keywordDecision = this.keywordRouting(query, config);
-    
+
     // Combine decisions with weighted voting
     if (semanticDecision.confidence > 0.8 || keywordDecision.confidence > 0.8) {
-      return semanticDecision.confidence > keywordDecision.confidence 
-        ? semanticDecision 
+      return semanticDecision.confidence > keywordDecision.confidence
+        ? semanticDecision
         : keywordDecision;
     }
-    
+
     return this.hybridRouting(query, config);
   }
 
@@ -237,7 +237,7 @@ export class RoutingModule extends BaseRAGModule {
    */
   private async hybridRouting(
     query: string,
-    config: RoutingConfig
+    config: RoutingConfig,
   ): Promise<RoutingDecision> {
     // Get decisions from both semantic and keyword routing
     const semanticDecision = await this.semanticRouting(query, config);
@@ -252,7 +252,7 @@ export class RoutingModule extends BaseRAGModule {
         ...semanticDecision,
         confidence: Math.min(
           (semanticDecision.confidence + keywordDecision.confidence) / 2 + 0.1,
-          1.0
+          1.0,
         ),
         reasoning: `Hybrid: ${semanticDecision.reasoning} + keyword matching`,
       };
@@ -358,4 +358,3 @@ export class RoutingModule extends BaseRAGModule {
     return validStrategies.includes(this.config.strategy);
   }
 }
-

@@ -5,7 +5,7 @@ import {
   HumanMessage,
   AIMessage,
 } from '@langchain/core/messages';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 export interface ChatMessage {
   senderType: 'user' | 'support' | 'system' | 'ai';

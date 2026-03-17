@@ -4,7 +4,11 @@
  */
 
 import { BaseIntegrationMCP } from './base-integration.mcp';
-import { createToolSchema, createParameter, CommonParameters } from '../registry/tool-metadata';
+import {
+  createToolSchema,
+  createParameter,
+  CommonParameters,
+} from '../registry/tool-metadata';
 
 const VERCEL_API_BASE = 'https://api.vercel.com';
 
@@ -15,7 +19,7 @@ export class VercelMCP extends BaseIntegrationMCP {
 
   registerTools(): void {
     // ===== PROJECT OPERATIONS =====
-    
+
     // List projects
     this.registerTool(
       createToolSchema(
@@ -24,10 +28,20 @@ export class VercelMCP extends BaseIntegrationMCP {
         'List all Vercel projects',
         'GET',
         [
-          createParameter('limit', 'number', 'Maximum number of projects to return', { default: 20 }),
-          createParameter('search', 'string', 'Search query for project names', { required: false }),
+          createParameter(
+            'limit',
+            'number',
+            'Maximum number of projects to return',
+            { default: 20 },
+          ),
+          createParameter(
+            'search',
+            'string',
+            'Search query for project names',
+            { required: false },
+          ),
         ],
-        { requiredScopes: ['projects:read'] }
+        { requiredScopes: ['projects:read'] },
       ),
       async (params, context) => {
         const queryParams: any = { limit: params.limit || 20 };
@@ -39,7 +53,7 @@ export class VercelMCP extends BaseIntegrationMCP {
           context.connectionId,
           'GET',
           `${VERCEL_API_BASE}/v9/projects`,
-          { params: queryParams, timeout: 300000 } // 30 second timeout
+          { params: queryParams, timeout: 300000 }, // 30 second timeout
         );
 
         return {
@@ -47,7 +61,7 @@ export class VercelMCP extends BaseIntegrationMCP {
           count: data.projects?.length || 0,
           pagination: data.pagination,
         };
-      }
+      },
     );
 
     // Get project
@@ -58,18 +72,18 @@ export class VercelMCP extends BaseIntegrationMCP {
         'Get details of a specific Vercel project',
         'GET',
         [CommonParameters.projectId],
-        { requiredScopes: ['projects:read'] }
+        { requiredScopes: ['projects:read'] },
       ),
       async (params, context) => {
         const data = await this.makeRequest(
           context.connectionId,
           'GET',
           `${VERCEL_API_BASE}/v9/projects/${params.projectId}`,
-          { timeout: 500000 } // 5 min timeout for deployment cancellation
+          { timeout: 500000 }, // 5 min timeout for deployment cancellation
         );
 
         return data;
-      }
+      },
     );
 
     // Create project
@@ -81,11 +95,26 @@ export class VercelMCP extends BaseIntegrationMCP {
         'POST',
         [
           CommonParameters.projectName,
-          createParameter('framework', 'string', 'Framework preset (nextjs, vite, etc)', { required: false }),
-          createParameter('gitRepository', 'object', 'Git repository configuration', { required: false }),
-          createParameter('environmentVariables', 'array', 'Environment variables', { required: false }),
+          createParameter(
+            'framework',
+            'string',
+            'Framework preset (nextjs, vite, etc)',
+            { required: false },
+          ),
+          createParameter(
+            'gitRepository',
+            'object',
+            'Git repository configuration',
+            { required: false },
+          ),
+          createParameter(
+            'environmentVariables',
+            'array',
+            'Environment variables',
+            { required: false },
+          ),
         ],
-        { requiredScopes: ['projects:write'] }
+        { requiredScopes: ['projects:write'] },
       ),
       async (params, context) => {
         const body: any = {
@@ -108,11 +137,11 @@ export class VercelMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${VERCEL_API_BASE}/v9/projects`,
-          { body, timeout: 500000 } // 5 min timeout for project creation
+          { body, timeout: 500000 }, // 5 min timeout for project creation
         );
 
         return data;
-      }
+      },
     );
 
     // Update project
@@ -124,25 +153,33 @@ export class VercelMCP extends BaseIntegrationMCP {
         'PATCH',
         [
           CommonParameters.projectId,
-          createParameter('name', 'string', 'New project name', { required: false }),
-          createParameter('framework', 'string', 'Framework preset', { required: false }),
-          createParameter('buildCommand', 'string', 'Custom build command', { required: false }),
-          createParameter('outputDirectory', 'string', 'Output directory', { required: false }),
+          createParameter('name', 'string', 'New project name', {
+            required: false,
+          }),
+          createParameter('framework', 'string', 'Framework preset', {
+            required: false,
+          }),
+          createParameter('buildCommand', 'string', 'Custom build command', {
+            required: false,
+          }),
+          createParameter('outputDirectory', 'string', 'Output directory', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['projects:write'] }
+        { requiredScopes: ['projects:write'] },
       ),
       async (params, context) => {
         const { projectId, ...updates } = params;
-        
+
         const data = await this.makeRequest(
           context.connectionId,
           'PATCH',
           `${VERCEL_API_BASE}/v9/projects/${projectId}`,
-          { body: updates, timeout: 30000 } // 30 second timeout
+          { body: updates, timeout: 30000 }, // 30 second timeout
         );
 
         return data;
-      }
+      },
     );
 
     // Delete project
@@ -153,24 +190,24 @@ export class VercelMCP extends BaseIntegrationMCP {
         'Delete a Vercel project',
         'DELETE',
         [CommonParameters.projectId],
-        { 
+        {
           requiredScopes: ['projects:delete'],
           dangerous: true,
-        }
+        },
       ),
       async (params, context) => {
         await this.makeRequest(
           context.connectionId,
           'DELETE',
           `${VERCEL_API_BASE}/v9/projects/${params.projectId}`,
-          { timeout: 500000 } // 5 min timeout for deployment cancellation
+          { timeout: 500000 }, // 5 min timeout for deployment cancellation
         );
 
         return {
           success: true,
           message: `Project ${params.projectId} deleted successfully`,
         };
-      }
+      },
     );
 
     // ===== DEPLOYMENT OPERATIONS =====
@@ -187,17 +224,24 @@ export class VercelMCP extends BaseIntegrationMCP {
           CommonParameters.limit,
           createParameter('state', 'string', 'Filter by deployment state', {
             required: false,
-            enum: ['BUILDING', 'ERROR', 'INITIALIZING', 'QUEUED', 'READY', 'CANCELED'],
+            enum: [
+              'BUILDING',
+              'ERROR',
+              'INITIALIZING',
+              'QUEUED',
+              'READY',
+              'CANCELED',
+            ],
           }),
         ],
-        { requiredScopes: ['deployments:read'] }
+        { requiredScopes: ['deployments:read'] },
       ),
       async (params, context) => {
         const queryParams: any = {
           projectId: params.projectId,
           limit: params.limit || 20,
         };
-        
+
         if (params.state) {
           queryParams.state = params.state;
         }
@@ -206,7 +250,7 @@ export class VercelMCP extends BaseIntegrationMCP {
           context.connectionId,
           'GET',
           `${VERCEL_API_BASE}/v6/deployments`,
-          { params: queryParams, timeout: 30000 } // 30 second timeout
+          { params: queryParams, timeout: 30000 }, // 30 second timeout
         );
 
         return {
@@ -214,7 +258,7 @@ export class VercelMCP extends BaseIntegrationMCP {
           count: data.deployments?.length || 0,
           pagination: data.pagination,
         };
-      }
+      },
     );
 
     // Get deployment
@@ -225,18 +269,18 @@ export class VercelMCP extends BaseIntegrationMCP {
         'Get details of a specific deployment',
         'GET',
         [CommonParameters.deploymentId],
-        { requiredScopes: ['deployments:read'] }
+        { requiredScopes: ['deployments:read'] },
       ),
       async (params, context) => {
         const data = await this.makeRequest(
           context.connectionId,
           'GET',
           `${VERCEL_API_BASE}/v13/deployments/${params.deploymentId}`,
-          { timeout: 500000 } // 5 min timeout for deployment cancellation
+          { timeout: 500000 }, // 5 min timeout for deployment cancellation
         );
 
         return data;
-      }
+      },
     );
 
     // Create deployment
@@ -248,14 +292,16 @@ export class VercelMCP extends BaseIntegrationMCP {
         'POST',
         [
           CommonParameters.projectName,
-          createParameter('gitSource', 'object', 'Git source information', { required: false }),
+          createParameter('gitSource', 'object', 'Git source information', {
+            required: false,
+          }),
           createParameter('target', 'string', 'Deployment target', {
             required: false,
             enum: ['production', 'preview'],
             default: 'preview',
           }),
         ],
-        { requiredScopes: ['deployments:write'] }
+        { requiredScopes: ['deployments:write'] },
       ),
       async (params, context) => {
         const body: any = {
@@ -271,11 +317,11 @@ export class VercelMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${VERCEL_API_BASE}/v13/deployments`,
-          { body, timeout: 60000 } // 60 second timeout for deployment creation
+          { body, timeout: 60000 }, // 60 second timeout for deployment creation
         );
 
         return data;
-      }
+      },
     );
 
     // Rollback deployment (cancel)
@@ -286,21 +332,21 @@ export class VercelMCP extends BaseIntegrationMCP {
         'Rollback (cancel) a deployment',
         'POST',
         [CommonParameters.deploymentId],
-        { requiredScopes: ['deployments:write'] }
+        { requiredScopes: ['deployments:write'] },
       ),
       async (params, context) => {
         await this.makeRequest(
           context.connectionId,
           'PATCH',
           `${VERCEL_API_BASE}/v13/deployments/${params.deploymentId}/cancel`,
-          { timeout: 500000 } // 5 min timeout for deployment cancellation
+          { timeout: 500000 }, // 5 min timeout for deployment cancellation
         );
 
         return {
           success: true,
           message: `Deployment ${params.deploymentId} cancelled`,
         };
-      }
+      },
     );
 
     // ===== DOMAIN OPERATIONS =====
@@ -313,21 +359,21 @@ export class VercelMCP extends BaseIntegrationMCP {
         'List domains for a project',
         'GET',
         [CommonParameters.projectId],
-        { requiredScopes: ['domains:read'] }
+        { requiredScopes: ['domains:read'] },
       ),
       async (params, context) => {
         const data = await this.makeRequest(
           context.connectionId,
           'GET',
           `${VERCEL_API_BASE}/v9/projects/${params.projectId}/domains`,
-          { timeout: 500000 } // 5 min timeout for deployment cancellation
+          { timeout: 500000 }, // 5 min timeout for deployment cancellation
         );
 
         return {
           domains: data.domains || [],
           count: data.domains?.length || 0,
         };
-      }
+      },
     );
 
     // Add domain
@@ -339,10 +385,14 @@ export class VercelMCP extends BaseIntegrationMCP {
         'POST',
         [
           CommonParameters.projectId,
-          createParameter('domain', 'string', 'Domain name to add', { required: true }),
-          createParameter('redirect', 'string', 'Redirect domain', { required: false }),
+          createParameter('domain', 'string', 'Domain name to add', {
+            required: true,
+          }),
+          createParameter('redirect', 'string', 'Redirect domain', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['domains:write'] }
+        { requiredScopes: ['domains:write'] },
       ),
       async (params, context) => {
         const body: any = {
@@ -357,11 +407,11 @@ export class VercelMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${VERCEL_API_BASE}/v9/projects/${params.projectId}/domains`,
-          { body, timeout: 30000 } // 30 second timeout
+          { body, timeout: 30000 }, // 30 second timeout
         );
 
         return data;
-      }
+      },
     );
 
     // Remove domain
@@ -373,26 +423,28 @@ export class VercelMCP extends BaseIntegrationMCP {
         'DELETE',
         [
           CommonParameters.projectId,
-          createParameter('domain', 'string', 'Domain name to remove', { required: true }),
+          createParameter('domain', 'string', 'Domain name to remove', {
+            required: true,
+          }),
         ],
-        { 
+        {
           requiredScopes: ['domains:write'],
           dangerous: true,
-        }
+        },
       ),
       async (params, context) => {
         await this.makeRequest(
           context.connectionId,
           'DELETE',
           `${VERCEL_API_BASE}/v9/projects/${params.projectId}/domains/${params.domain}`,
-          { timeout: 500000 } // 5 min timeout for deployment cancellation
+          { timeout: 500000 }, // 5 min timeout for deployment cancellation
         );
 
         return {
           success: true,
           message: `Domain ${params.domain} removed from project`,
         };
-      }
+      },
     );
 
     // ===== ENVIRONMENT VARIABLE OPERATIONS =====
@@ -405,21 +457,21 @@ export class VercelMCP extends BaseIntegrationMCP {
         'List environment variables for a project',
         'GET',
         [CommonParameters.projectId],
-        { requiredScopes: ['env:read'] }
+        { requiredScopes: ['env:read'] },
       ),
       async (params, context) => {
         const data = await this.makeRequest(
           context.connectionId,
           'GET',
           `${VERCEL_API_BASE}/v9/projects/${params.projectId}/env`,
-          { timeout: 500000 } // 5 min timeout for deployment cancellation
+          { timeout: 500000 }, // 5 min timeout for deployment cancellation
         );
 
         return {
           envs: data.envs || [],
           count: data.envs?.length || 0,
         };
-      }
+      },
     );
 
     // Set environment variable
@@ -431,8 +483,12 @@ export class VercelMCP extends BaseIntegrationMCP {
         'POST',
         [
           CommonParameters.projectId,
-          createParameter('key', 'string', 'Environment variable key', { required: true }),
-          createParameter('value', 'string', 'Environment variable value', { required: true }),
+          createParameter('key', 'string', 'Environment variable key', {
+            required: true,
+          }),
+          createParameter('value', 'string', 'Environment variable value', {
+            required: true,
+          }),
           createParameter('target', 'array', 'Deployment targets', {
             required: false,
             default: ['production', 'preview', 'development'],
@@ -443,7 +499,7 @@ export class VercelMCP extends BaseIntegrationMCP {
             default: 'encrypted',
           }),
         ],
-        { requiredScopes: ['env:write'] }
+        { requiredScopes: ['env:write'] },
       ),
       async (params, context) => {
         const body = {
@@ -457,11 +513,11 @@ export class VercelMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           `${VERCEL_API_BASE}/v10/projects/${params.projectId}/env`,
-          { body, timeout: 20000 } // 20 second timeout
+          { body, timeout: 20000 }, // 20 second timeout
         );
 
         return data;
-      }
+      },
     );
 
     // Delete environment variable
@@ -473,26 +529,28 @@ export class VercelMCP extends BaseIntegrationMCP {
         'DELETE',
         [
           CommonParameters.projectId,
-          createParameter('envId', 'string', 'Environment variable ID', { required: true }),
+          createParameter('envId', 'string', 'Environment variable ID', {
+            required: true,
+          }),
         ],
-        { 
+        {
           requiredScopes: ['env:write'],
           dangerous: true,
-        }
+        },
       ),
       async (params, context) => {
         await this.makeRequest(
           context.connectionId,
           'DELETE',
           `${VERCEL_API_BASE}/v9/projects/${params.projectId}/env/${params.envId}`,
-          { timeout: 500000 } // 5 min timeout for deployment cancellation
+          { timeout: 500000 }, // 5 min timeout for deployment cancellation
         );
 
         return {
           success: true,
           message: `Environment variable deleted successfully`,
         };
-      }
+      },
     );
   }
 }

@@ -26,7 +26,7 @@ describe('AdaptiveRAGPattern', () => {
 
       const result = await adaptivePattern.execute(
         'What are the latest cloud cost optimization techniques?',
-        context
+        context,
       );
 
       expect(result.success).toBe(true);
@@ -40,10 +40,7 @@ describe('AdaptiveRAGPattern', () => {
         userId: 'test-user',
       };
 
-      const result = await adaptivePattern.execute(
-        'What is 2 + 2?',
-        context
-      );
+      const result = await adaptivePattern.execute('What is 2 + 2?', context);
 
       expect(result.success).toBe(true);
       expect(result.answer).toBeDefined();
@@ -56,7 +53,7 @@ describe('AdaptiveRAGPattern', () => {
 
       const result = await adaptivePattern.execute(
         'Tell me about AWS pricing and my usage',
-        context
+        context,
       );
 
       expect(result.success).toBe(true);
@@ -68,11 +65,13 @@ describe('AdaptiveRAGPattern', () => {
         userId: 'test-user',
       };
 
-      const result = await adaptivePattern.execute('What is serverless computing?', context);
+      const result = await adaptivePattern.execute(
+        'What is serverless computing?',
+        context,
+      );
 
       expect(result.metadata).toHaveProperty('modulesUsed');
       expect(Array.isArray(result.metadata.modulesUsed)).toBe(true);
     });
   });
 });
-

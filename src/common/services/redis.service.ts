@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { createClient, RedisClientType } from 'redis';
 import * as crypto from 'crypto';
-import { ChatBedrockConverse } from '@langchain/aws';
+import { createSafeBedrockEmbeddings } from '../../services/safeBedrockEmbeddings';
 import { LRUCache } from 'lru-cache';
 import { CostStreamingService } from '../../modules/telemetry/services/cost-streaming.service';
 import {
@@ -59,7 +59,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
   public client!: RedisClientType;
   private readerClient!: RedisClientType;
-  private embeddingModel: ChatBedrockConverse;
+  private embeddingModel: ReturnType<typeof createSafeBedrockEmbeddings>;
   private _isConnected: boolean = false;
   private inMemoryCache: LRUCache<string, { value: string; expiry: number }>;
   private isLocalDev: boolean = false;
@@ -106,13 +106,19 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       this.setupRedisClients();
     }
 
-    // Initialize embedding model for semantic caching
-    this.embeddingModel = new ChatBedrockConverse({
-      model: 'amazon.nova-micro-v1:0',
-      region: process.env.AWS_REGION || 'us-east-1',
-      temperature: 0,
-      maxTokens: 100,
-    });
+    // Initialize embedding model for semantic caching (real Bedrock embeddings)
+    try {
+      this.embeddingModel = createSafeBedrockEmbeddings({
+        model:
+          process.env.RAG_EMBEDDING_MODEL || 'amazon.titan-embed-text-v2:0',
+      });
+    } catch (error) {
+      this.logger.warn(
+        'Redis: SafeBedrockEmbeddings init failed, semantic cache will use fallback',
+        { error: error instanceof Error ? error.message : String(error) },
+      );
+      this.embeddingModel = null as any;
+    }
   }
 
   async onModuleInit() {
@@ -461,11 +467,12 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   private async generateEmbedding(text: string): Promise<number[]> {
     try {
       // Validate input - AWS Bedrock requires minLength: 1
+      const EMBEDDING_DIM = 1024;
       if (!text || text.trim().length === 0) {
         this.logger.warn(
           'Empty text provided to generateEmbedding, returning zero vector',
         );
-        return new Array(384).fill(0);
+        return new Array(EMBEDDING_DIM).fill(0);
       }
 
       const cleanText = text.trim();
@@ -477,22 +484,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         return JSON.parse(cachedEmbedding);
       }
 
-      // Try to use AWS Bedrock embedding model first
-      const embedding: number[] = [];
+      // Use real Bedrock embedding model (SafeBedrockEmbeddings)
+      let embedding: number[] = [];
 
       try {
         if (this.embeddingModel && process.env.AWS_ACCESS_KEY_ID) {
-          // Use AWS Bedrock for embeddings (simplified approach)
-          const response = await this.embeddingModel.invoke(cleanText);
-          // For now, create a deterministic embedding from the response
-          const responseText = JSON.stringify(response);
-          const hash = crypto
-            .createHash('sha256')
-            .update(responseText)
-            .digest();
-
-          for (let i = 0; i < 384; i++) {
-            embedding.push(hash[i % hash.length] / 255);
+          embedding = await this.embeddingModel.embedQuery(cleanText);
+          if (!embedding || embedding.length === 0) {
+            throw new Error('Empty embedding returned');
           }
         } else {
           throw new Error('AWS Bedrock not available');
@@ -503,10 +502,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
             awsError instanceof Error ? awsError.message : String(awsError),
         });
 
-        // Fallback: Using a simple hash-based pseudo-embedding
+        // Fallback: deterministic hash-based pseudo-embedding (only when Bedrock unavailable)
         const hash = crypto.createHash('sha256').update(cleanText).digest();
-
-        for (let i = 0; i < 384; i++) {
+        for (let i = 0; i < EMBEDDING_DIM; i++) {
           embedding.push(hash[i % hash.length] / 255);
         }
       }

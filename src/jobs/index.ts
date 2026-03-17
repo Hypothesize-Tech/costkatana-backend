@@ -7,7 +7,7 @@ import { PerformanceAggregationJob } from './performanceAggregation.job';
 import { SemanticClusteringJob } from './semanticClustering.job';
 import { GlobalBenchmarkUpdateJob } from './globalBenchmarkUpdate.job';
 import { LearningLoopProcessorJob } from './learningLoopProcessor.job';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 
 /**
  * Start all Data Network Effects jobs
@@ -28,10 +28,12 @@ export function startDataNetworkEffectsJobs(): void {
     // Start learning loop processor (every 6 hours)
     LearningLoopProcessorJob.start(6);
 
-    loggingService.info('✅ All Data Network Effects jobs started successfully');
+    loggingService.info(
+      '✅ All Data Network Effects jobs started successfully',
+    );
   } catch (error) {
     loggingService.error('❌ Failed to start Data Network Effects jobs', {
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     });
   }
 }
@@ -65,7 +67,7 @@ export async function runAllJobsOnce(): Promise<void> {
     loggingService.info('✅ All jobs completed');
   } catch (error) {
     loggingService.error('❌ Job execution failed', {
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     });
   }
 }
@@ -75,6 +77,5 @@ export {
   PerformanceAggregationJob,
   SemanticClusteringJob,
   GlobalBenchmarkUpdateJob,
-  LearningLoopProcessorJob
+  LearningLoopProcessorJob,
 };
-

@@ -59,7 +59,9 @@ describe('ModularRAGOrchestrator evaluation wiring', () => {
       expect(result.metadata.evaluation).toHaveProperty('retrievalPrecision');
       expect(result.metadata.evaluation).toHaveProperty('retrievalRecall');
       expect(result.metadata.evaluation).toHaveProperty('overall');
-      expect(typeof result.metadata.evaluation!.contextRelevance).toBe('number');
+      expect(typeof result.metadata.evaluation!.contextRelevance).toBe(
+        'number',
+      );
       expect(typeof result.metadata.evaluation!.overall).toBe('number');
     }
     // If RAG failed (e.g. no Bedrock), we still pass; eval is only run on success

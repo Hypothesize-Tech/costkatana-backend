@@ -226,6 +226,17 @@ interface CachedExecutor {
   lastUsed: number;
 }
 
+let mongodbMcpServiceInstance: MongodbMcpService | null = null;
+
+export function getMongodbMcpService(): MongodbMcpService {
+  if (!mongodbMcpServiceInstance) {
+    throw new Error(
+      'MongodbMcpService not initialized. Ensure MongodbMcpModule is imported.',
+    );
+  }
+  return mongodbMcpServiceInstance;
+}
+
 @Injectable()
 export class MongodbMcpService {
   private readonly logger = new Logger(MongodbMcpService.name);
@@ -241,6 +252,7 @@ export class MongodbMcpService {
     private readonly policy: MongodbMcpPolicyService,
     private readonly circuitBreaker: MongodbMcpCircuitBreakerService,
   ) {
+    mongodbMcpServiceInstance = this;
     this.startPoolCleanup();
   }
 

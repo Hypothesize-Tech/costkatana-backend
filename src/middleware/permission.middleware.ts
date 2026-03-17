@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { permissionService, Permissions } from '../services/permission.service';
 import { AppError } from './error.middleware';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 import { agentIdentityService } from '../services/agentIdentity.service';
 
 // Extend Express Request type to include workspace info
@@ -20,46 +20,55 @@ declare global {
  * Supports both user and agent RBAC
  */
 export const requirePermission = (permission: keyof Permissions) => {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  return async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
       // Check if this is an agent request
       const isAgentRequest = req.gatewayContext?.isAgentRequest;
-      
+
       if (isAgentRequest && req.gatewayContext?.agentToken) {
         loggingService.info('Agent permission check', {
           component: 'PermissionMiddleware',
           operation: 'requirePermission',
           agentId: req.gatewayContext.agentId,
-          permission
+          permission,
         });
-        
+
         // Agent RBAC check
-        const agentIdentity = await agentIdentityService.authenticateAgent(req.gatewayContext.agentToken);
+        const agentIdentity = await agentIdentityService.authenticateAgent(
+          req.gatewayContext.agentToken,
+        );
         if (!agentIdentity) {
           throw new AppError('Agent authentication failed', 401);
         }
-        
+
         // Map permission to agent action
         const action = mapPermissionToAgentAction(permission);
         const permissionResult = await agentIdentityService.checkPermission(
           agentIdentity,
-          action
+          action,
         );
-        
+
         if (!permissionResult.allowed) {
           loggingService.warn('Agent permission denied', {
             agentId: agentIdentity.agentId,
             permission,
             action,
-            reason: permissionResult.reason
+            reason: permissionResult.reason,
           });
-          throw new AppError(`Agent permission denied: ${permissionResult.reason}`, 403);
+          throw new AppError(
+            `Agent permission denied: ${permissionResult.reason}`,
+            403,
+          );
         }
-        
+
         next();
         return;
       }
-      
+
       // Standard user permission check
       const userId = (req as any).user?.id;
       const workspaceId = req.workspaceId || (req as any).user?.workspaceId;
@@ -72,7 +81,11 @@ export const requirePermission = (permission: keyof Permissions) => {
         throw new AppError('Workspace context required', 400);
       }
 
-      const hasPermission = await permissionService.hasPermission(userId, workspaceId, permission);
+      const hasPermission = await permissionService.hasPermission(
+        userId,
+        workspaceId,
+        permission,
+      );
 
       if (!hasPermission) {
         loggingService.warn('Permission denied', {
@@ -80,12 +93,15 @@ export const requirePermission = (permission: keyof Permissions) => {
           workspaceId,
           permission,
         });
-        throw new AppError(`Permission denied: ${permission}`, 403);
+        throw new AppError(`Permission denied: ${String(permission)}`, 403);
       }
 
       // Attach permissions to request for later use
       if (!req.userPermissions) {
-        req.userPermissions = await permissionService.getMemberPermissions(userId, workspaceId);
+        req.userPermissions = await permissionService.getMemberPermissions(
+          userId,
+          workspaceId,
+        );
       }
 
       next();
@@ -106,17 +122,23 @@ function mapPermissionToAgentAction(permission: keyof Permissions): string {
     canViewAnalytics: 'read',
     canManageApiKeys: 'admin',
     canManageIntegrations: 'write',
-    canExportData: 'read'
+    canExportData: 'read',
   };
-  
-  return permissionActionMap[permission] || 'read';
+
+  return permissionActionMap[String(permission)] || 'read';
 }
 
 /**
  * Middleware to require specific role(s) - exact match
  */
-export const requireRole = (...roles: Array<'owner' | 'admin' | 'developer' | 'viewer'>) => {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const requireRole = (
+  ...roles: Array<'owner' | 'admin' | 'developer' | 'viewer'>
+) => {
+  return async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
       const userId = (req as any).user?.id;
       const workspaceId = req.workspaceId || (req as any).user?.workspaceId;
@@ -155,8 +177,14 @@ export const requireRole = (...roles: Array<'owner' | 'admin' | 'developer' | 'v
  * Middleware to require minimum workspace role using role hierarchy
  * viewer < developer < admin < owner
  */
-export const requireWorkspaceRole = (minimumRole: 'owner' | 'admin' | 'developer' | 'viewer') => {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+export const requireWorkspaceRole = (
+  minimumRole: 'owner' | 'admin' | 'developer' | 'viewer',
+) => {
+  return async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
       const userId = (req as any).user?.id;
       const workspaceId = req.workspaceId || (req as any).user?.workspaceId;
@@ -208,10 +236,15 @@ export const requireWorkspaceRole = (minimumRole: 'owner' | 'admin' | 'developer
  * Middleware to require project access
  */
 export const requireProjectAccess = () => {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  return async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
       const userId = (req as any).user?.id;
-      const projectId = req.params.projectId || req.body.projectId || req.query.projectId;
+      const projectId =
+        req.params.projectId || req.body.projectId || req.query.projectId;
 
       if (!userId) {
         throw new AppError('Authentication required', 401);
@@ -221,7 +254,10 @@ export const requireProjectAccess = () => {
         throw new AppError('Project ID required', 400);
       }
 
-      const hasAccess = await permissionService.canAccessProject(userId, projectId);
+      const hasAccess = await permissionService.canAccessProject(
+        userId,
+        projectId,
+      );
 
       if (!hasAccess) {
         loggingService.warn('Project access denied', {
@@ -244,7 +280,7 @@ export const requireProjectAccess = () => {
 export const attachWorkspaceContext = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> => {
   try {
     const userId = (req as any).user?.id;
@@ -254,11 +290,14 @@ export const attachWorkspaceContext = async (
     }
 
     // Get workspace from user or from request params/body
-    const workspaceId = req.params.workspaceId || req.body.workspaceId || (req as any).user?.workspaceId;
+    const workspaceId =
+      req.params.workspaceId ||
+      req.body.workspaceId ||
+      (req as any).user?.workspaceId;
 
     if (workspaceId) {
       req.workspaceId = workspaceId.toString();
-      
+
       // Optionally fetch and attach role and permissions
       const [role, permissions] = await Promise.all([
         permissionService.getUserRole(userId, workspaceId),
@@ -283,7 +322,7 @@ export const attachWorkspaceContext = async (
 export const requireOwner = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> => {
   try {
     const userId = (req as any).user?.id;
@@ -297,7 +336,10 @@ export const requireOwner = async (
       throw new AppError('Workspace context required', 400);
     }
 
-    const isOwner = await permissionService.isWorkspaceOwner(userId, workspaceId);
+    const isOwner = await permissionService.isWorkspaceOwner(
+      userId,
+      workspaceId,
+    );
 
     if (!isOwner) {
       loggingService.warn('Owner permission required', {
@@ -319,7 +361,7 @@ export const requireOwner = async (
 export const requireAdminOrOwner = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> => {
   try {
     const userId = (req as any).user?.id;
@@ -333,7 +375,10 @@ export const requireAdminOrOwner = async (
       throw new AppError('Workspace context required', 400);
     }
 
-    const isAdminOrOwner = await permissionService.isAdminOrOwner(userId, workspaceId);
+    const isAdminOrOwner = await permissionService.isAdminOrOwner(
+      userId,
+      workspaceId,
+    );
 
     if (!isAdminOrOwner) {
       loggingService.warn('Admin or owner permission required', {
@@ -348,4 +393,3 @@ export const requireAdminOrOwner = async (
     next(error);
   }
 };
-

@@ -1,14 +1,14 @@
 /**
  * MongoDB Integration Tool for Agent System
- * 
+ *
  * This tool allows the AI agent to execute MongoDB operations using the existing
  * MCP infrastructure and MongoDBChatAgentService.
  */
 
 import { Tool } from '@langchain/core/tools';
-import { loggingService } from '../services/logging.service';
-import { MongoDBConnection } from '../models/MongoDBConnection';
-import { MongoDBChatAgentService } from '../services/mongodbChatAgent.service';
+import { loggingService } from '../common/services/logging.service';
+import { getMongoDBConnectionModel } from '../common/utils/get-mongoose-models';
+import { getMongoDBChatAgentService } from '../services/mongodbChatAgent.service';
 
 export interface MongoDBIntegrationInput {
   action: string;
@@ -58,9 +58,12 @@ Example: {"action": "list_collections"}`;
   async _call(input: string, runManager?: any): Promise<string> {
     try {
       // Try to extract userId from run manager or context
-      const contextUserId = runManager?.metadata?.userId || runManager?.tags?.includes('user:') 
-        ? runManager.tags.find((t: string) => t.startsWith('user:'))?.split(':')[1]
-        : this.userId;
+      const contextUserId =
+        runManager?.metadata?.userId || runManager?.tags?.includes('user:')
+          ? runManager.tags
+              .find((t: string) => t.startsWith('user:'))
+              ?.split(':')[1]
+          : this.userId;
 
       loggingService.info('🔧 MongoDB Integration Tool called', {
         component: 'MongoDBIntegrationTool',
@@ -87,8 +90,15 @@ Example: {"action": "list_collections"}`;
 
       // Validate action
       const validActions = [
-        'list_collections', 'list_databases', 'database_stats', 'collection_stats',
-        'find', 'count', 'distinct', 'aggregate', 'help'
+        'list_collections',
+        'list_databases',
+        'database_stats',
+        'collection_stats',
+        'find',
+        'count',
+        'distinct',
+        'aggregate',
+        'help',
       ];
 
       if (!validActions.includes(params.action)) {
@@ -101,21 +111,27 @@ Example: {"action": "list_collections"}`;
       }
 
       // Check for required parameters and trigger IntegrationSelector if missing
-      const paramCheckResult = await this.checkRequiredParameters(params, contextUserId);
+      const paramCheckResult = await this.checkRequiredParameters(
+        params,
+        contextUserId,
+      );
       if (!paramCheckResult.valid) {
-        loggingService.info('🔧 Missing required parameters, triggering IntegrationSelector', {
-          component: 'MongoDBIntegrationTool',
-          action: params.action,
-          missingParam: paramCheckResult.missingParam,
-          selectorDataPreview: {
-            parameterName: paramCheckResult.selectorData?.parameterName,
-            question: paramCheckResult.selectorData?.question,
-            optionsCount: paramCheckResult.selectorData?.options?.length || 0,
-            allowCustom: paramCheckResult.selectorData?.allowCustom,
-            integration: paramCheckResult.selectorData?.integration
-          }
-        });
-        
+        loggingService.info(
+          '🔧 Missing required parameters, triggering IntegrationSelector',
+          {
+            component: 'MongoDBIntegrationTool',
+            action: params.action,
+            missingParam: paramCheckResult.missingParam,
+            selectorDataPreview: {
+              parameterName: paramCheckResult.selectorData?.parameterName,
+              question: paramCheckResult.selectorData?.question,
+              optionsCount: paramCheckResult.selectorData?.options?.length || 0,
+              allowCustom: paramCheckResult.selectorData?.allowCustom,
+              integration: paramCheckResult.selectorData?.integration,
+            },
+          },
+        );
+
         return JSON.stringify({
           success: false,
           error: paramCheckResult.error,
@@ -150,20 +166,23 @@ Example: {"action": "list_collections"}`;
   /**
    * Execute MongoDB command using existing MCP infrastructure
    */
-  private async executeMongoDBCommand(params: MongoDBIntegrationInput, userId: string): Promise<any> {
+  private async executeMongoDBCommand(
+    params: MongoDBIntegrationInput,
+    userId: string,
+  ): Promise<any> {
     try {
       // Get active MongoDB connection for the user (with connectionString for debugging)
-      const connection = await MongoDBConnection.findOne({
+      const connection = await getMongoDBConnectionModel().findOne({
         userId,
-        isActive: true
-      }).select('+connectionString');
+        isActive: true,
+      });
 
       if (!connection) {
         return {
           success: false,
           error: 'No active MongoDB connection found',
           hint: 'Please connect to MongoDB first using the Integrations page',
-          requiresSetup: true
+          requiresSetup: true,
         };
       }
 
@@ -171,7 +190,7 @@ Example: {"action": "list_collections"}`;
       if (!connectionId) {
         return {
           success: false,
-          error: 'Invalid connection ID'
+          error: 'Invalid connection ID',
         };
       }
 
@@ -179,31 +198,30 @@ Example: {"action": "list_collections"}`;
       loggingService.info('MongoDB connection details', {
         component: 'MongoDBIntegrationTool',
         connectionId,
-        database: connection.database,
-        alias: connection.alias,
-        action: params.action
+        name: (connection as any).name,
+        action: params.action,
       });
 
       // Map the action to a natural language message that MongoDBChatAgentService can understand
       let message = '';
-      
+
       switch (params.action) {
         case 'list_collections':
           message = 'show all collections';
           break;
-        
+
         case 'list_databases':
           message = 'show database info';
           break;
-        
+
         case 'database_stats':
           message = 'show database statistics';
           break;
-        
+
         case 'collection_stats':
           message = `show statistics for ${params.collectionName} collection`;
           break;
-        
+
         case 'find':
           const limit = params.limit || 10;
           message = `find ${limit} documents from ${params.collectionName}`;
@@ -211,25 +229,25 @@ Example: {"action": "list_collections"}`;
             message += ` where ${JSON.stringify(params.query)}`;
           }
           break;
-        
+
         case 'count':
           message = `count how many documents in ${params.collectionName}`;
           if (params.query) {
             message += ` matching ${JSON.stringify(params.query)}`;
           }
           break;
-        
+
         case 'aggregate':
           message = `aggregate ${params.collectionName} with pipeline ${JSON.stringify(params.pipeline)}`;
           break;
-        
+
         case 'distinct':
           message = `get distinct values from ${params.collectionName}`;
           if (params.fields) {
             message += ` for field ${params.fields}`;
           }
           break;
-        
+
         case 'help':
           return {
             success: true,
@@ -243,14 +261,22 @@ Example: {"action": "list_collections"}`;
 
 Connected to database: ${connection.database || 'default'}
 Connection: ${connection.alias}`,
-            action: 'help'
+            action: 'help',
           };
-        
+
         default:
           return {
             success: false,
             error: `Unknown action: ${params.action}`,
-            availableActions: ['list_collections', 'database_stats', 'collection_stats', 'find', 'count', 'aggregate', 'help']
+            availableActions: [
+              'list_collections',
+              'database_stats',
+              'collection_stats',
+              'find',
+              'count',
+              'aggregate',
+              'help',
+            ],
           };
       }
 
@@ -258,13 +284,13 @@ Connection: ${connection.alias}`,
       const result = await MongoDBChatAgentService.processMessage(
         userId,
         connectionId,
-        message
+        message,
       );
 
       // Transform the result to match our expected format
       // Add database info to the message for transparency
       const enhancedMessage = `${result.message}\n\n📁 Connected to database: "${connection.database || 'default'}"`;
-      
+
       return {
         success: true,
         message: enhancedMessage,
@@ -281,19 +307,19 @@ Connection: ${connection.alias}`,
           action: params.action,
           connectionId,
           database: connection.database,
-          connectionAlias: connection.alias
-        }
+          connectionAlias: connection.alias,
+        },
       };
-
     } catch (error) {
       loggingService.error('Error executing MongoDB command', {
         component: 'MongoDBIntegrationTool',
         error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
+        stack: error instanceof Error ? error.stack : undefined,
       });
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred'
+        error:
+          error instanceof Error ? error.message : 'Unknown error occurred',
       };
     }
   }
@@ -302,26 +328,30 @@ Connection: ${connection.alias}`,
    * Fetch collection options for IntegrationSelector
    * Returns a formatted array of collections with metadata
    */
-  private async fetchCollectionOptions(userId: string): Promise<Array<{
-    id: string;
-    label: string;
-    value: string;
-    description?: string;
-  }>> {
+  private async fetchCollectionOptions(userId: string): Promise<
+    Array<{
+      id: string;
+      label: string;
+      value: string;
+      description?: string;
+    }>
+  > {
     try {
       // Get active MongoDB connection
-      const connection = await MongoDBConnection.findOne({
+      const connection = await getMongoDBConnectionModel().findOne({
         userId,
-        isActive: true
+        isActive: true,
       });
 
       if (!connection) {
-        return [{
-          id: 'no_connection',
-          label: 'No MongoDB connection found',
-          value: '',
-          description: 'Please connect your MongoDB database first'
-        }];
+        return [
+          {
+            id: 'no_connection',
+            label: 'No MongoDB connection found',
+            value: '',
+            description: 'Please connect your MongoDB database first',
+          },
+        ];
       }
 
       const connectionId = connection._id?.toString();
@@ -330,40 +360,46 @@ Connection: ${connection.alias}`,
       }
 
       // Call MongoDBChatAgentService to list collections
-      const { MongoDBChatAgentService } = await import('../services/mongodbChatAgent.service');
-      const result = await MongoDBChatAgentService.processMessage(
+      const result = await getMongoDBChatAgentService().processMessage(
         userId,
         connectionId,
-        'show all collections'
+        'show all collections',
       );
 
       // Extract collections array from result
       // result.data is MCPToolResult: { content: [{ type: 'text', text: JSON.stringify({database, count, collections}) }] }
       let collectionsArray: string[] = [];
-      
+
       try {
-        if (result.data?.content && Array.isArray(result.data.content) && result.data.content.length > 0) {
+        if (
+          result.data?.content &&
+          Array.isArray(result.data.content) &&
+          result.data.content.length > 0
+        ) {
           const textContent = result.data.content[0]?.text;
           if (textContent) {
             const parsed = JSON.parse(textContent);
             collectionsArray = parsed.collections || [];
-            
+
             loggingService.info('Parsed collections from MCP result', {
               component: 'MongoDBIntegrationTool',
               collectionsCount: collectionsArray.length,
               sampleCollections: collectionsArray.slice(0, 3),
-              database: parsed.database
+              database: parsed.database,
             });
           }
         }
       } catch (parseError) {
         loggingService.error('Error parsing collections from MCP result', {
           component: 'MongoDBIntegrationTool',
-          error: parseError instanceof Error ? parseError.message : String(parseError),
-          dataStructure: result.data ? Object.keys(result.data) : 'no data'
+          error:
+            parseError instanceof Error
+              ? parseError.message
+              : String(parseError),
+          dataStructure: result.data ? Object.keys(result.data) : 'no data',
         });
       }
-      
+
       loggingService.info('Fetched collections for IntegrationSelector', {
         component: 'MongoDBIntegrationTool',
         userId,
@@ -371,48 +407,60 @@ Connection: ${connection.alias}`,
         resultType: result.resultType,
         hasData: !!result.data,
         collectionsCount: collectionsArray.length,
-        sampleCollections: collectionsArray.slice(0, 3)
+        sampleCollections: collectionsArray.slice(0, 3),
       });
 
       // Parse collections from result
-      if (collectionsArray && Array.isArray(collectionsArray) && collectionsArray.length > 0) {
-        const collectionsOptions = collectionsArray.map((collection: string) => ({
-          id: collection,
-          label: collection,
-          value: collection,
-          description: `Collection in database`
-        }));
-        
-        loggingService.info('Formatted collections options for IntegrationSelector', {
-          component: 'MongoDBIntegrationTool',
-          optionsCount: collectionsOptions.length,
-          sampleOptions: collectionsOptions.slice(0, 3)
-        });
-        
+      if (
+        collectionsArray &&
+        Array.isArray(collectionsArray) &&
+        collectionsArray.length > 0
+      ) {
+        const collectionsOptions = collectionsArray.map(
+          (collection: string) => ({
+            id: collection,
+            label: collection,
+            value: collection,
+            description: `Collection in database`,
+          }),
+        );
+
+        loggingService.info(
+          'Formatted collections options for IntegrationSelector',
+          {
+            component: 'MongoDBIntegrationTool',
+            optionsCount: collectionsOptions.length,
+            sampleOptions: collectionsOptions.slice(0, 3),
+          },
+        );
+
         return collectionsOptions;
       }
 
       // Fallback: return empty array with a helpful message
-      return [{
-        id: 'custom',
-        label: 'Type collection name manually',
-        value: '',
-        description: 'Could not fetch collections. Please enter manually.'
-      }];
-
+      return [
+        {
+          id: 'custom',
+          label: 'Type collection name manually',
+          value: '',
+          description: 'Could not fetch collections. Please enter manually.',
+        },
+      ];
     } catch (error) {
       loggingService.error('Error fetching collection options', {
         component: 'MongoDBIntegrationTool',
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
-      
+
       // Return a fallback option
-      return [{
-        id: 'custom',
-        label: 'Type collection name manually',
-        value: '',
-        description: 'Error fetching collections. Please enter manually.'
-      }];
+      return [
+        {
+          id: 'custom',
+          label: 'Type collection name manually',
+          value: '',
+          description: 'Error fetching collections. Please enter manually.',
+        },
+      ];
     }
   }
 
@@ -430,44 +478,45 @@ Connection: ${connection.alias}`,
         id: 'match',
         label: '$match - Filter documents',
         value: '[{"$match": {"status": "active"}}]',
-        description: 'Filter documents by criteria'
+        description: 'Filter documents by criteria',
       },
       {
         id: 'group',
         label: '$group - Group by field',
         value: '[{"$group": {"_id": "$category", "count": {"$sum": 1}}}]',
-        description: 'Group documents and aggregate'
+        description: 'Group documents and aggregate',
       },
       {
         id: 'sort',
         label: '$sort - Sort documents',
         value: '[{"$sort": {"createdAt": -1}}]',
-        description: 'Sort by field ascending (1) or descending (-1)'
+        description: 'Sort by field ascending (1) or descending (-1)',
       },
       {
         id: 'limit',
         label: '$limit - Limit results',
         value: '[{"$limit": 10}]',
-        description: 'Limit number of results'
+        description: 'Limit number of results',
       },
       {
         id: 'project',
         label: '$project - Select fields',
         value: '[{"$project": {"name": 1, "email": 1, "_id": 0}}]',
-        description: 'Include/exclude specific fields'
+        description: 'Include/exclude specific fields',
       },
       {
         id: 'lookup',
         label: '$lookup - Join collections',
-        value: '[{"$lookup": {"from": "orders", "localField": "_id", "foreignField": "userId", "as": "userOrders"}}]',
-        description: 'Perform left outer join'
+        value:
+          '[{"$lookup": {"from": "orders", "localField": "_id", "foreignField": "userId", "as": "userOrders"}}]',
+        description: 'Perform left outer join',
       },
       {
         id: 'custom',
         label: 'Custom pipeline',
         value: '',
-        description: 'Type your own aggregation pipeline'
-      }
+        description: 'Type your own aggregation pipeline',
+      },
     ];
   }
 
@@ -475,7 +524,10 @@ Connection: ${connection.alias}`,
    * Check if all required parameters are present for the given action
    * If not, return IntegrationSelector data to ask the user
    */
-  private async checkRequiredParameters(params: MongoDBIntegrationInput, userId: string): Promise<{
+  private async checkRequiredParameters(
+    params: MongoDBIntegrationInput,
+    userId: string,
+  ): Promise<{
     valid: boolean;
     error?: string;
     missingParam?: string;
@@ -486,16 +538,18 @@ Connection: ${connection.alias}`,
         if (!params.collectionName) {
           // Fetch collections to provide as options
           const collections = await this.fetchCollectionOptions(userId);
-          
+
           return {
             valid: false,
             error: 'Collection name is required to count documents',
             missingParam: 'collectionName',
             selectorData: {
               parameterName: 'collectionName',
-              question: 'Which collection would you like to count documents in?',
+              question:
+                'Which collection would you like to count documents in?',
               options: collections,
-              placeholder: 'Enter collection name (e.g., users, products, orders)',
+              placeholder:
+                'Enter collection name (e.g., users, products, orders)',
               allowCustom: true,
               integration: 'mongodb',
               pendingAction: 'count',
@@ -509,7 +563,7 @@ Connection: ${connection.alias}`,
         if (!params.collectionName) {
           // Fetch collections to provide as options
           const collections = await this.fetchCollectionOptions(userId);
-          
+
           return {
             valid: false,
             error: 'Collection name is required to find documents',
@@ -518,7 +572,8 @@ Connection: ${connection.alias}`,
               parameterName: 'collectionName',
               question: 'Which collection would you like to search in?',
               options: collections,
-              placeholder: 'Enter collection name (e.g., users, products, orders)',
+              placeholder:
+                'Enter collection name (e.g., users, products, orders)',
               allowCustom: true,
               integration: 'mongodb',
               pendingAction: 'find',
@@ -534,14 +589,15 @@ Connection: ${connection.alias}`,
         if (!params.collectionName) {
           // Fetch collections to provide as options
           const collections = await this.fetchCollectionOptions(userId);
-          
+
           return {
             valid: false,
             error: 'Collection name is required for collection statistics',
             missingParam: 'collectionName',
             selectorData: {
               parameterName: 'collectionName',
-              question: 'Which collection would you like to get statistics for?',
+              question:
+                'Which collection would you like to get statistics for?',
               options: collections,
               placeholder: 'Enter collection name',
               allowCustom: true,
@@ -557,14 +613,15 @@ Connection: ${connection.alias}`,
         if (!params.collectionName) {
           // Fetch collections to provide as options
           const collections = await this.fetchCollectionOptions(userId);
-          
+
           return {
             valid: false,
             error: 'Collection name is required for aggregation',
             missingParam: 'collectionName',
             selectorData: {
               parameterName: 'collectionName',
-              question: 'Which collection would you like to run aggregation on?',
+              question:
+                'Which collection would you like to run aggregation on?',
               options: collections,
               placeholder: 'Enter collection name',
               allowCustom: true,
@@ -577,7 +634,7 @@ Connection: ${connection.alias}`,
         if (!params.pipeline) {
           // Provide aggregation pipeline suggestions
           const pipelineSuggestions = this.getAggregationPipelineSuggestions();
-          
+
           return {
             valid: false,
             error: 'Aggregation pipeline is required',
@@ -586,11 +643,15 @@ Connection: ${connection.alias}`,
               parameterName: 'pipeline',
               question: 'What aggregation pipeline would you like to run?',
               options: pipelineSuggestions,
-              placeholder: 'Enter JSON array (e.g., [{"$match": {"status": "active"}}])',
+              placeholder:
+                'Enter JSON array (e.g., [{"$match": {"status": "active"}}])',
               allowCustom: true,
               integration: 'mongodb',
               pendingAction: 'aggregate',
-              collectedParams: { action: 'aggregate', collectionName: params.collectionName },
+              collectedParams: {
+                action: 'aggregate',
+                collectionName: params.collectionName,
+              },
             },
           };
         }
@@ -600,14 +661,15 @@ Connection: ${connection.alias}`,
         if (!params.collectionName) {
           // Fetch collections to provide as options
           const collections = await this.fetchCollectionOptions(userId);
-          
+
           return {
             valid: false,
             error: 'Collection name is required for distinct operation',
             missingParam: 'collectionName',
             selectorData: {
               parameterName: 'collectionName',
-              question: 'Which collection would you like to get distinct values from?',
+              question:
+                'Which collection would you like to get distinct values from?',
               options: collections,
               placeholder: 'Enter collection name',
               allowCustom: true,
@@ -641,17 +703,17 @@ Connection: ${connection.alias}`,
    */
   private parseNaturalLanguage(input: string): MongoDBIntegrationInput {
     const lowerInput = input.toLowerCase();
-    
+
     // Extract action - check for @mongodb:action format first
     let action = 'help';
     let collectionName: string | undefined;
-    
+
     // Handle @mongodb:action format
     const mentionMatch = /@mongodb:(\w+)(?:\s+(.+))?/i.exec(input);
     if (mentionMatch) {
       const mentionedAction = mentionMatch[1].toLowerCase();
       const restOfMessage = mentionMatch[2]?.trim();
-      
+
       // Map mentioned actions
       if (mentionedAction === 'list') {
         action = 'list_collections';
@@ -666,7 +728,10 @@ Connection: ${connection.alias}`,
         if (restOfMessage) {
           collectionName = restOfMessage.split(/\s+/)[0];
         }
-      } else if (mentionedAction === 'stats' || mentionedAction === 'database_stats') {
+      } else if (
+        mentionedAction === 'stats' ||
+        mentionedAction === 'database_stats'
+      ) {
         action = 'database_stats';
       } else if (mentionedAction === 'help') {
         action = 'help';
@@ -683,37 +748,48 @@ Connection: ${connection.alias}`,
       }
     }
     // Handle plain language without @mongodb: prefix
-    else if (lowerInput === 'list' || lowerInput.includes('show collections') || lowerInput.includes('list collections')) {
+    else if (
+      lowerInput === 'list' ||
+      lowerInput.includes('show collections') ||
+      lowerInput.includes('list collections')
+    ) {
       action = 'list_collections';
-    }
-    else if (lowerInput.includes('count')) {
+    } else if (lowerInput.includes('count')) {
       action = 'count';
       // Try to extract collection name
-      const countMatch = /count\s+(?:documents\s+in\s+)?(?:collection\s+)?([a-zA-Z0-9_.-]+)/i.exec(input);
+      const countMatch =
+        /count\s+(?:documents\s+in\s+)?(?:collection\s+)?([a-zA-Z0-9_.-]+)/i.exec(
+          input,
+        );
       if (countMatch && countMatch[1]) {
         collectionName = countMatch[1];
       }
-    }
-    else if (lowerInput.includes('database') && lowerInput.includes('stat')) {
+    } else if (lowerInput.includes('database') && lowerInput.includes('stat')) {
       action = 'database_stats';
-    }
-    else if (lowerInput.includes('find') || lowerInput.includes('query')) {
+    } else if (lowerInput.includes('find') || lowerInput.includes('query')) {
       action = 'find';
-      const findMatch = /find\s+(?:documents\s+in\s+)?(?:collection\s+)?([a-zA-Z0-9_.-]+)/i.exec(input);
+      const findMatch =
+        /find\s+(?:documents\s+in\s+)?(?:collection\s+)?([a-zA-Z0-9_.-]+)/i.exec(
+          input,
+        );
       if (findMatch && findMatch[1]) {
         collectionName = findMatch[1];
       }
-    }
-    else if (lowerInput.includes('aggregate')) {
+    } else if (lowerInput.includes('aggregate')) {
       action = 'aggregate';
-      const aggMatch = /aggregate\s+(?:on\s+)?(?:collection\s+)?([a-zA-Z0-9_.-]+)/i.exec(input);
+      const aggMatch =
+        /aggregate\s+(?:on\s+)?(?:collection\s+)?([a-zA-Z0-9_.-]+)/i.exec(
+          input,
+        );
       if (aggMatch && aggMatch[1]) {
         collectionName = aggMatch[1];
       }
-    }
-    else if (lowerInput.includes('distinct')) {
+    } else if (lowerInput.includes('distinct')) {
       action = 'distinct';
-      const distinctMatch = /distinct\s+(?:values?\s+)?(?:from\s+)?(?:collection\s+)?([a-zA-Z0-9_.-]+)/i.exec(input);
+      const distinctMatch =
+        /distinct\s+(?:values?\s+)?(?:from\s+)?(?:collection\s+)?([a-zA-Z0-9_.-]+)/i.exec(
+          input,
+        );
       if (distinctMatch && distinctMatch[1]) {
         collectionName = distinctMatch[1];
       }
@@ -723,7 +799,7 @@ Connection: ${connection.alias}`,
     if (collectionName) {
       result.collectionName = collectionName;
     }
-    
+
     return result;
   }
 }

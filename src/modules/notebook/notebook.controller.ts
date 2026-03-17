@@ -164,10 +164,7 @@ export class NotebookController {
     @Param('id') notebookId: string,
   ) {
     const userId = user._id?.toString() || user.id?.toString();
-    const notebook = await this.notebookService.getNotebook(
-      userId,
-      notebookId,
-    );
+    const notebook = await this.notebookService.getNotebook(userId, notebookId);
     return {
       success: true,
       data: notebook,
@@ -181,15 +178,9 @@ export class NotebookController {
    */
   @Get(':id')
   @HttpCode(HttpStatus.OK)
-  async getNotebook(
-    @CurrentUser() user: any,
-    @Param('id') notebookId: string,
-  ) {
+  async getNotebook(@CurrentUser() user: any, @Param('id') notebookId: string) {
     const userId = user._id?.toString() || user.id?.toString();
-    const notebook = await this.notebookService.getNotebook(
-      userId,
-      notebookId,
-    );
+    const notebook = await this.notebookService.getNotebook(userId, notebookId);
 
     return {
       success: true,

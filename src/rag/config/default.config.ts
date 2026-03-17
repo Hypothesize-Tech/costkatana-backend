@@ -141,4 +141,3 @@ export function getPatternConfig(pattern: string): RAGConfig {
       return DEFAULT_RAG_CONFIG;
   }
 }
-

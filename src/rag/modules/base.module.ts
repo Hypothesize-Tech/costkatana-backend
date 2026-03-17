@@ -12,7 +12,7 @@ import {
   ModuleMetadata,
   RAGModuleError,
 } from '../types/rag.types';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 export abstract class BaseRAGModule implements IRAGModule {
   public readonly name: string;
@@ -23,7 +23,7 @@ export abstract class BaseRAGModule implements IRAGModule {
   constructor(
     name: string,
     type: RAGModuleType,
-    config: ModuleConfig = { enabled: true }
+    config: ModuleConfig = { enabled: true },
   ) {
     this.name = name;
     this.type = type;
@@ -50,7 +50,7 @@ export abstract class BaseRAGModule implements IRAGModule {
         throw new RAGModuleError(
           this.name,
           this.type,
-          'Invalid module configuration'
+          'Invalid module configuration',
         );
       }
 
@@ -113,7 +113,7 @@ export abstract class BaseRAGModule implements IRAGModule {
    * Abstract method that each module must implement
    */
   protected abstract executeInternal(
-    input: RAGModuleInput
+    input: RAGModuleInput,
   ): Promise<RAGModuleOutput>;
 
   /**
@@ -130,18 +130,14 @@ export abstract class BaseRAGModule implements IRAGModule {
    */
   protected validateInput(input: RAGModuleInput): void {
     if (!input) {
-      throw new RAGModuleError(
-        this.name,
-        this.type,
-        'Input is required'
-      );
+      throw new RAGModuleError(this.name, this.type, 'Input is required');
     }
 
     if (!input.query && !input.documents) {
       throw new RAGModuleError(
         this.name,
         this.type,
-        'Either query or documents must be provided'
+        'Either query or documents must be provided',
       );
     }
   }
@@ -189,7 +185,7 @@ export abstract class BaseRAGModule implements IRAGModule {
    */
   private createSkippedOutput(
     input: RAGModuleInput,
-    startTime: number
+    startTime: number,
   ): RAGModuleOutput {
     const endTime = Date.now();
 
@@ -217,7 +213,7 @@ export abstract class BaseRAGModule implements IRAGModule {
    */
   protected createSuccessOutput(
     data: any,
-    metadata?: Record<string, any>
+    metadata?: Record<string, any>,
   ): Omit<RAGModuleOutput, 'performance'> {
     return {
       success: true,
@@ -231,7 +227,7 @@ export abstract class BaseRAGModule implements IRAGModule {
    */
   protected createErrorOutput(
     error: string | Error,
-    metadata?: Record<string, any>
+    metadata?: Record<string, any>,
   ): Omit<RAGModuleOutput, 'performance'> {
     return {
       success: false,
@@ -269,4 +265,3 @@ export abstract class BaseRAGModule implements IRAGModule {
     return { ...this.config };
   }
 }
-

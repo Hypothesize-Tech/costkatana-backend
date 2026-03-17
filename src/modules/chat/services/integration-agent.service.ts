@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { LoggerService } from '../../../common/logger/logger.service';
 import {
   IntegrationChatService,
@@ -211,7 +211,7 @@ export class IntegrationAgentService {
 What action is the user trying to perform? Respond with ONLY the action name (like "list_projects", "create_issue", etc.), nothing else.
 If you can't determine the action, respond with "unknown".`;
 
-      const response = await this.bedrockService.invokeModelDirectly(
+      const response = await BedrockService.invokeModelDirectly(
         'amazon.nova-pro-v1:0',
         {
           prompt,

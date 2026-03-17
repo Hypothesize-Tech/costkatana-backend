@@ -21,12 +21,7 @@ import {
   UseInterceptors,
   UploadedFile,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBody,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectModel } from '@nestjs/mongoose';
@@ -374,9 +369,14 @@ export class ChatController {
   async updateConversationModel(
     @Param('conversationId') conversationId: string,
     @CurrentUser() user: AuthenticatedUser,
-    @Body(new ValidationPipe({ whitelist: true })) dto: UpdateConversationModelDto,
+    @Body(new ValidationPipe({ whitelist: true }))
+    dto: UpdateConversationModelDto,
   ) {
-    await this.chatService.updateConversationModel(conversationId, user.id, dto.modelId);
+    await this.chatService.updateConversationModel(
+      conversationId,
+      user.id,
+      dto.modelId,
+    );
     return {
       success: true,
       message: 'Conversation model updated successfully',

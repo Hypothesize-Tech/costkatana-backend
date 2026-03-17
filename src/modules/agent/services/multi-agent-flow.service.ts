@@ -9,7 +9,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { StateGraph, Annotation, START, END } from '@langchain/langgraph';
 import { BaseMessage, HumanMessage, AIMessage } from '@langchain/core/messages';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 // Multi-Agent State using LangGraph Annotation
 const MultiAgentStateAnnotation = Annotation.Root({
@@ -463,23 +463,12 @@ Provide a detailed, expert response that directly addresses the user's query. Be
     try {
       const result = await BedrockService.invokeModel(
         specialistPrompt,
-        undefined, // Use default model
-        {
-          maxTokens: 1000,
-          temperature: 0.7,
-          userId: state.userId,
-          sessionId: state.conversationId,
-          metadata: {
-            agentType: 'specialist',
-            taskType: state.taskType,
-            multiAgentFlow: true,
-          },
-        },
+        'amazon.nova-pro-v1:0',
       );
 
       return {
-        content: result.response,
-        cost: result.cost,
+        content: typeof result === 'string' ? result : (result as { response?: string })?.response ?? '',
+        cost: 0,
         optimizations: ['specialized_processing', 'llm_powered_response'],
       };
     } catch (error) {
@@ -532,29 +521,19 @@ Respond in JSON format:
     try {
       const result = await BedrockService.invokeModel(
         scrapingPrompt,
-        undefined, // Use default model
-        {
-          maxTokens: 800,
-          temperature: 0.3, // Lower temperature for more consistent planning
-          userId: state.userId,
-          sessionId: state.conversationId,
-          metadata: {
-            agentType: 'web_scraper',
-            taskType: 'research_planning',
-            multiAgentFlow: true,
-          },
-        },
+        'amazon.nova-pro-v1:0',
       );
+      const responseStr = typeof result === 'string' ? result : (result as { response?: string })?.response ?? '';
 
       // Parse the JSON response
       try {
-        const scrapingPlan = JSON.parse(result.response);
+        const scrapingPlan = JSON.parse(responseStr);
         return Array.isArray(scrapingPlan)
           ? scrapingPlan
           : [
               {
                 url: 'https://example.com',
-                content: result.response,
+                content: responseStr,
                 relevance: 0.7,
                 justification: 'LLM-generated research plan',
               },
@@ -564,7 +543,7 @@ Respond in JSON format:
         return [
           {
             url: 'https://example.com',
-            content: result.response,
+            content: responseStr,
             relevance: 0.7,
             justification: 'LLM response parsing failed, using raw content',
           },
@@ -616,29 +595,19 @@ Be thorough, data-driven, and specific to the user's needs.`;
     try {
       const result = await BedrockService.invokeModel(
         analysisPrompt,
-        undefined, // Use default model
-        {
-          maxTokens: 1200,
-          temperature: 0.6,
-          userId: state.userId,
-          sessionId: state.conversationId,
-          metadata: {
-            agentType: 'analyst',
-            taskType: state.taskType,
-            multiAgentFlow: true,
-          },
-        },
+        'amazon.nova-pro-v1:0',
       );
+      const responseStr = typeof result === 'string' ? result : (result as { response?: string })?.response ?? '';
 
       // Extract insights from the response (simple extraction)
-      const insights = result.response
+      const insights = responseStr
         .split('\n')
-        .filter((line) => line.trim().length > 0)
+        .filter((line: string) => line.trim().length > 0)
         .slice(0, 5); // Take first 5 lines as insights
 
       return {
-        content: result.response,
-        cost: result.cost,
+        content: responseStr,
+        cost: 0,
         insights:
           insights.length > 0 ? insights : ['Analysis completed successfully'],
       };
@@ -698,23 +667,13 @@ Respond in JSON format:
     try {
       const result = await BedrockService.invokeModel(
         qualityPrompt,
-        undefined, // Use default model
-        {
-          maxTokens: 600,
-          temperature: 0.2, // Low temperature for consistent evaluation
-          userId: state.userId,
-          sessionId: state.conversationId,
-          metadata: {
-            agentType: 'quality_checker',
-            taskType: 'evaluation',
-            multiAgentFlow: true,
-          },
-        },
+        'amazon.nova-pro-v1:0',
       );
+      const responseStr = typeof result === 'string' ? result : (result as { response?: string })?.response ?? '';
 
       // Parse the JSON response
       try {
-        const qualityResult = JSON.parse(result.response);
+        const qualityResult = JSON.parse(responseStr);
         return {
           passed: qualityResult.passed ?? true,
           score: qualityResult.score ?? 0.8,
@@ -790,23 +749,11 @@ Ensure the response feels natural and conversational while being informative and
     try {
       const result = await BedrockService.invokeModel(
         finalResponsePrompt,
-        undefined, // Use default model
-        {
-          maxTokens: 1500,
-          temperature: 0.7,
-          userId: state.userId,
-          sessionId: state.conversationId,
-          metadata: {
-            agentType: 'final_synthesizer',
-            taskType: state.taskType,
-            multiAgentFlow: true,
-            agentPath: state.agentPath,
-          },
-        },
+        'amazon.nova-pro-v1:0',
       );
 
       return {
-        content: result.response,
+        content: typeof result === 'string' ? result : (result as { response?: string })?.response ?? '',
       };
     } catch (error) {
       this.logger.warn('Final response generation failed, using fallback', {

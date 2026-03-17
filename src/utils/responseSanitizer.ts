@@ -12,7 +12,8 @@
 export function sanitizeResponseForDisplay(response: any): string {
   if (!response) return '';
 
-  let responseStr = typeof response === 'string' ? response : JSON.stringify(response, null, 2);
+  let responseStr =
+    typeof response === 'string' ? response : JSON.stringify(response, null, 2);
 
   // Remove MongoDB ObjectIDs (24 hex characters)
   responseStr = responseStr.replace(/[a-fA-F0-9]{24}/g, '[ID]');
@@ -28,7 +29,7 @@ export function sanitizeResponseForDisplay(response: any): string {
     /"updated_at"\s*:\s*"[^"]+"/g,
   ];
 
-  fieldsToRemove.forEach(pattern => {
+  fieldsToRemove.forEach((pattern) => {
     responseStr = responseStr.replace(pattern, '');
   });
 
@@ -66,7 +67,7 @@ export function sanitizeResponseForDisplay(response: any): string {
  */
 function sanitizeObject(obj: any): any {
   if (Array.isArray(obj)) {
-    return obj.map(item => sanitizeObject(item));
+    return obj.map((item) => sanitizeObject(item));
   }
 
   if (obj && typeof obj === 'object') {
@@ -78,9 +79,18 @@ function sanitizeObject(obj: any): any {
       }
 
       // Skip timestamp fields unless they're meaningful (like "Created At" in user-friendly format)
-      if (key === 'createdAt' || key === 'updatedAt' || key === 'created_at' || key === 'updated_at') {
+      if (
+        key === 'createdAt' ||
+        key === 'updatedAt' ||
+        key === 'created_at' ||
+        key === 'updated_at'
+      ) {
         // Only include if it's already formatted nicely
-        if (typeof value === 'string' && value.includes('T') && value.includes('Z')) {
+        if (
+          typeof value === 'string' &&
+          value.includes('T') &&
+          value.includes('Z')
+        ) {
           continue; // Skip ISO timestamps
         }
       }
@@ -105,13 +115,17 @@ function sanitizeObject(obj: any): any {
 function formatObjectForDisplay(obj: any, indent = 0): string {
   if (Array.isArray(obj)) {
     if (obj.length === 0) return '[]';
-    
+
     // For arrays of objects, format each item nicely
     if (obj.length > 0 && typeof obj[0] === 'object' && obj[0] !== null) {
-      return obj.map(item => formatObjectForDisplay(item, indent + 2)).join('\n\n');
+      return obj
+        .map((item) => formatObjectForDisplay(item, indent + 2))
+        .join('\n\n');
     }
-    
-    return obj.map(item => formatValueForDisplay(item, indent + 2)).join(', ');
+
+    return obj
+      .map((item) => formatValueForDisplay(item, indent + 2))
+      .join(', ');
   }
 
   if (obj && typeof obj === 'object') {
@@ -138,7 +152,7 @@ function formatKey(key: string): string {
   // Convert camelCase to Title Case
   return key
     .replace(/([A-Z])/g, ' $1')
-    .replace(/^./, str => str.toUpperCase())
+    .replace(/^./, (str) => str.toUpperCase())
     .trim();
 }
 
@@ -153,7 +167,7 @@ function formatValueForDisplay(value: any, indent: number): string {
   if (typeof value === 'boolean') return value.toString();
   if (Array.isArray(value)) {
     if (value.length === 0) return '[]';
-    return `[\n${value.map(item => ' '.repeat(indent + 2) + formatValueForDisplay(item, indent + 2)).join(',\n')}\n${' '.repeat(indent)}]`;
+    return `[\n${value.map((item) => ' '.repeat(indent + 2) + formatValueForDisplay(item, indent + 2)).join(',\n')}\n${' '.repeat(indent)}]`;
   }
   if (typeof value === 'object') {
     return formatObjectForDisplay(value, indent);
@@ -166,7 +180,9 @@ function formatValueForDisplay(value: any, indent: number): string {
  * Extracts meaningful information and presents it in a user-friendly format
  * Returns both the display message and metadata for UI rendering
  */
-export function formatIntegrationResultForDisplay(result: any): string | { message: string; viewLinks?: any[]; metadata?: any } {
+export function formatIntegrationResultForDisplay(
+  result: any,
+): string | { message: string; viewLinks?: any[]; metadata?: any } {
   if (!result || !result.success) {
     return result?.message || 'Command execution failed';
   }
@@ -176,7 +192,7 @@ export function formatIntegrationResultForDisplay(result: any): string | { messa
     return {
       message: result.message || 'Operation completed successfully',
       viewLinks: result.viewLinks,
-      metadata: result.metadata
+      metadata: result.metadata,
     };
   }
 
@@ -186,7 +202,7 @@ export function formatIntegrationResultForDisplay(result: any): string | { messa
   // If result has data, format it nicely
   if (result.data) {
     const sanitizedData = sanitizeObject(result.data);
-    
+
     // Format based on data type
     if (Array.isArray(sanitizedData)) {
       if (sanitizedData.length === 0) {
@@ -196,10 +212,15 @@ export function formatIntegrationResultForDisplay(result: any): string | { messa
         sanitizedData.forEach((item, index) => {
           if (typeof item === 'object' && item !== null) {
             // Extract meaningful fields (name, title, description, etc.)
-            const name = item.name || item.title || item.label || item.identifier || `Item ${index + 1}`;
+            const name =
+              item.name ||
+              item.title ||
+              item.label ||
+              item.identifier ||
+              `Item ${index + 1}`;
             const description = item.description || item.summary || '';
             const type = item.type || '';
-            
+
             display += `\n**${name}**`;
             if (type) display += ` (${type})`;
             if (description) display += `\n${description}`;
@@ -220,4 +241,3 @@ export function formatIntegrationResultForDisplay(result: any): string | { messa
 
   return display.trim();
 }
-

@@ -19,6 +19,17 @@ interface ParsedDeviceInfo {
   os: string;
 }
 
+let userSessionServiceInstance: UserSessionService | null = null;
+
+export function getUserSessionService(): UserSessionService {
+  if (!userSessionServiceInstance) {
+    throw new Error(
+      'UserSessionService not initialized. Ensure UserSessionModule is imported.',
+    );
+  }
+  return userSessionServiceInstance;
+}
+
 @Injectable()
 export class UserSessionService {
   private static readonly SESSION_EXPIRY_DAYS = 30;
@@ -28,7 +39,9 @@ export class UserSessionService {
   constructor(
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(UserSession.name) private userSessionModel: Model<UserSession>,
-  ) {}
+  ) {
+    userSessionServiceInstance = this;
+  }
 
   /**
    * Create a new user session

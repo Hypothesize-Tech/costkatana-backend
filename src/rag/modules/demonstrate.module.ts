@@ -10,8 +10,8 @@ import {
   DemonstrateConfig,
 } from '../types/rag.types';
 import { Document } from '@langchain/core/documents';
-import { retrievalService } from '../../services/retrieval.service';
-import { loggingService } from '../../services/logging.service';
+import { retrievalService } from '../services/retrieval.service';
+import { loggingService } from '../../common/services/logging.service';
 
 export class DemonstrateModule extends BaseRAGModule {
   protected config: DemonstrateConfig;
@@ -21,14 +21,14 @@ export class DemonstrateModule extends BaseRAGModule {
       enabled: true,
       numExamples: 3,
       selectionStrategy: 'similarity',
-    }
+    },
   ) {
     super('DemonstrateModule', 'demonstrate', config);
     this.config = config;
   }
 
   protected async executeInternal(
-    input: RAGModuleInput
+    input: RAGModuleInput,
   ): Promise<RAGModuleOutput> {
     const { query, context, config } = input;
     const effectiveConfig = { ...this.config, ...config };
@@ -50,7 +50,7 @@ export class DemonstrateModule extends BaseRAGModule {
           {
             examplesCount: examples.length,
             strategy: effectiveConfig.selectionStrategy,
-          }
+          },
         ),
         documents: examples,
         query,
@@ -74,7 +74,7 @@ export class DemonstrateModule extends BaseRAGModule {
    */
   private async selectExamples(
     query: string,
-    config: DemonstrateConfig
+    config: DemonstrateConfig,
   ): Promise<Document[]> {
     const numExamples = config.numExamples || 3;
     const strategy = config.selectionStrategy || 'similarity';
@@ -100,7 +100,7 @@ export class DemonstrateModule extends BaseRAGModule {
   private async selectBySimilarity(
     query: string,
     numExamples: number,
-    config: DemonstrateConfig
+    config: DemonstrateConfig,
   ): Promise<Document[]> {
     // Retrieve examples from knowledge base or example repository
     const source = config.exampleSource || 'knowledge-base';
@@ -124,7 +124,7 @@ export class DemonstrateModule extends BaseRAGModule {
   private async selectByDiversity(
     query: string,
     numExamples: number,
-    config: DemonstrateConfig
+    config: DemonstrateConfig,
   ): Promise<Document[]> {
     // Retrieve more candidates than needed
     const source = config.exampleSource || 'knowledge-base';
@@ -140,7 +140,7 @@ export class DemonstrateModule extends BaseRAGModule {
     // Apply diversity selection
     const diverseExamples = this.applyDiversitySelection(
       result.documents,
-      numExamples
+      numExamples,
     );
 
     return diverseExamples;
@@ -152,7 +152,7 @@ export class DemonstrateModule extends BaseRAGModule {
   private async selectByCoverage(
     query: string,
     numExamples: number,
-    config: DemonstrateConfig
+    config: DemonstrateConfig,
   ): Promise<Document[]> {
     // Similar to diversity but focuses on covering different topics
     const source = config.exampleSource || 'knowledge-base';
@@ -168,7 +168,7 @@ export class DemonstrateModule extends BaseRAGModule {
     // Group by topics and select one from each
     const coverageExamples = this.applyCoverageSelection(
       result.documents,
-      numExamples
+      numExamples,
     );
 
     return coverageExamples;
@@ -179,7 +179,7 @@ export class DemonstrateModule extends BaseRAGModule {
    */
   private applyDiversitySelection(
     documents: Document[],
-    target: number
+    target: number,
   ): Document[] {
     if (documents.length <= target) {
       return documents;
@@ -213,10 +213,7 @@ export class DemonstrateModule extends BaseRAGModule {
   /**
    * Calculate diversity score for a document relative to selected documents
    */
-  private calculateDiversity(
-    doc: Document,
-    selected: Document[]
-  ): number {
+  private calculateDiversity(doc: Document, selected: Document[]): number {
     if (selected.length === 0) return 1.0;
 
     // Simple diversity: lower similarity to already selected docs = higher diversity
@@ -239,7 +236,7 @@ export class DemonstrateModule extends BaseRAGModule {
     const words2 = new Set(doc2.pageContent.toLowerCase().split(/\s+/));
 
     const intersection = new Set(
-      [...words1].filter(word => words2.has(word))
+      [...words1].filter((word) => words2.has(word)),
     );
     const union = new Set([...words1, ...words2]);
 
@@ -251,7 +248,7 @@ export class DemonstrateModule extends BaseRAGModule {
    */
   private applyCoverageSelection(
     documents: Document[],
-    target: number
+    target: number,
   ): Document[] {
     if (documents.length <= target) {
       return documents;
@@ -274,7 +271,7 @@ export class DemonstrateModule extends BaseRAGModule {
     while (selected.length < target) {
       for (const groupKey of groupKeys) {
         const group = groups[groupKey];
-        const nextDoc = group.find(doc => !selected.includes(doc));
+        const nextDoc = group.find((doc) => !selected.includes(doc));
         if (nextDoc) {
           selected.push(nextDoc);
           if (selected.length >= target) break;
@@ -293,8 +290,11 @@ export class DemonstrateModule extends BaseRAGModule {
     const groups: Record<string, Document[]> = {};
 
     for (const doc of documents) {
-      const topic = doc.metadata.topic as string || doc.metadata.category as string || 'general';
-      
+      const topic =
+        (doc.metadata.topic as string) ||
+        (doc.metadata.category as string) ||
+        'general';
+
       if (!groups[topic]) {
         groups[topic] = [];
       }
@@ -332,4 +332,3 @@ export class DemonstrateModule extends BaseRAGModule {
     return true;
   }
 }
-

@@ -1,7 +1,7 @@
 import { modularRAGOrchestrator } from '../index';
 import { RAGContext, RAGPatternType } from '../types/rag.types';
 import { ragEvaluator, EvaluationInput } from '../evaluation/metrics';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 /**
  * Performance benchmarking for RAG patterns
@@ -50,7 +50,7 @@ export class RAGBenchmark {
    */
   async benchmarkPattern(
     pattern: RAGPatternType,
-    queries: string[] = this.testQueries
+    queries: string[] = this.testQueries,
   ): Promise<BenchmarkResult[]> {
     loggingService.info(`Benchmarking ${pattern} pattern`, {
       queryCount: queries.length,
@@ -97,7 +97,10 @@ export class RAGBenchmark {
           latency,
           documentsRetrieved: result.documents.length,
           answerLength: result.answer.length,
-          estimatedCost: this.estimateCost(pattern, result.metadata as unknown as Record<string, unknown>),
+          estimatedCost: this.estimateCost(
+            pattern,
+            result.metadata as unknown as Record<string, unknown>,
+          ),
           evaluationMetrics,
         };
 
@@ -127,8 +130,15 @@ export class RAGBenchmark {
   /**
    * Benchmark all patterns
    */
-  async benchmarkAllPatterns(): Promise<Map<RAGPatternType, BenchmarkResult[]>> {
-    const patterns: RAGPatternType[] = ['naive', 'adaptive', 'iterative', 'recursive'];
+  async benchmarkAllPatterns(): Promise<
+    Map<RAGPatternType, BenchmarkResult[]>
+  > {
+    const patterns: RAGPatternType[] = [
+      'naive',
+      'adaptive',
+      'iterative',
+      'recursive',
+    ];
     const results = new Map<RAGPatternType, BenchmarkResult[]>();
 
     for (const pattern of patterns) {
@@ -150,13 +160,16 @@ export class RAGBenchmark {
       successful.reduce((sum, r) => sum + r.latency, 0) / successful.length;
 
     const avgCost =
-      successful.reduce((sum, r) => sum + r.estimatedCost, 0) / successful.length;
+      successful.reduce((sum, r) => sum + r.estimatedCost, 0) /
+      successful.length;
 
     const withMetrics = successful.filter((r) => r.evaluationMetrics);
     const avgQuality =
       withMetrics.length > 0
-        ? withMetrics.reduce((sum, r) => sum + (r.evaluationMetrics?.overall ?? 0), 0) /
-          withMetrics.length
+        ? withMetrics.reduce(
+            (sum, r) => sum + (r.evaluationMetrics?.overall ?? 0),
+            0,
+          ) / withMetrics.length
         : 0;
 
     return {
@@ -172,9 +185,7 @@ export class RAGBenchmark {
   /**
    * Compare patterns
    */
-  comparePatterns(
-    allResults: Map<RAGPatternType, BenchmarkResult[]>
-  ): {
+  comparePatterns(allResults: Map<RAGPatternType, BenchmarkResult[]>): {
     summaries: BenchmarkSummary[];
     winner: {
       latency: RAGPatternType;
@@ -190,9 +201,13 @@ export class RAGBenchmark {
     });
 
     // Find winners
-    const sortedByLatency = [...summaries].sort((a, b) => a.avgLatency - b.avgLatency);
+    const sortedByLatency = [...summaries].sort(
+      (a, b) => a.avgLatency - b.avgLatency,
+    );
     const sortedByCost = [...summaries].sort((a, b) => a.avgCost - b.avgCost);
-    const sortedByQuality = [...summaries].sort((a, b) => b.avgQuality - a.avgQuality);
+    const sortedByQuality = [...summaries].sort(
+      (a, b) => b.avgQuality - a.avgQuality,
+    );
 
     // Balanced score: weighted combination
     const balanced = [...summaries]
@@ -219,7 +234,10 @@ export class RAGBenchmark {
   /**
    * Estimate cost based on pattern and usage
    */
-  private estimateCost(pattern: RAGPatternType, metadata: Record<string, unknown> | { [key: string]: unknown }): number {
+  private estimateCost(
+    pattern: RAGPatternType,
+    metadata: Record<string, unknown> | { [key: string]: unknown },
+  ): number {
     // Cost estimates (in cents) based on AWS Bedrock Nova Micro pricing
     const modelCallCost = 0.00015; // per 1K input tokens
     const embeddingCost = 0.00002; // per 1K tokens
@@ -249,7 +267,10 @@ export class RAGBenchmark {
     }
 
     // Assume average of 500 tokens per call
-    return estimatedCalls * modelCallCost * 0.5 + estimatedEmbeddings * embeddingCost * 0.1;
+    return (
+      estimatedCalls * modelCallCost * 0.5 +
+      estimatedEmbeddings * embeddingCost * 0.1
+    );
   }
 
   /**
@@ -257,7 +278,7 @@ export class RAGBenchmark {
    */
   exportResults(
     allResults: Map<RAGPatternType, BenchmarkResult[]>,
-    filename = 'rag-benchmark-results.json'
+    filename = 'rag-benchmark-results.json',
   ): void {
     const comparison = this.comparePatterns(allResults);
 
@@ -289,4 +310,3 @@ export class RAGBenchmark {
 }
 
 export const ragBenchmark = new RAGBenchmark();
-

@@ -5,7 +5,10 @@ describe('RewriteModule', () => {
   let rewriteModule: RewriteModule;
 
   beforeEach(() => {
-    rewriteModule = new RewriteModule({ enabled: true, methods: ['reformulation'] });
+    rewriteModule = new RewriteModule({
+      enabled: true,
+      methods: ['reformulation'],
+    });
   });
 
   describe('executeInternal', () => {
@@ -19,7 +22,9 @@ describe('RewriteModule', () => {
 
       expect(result.success).toBe(true);
       expect(result.data).toHaveProperty('queries');
-      expect(Array.isArray((result.data as { queries: string[] }).queries)).toBe(true);
+      expect(
+        Array.isArray((result.data as { queries: string[] }).queries),
+      ).toBe(true);
     });
 
     it('should apply multiple rewriting methods', async () => {
@@ -69,4 +74,3 @@ describe('RewriteModule', () => {
     });
   });
 });
-

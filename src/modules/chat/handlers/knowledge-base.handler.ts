@@ -10,7 +10,7 @@ import {
   ProcessingContext,
 } from './types/handler.types';
 import { RagServiceLocator } from '../../rag/rag-service-locator';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { GoogleService } from '../../google/google.service';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -425,7 +425,7 @@ User question: ${userMessage}
 Please analyze the content from the Google Drive files above and provide a relevant answer to the user's question. If the files contain relevant information, use that in your response. If not, let the user know what the files contain instead.`;
 
     try {
-      const response = await this.bedrockService.invokeModelDirectly(
+      const response = await BedrockService.invokeModelDirectly(
         modelId || 'anthropic.claude-sonnet-4-5-20250929-v1:0',
         {
           prompt: contextualPrompt,

@@ -1241,8 +1241,7 @@ export class IntegrationChatService {
             if (!teamId) {
               return {
                 success: false,
-                message:
-                  'Team ID is required. Use @linear:team:TEAM-ID',
+                message: 'Team ID is required. Use @linear:team:TEAM-ID',
                 error: 'MISSING_TEAM_ID',
               };
             }
@@ -1294,8 +1293,7 @@ export class IntegrationChatService {
             if (!teamId) {
               return {
                 success: false,
-                message:
-                  'Team ID is required. Use @linear:team:TEAM-ID',
+                message: 'Team ID is required. Use @linear:team:TEAM-ID',
                 error: 'MISSING_TEAM_ID',
               };
             }
@@ -1328,8 +1326,7 @@ export class IntegrationChatService {
             if (!teamId) {
               return {
                 success: false,
-                message:
-                  'Team ID is required. Use @linear:team:TEAM-ID',
+                message: 'Team ID is required. Use @linear:team:TEAM-ID',
                 error: 'MISSING_TEAM_ID',
               };
             }
@@ -1359,8 +1356,7 @@ export class IntegrationChatService {
             if (!teamId) {
               return {
                 success: false,
-                message:
-                  'Team ID is required. Use @linear:team:TEAM-ID',
+                message: 'Team ID is required. Use @linear:team:TEAM-ID',
                 error: 'MISSING_TEAM_ID',
               };
             }
@@ -1774,7 +1770,10 @@ export class IntegrationChatService {
           }
           if (command.entity === 'role' || command.entity === 'roles') {
             const guildId = await resolveGuildId();
-            const roles = await this.discordService.listRoles(botToken, guildId);
+            const roles = await this.discordService.listRoles(
+              botToken,
+              guildId,
+            );
             return {
               success: true,
               message: `Found ${roles.length} roles`,
@@ -1924,11 +1923,15 @@ export class IntegrationChatService {
               command.params?.roleName ||
               command.naturalLanguage?.trim() ||
               'New Role';
-            const result = await this.discordService.createRole(botToken, guildId, {
-              name,
-              permissions: command.params?.permissions,
-              color: command.params?.color,
-            });
+            const result = await this.discordService.createRole(
+              botToken,
+              guildId,
+              {
+                name,
+                permissions: command.params?.permissions,
+                color: command.params?.color,
+              },
+            );
             return {
               success: true,
               message: `Role "${result.name}" created`,
@@ -1961,7 +1964,8 @@ export class IntegrationChatService {
             if (!userId) {
               return {
                 success: false,
-                message: 'User ID is required to kick. Use @discord:user:USER-ID',
+                message:
+                  'User ID is required to kick. Use @discord:user:USER-ID',
                 error: 'Missing params',
                 metadata: { service: 'discord' },
               };
@@ -1991,7 +1995,8 @@ export class IntegrationChatService {
             if (!userId) {
               return {
                 success: false,
-                message: 'User ID is required to ban. Use @discord:user:USER-ID',
+                message:
+                  'User ID is required to ban. Use @discord:user:USER-ID',
                 error: 'Missing params',
                 metadata: { service: 'discord' },
               };
@@ -2038,12 +2043,9 @@ export class IntegrationChatService {
         case 'assign':
           if (command.entity === 'role') {
             const guildId = await resolveGuildId();
-            const userId =
-              command.mention.entityId ||
-              command.params?.userId;
+            const userId = command.mention.entityId || command.params?.userId;
             const roleId =
-              command.mention.subEntityId ||
-              command.params?.roleId;
+              command.mention.subEntityId || command.params?.roleId;
             if (!userId || !roleId) {
               return {
                 success: false,
@@ -2071,17 +2073,13 @@ export class IntegrationChatService {
         case 'remove':
           if (command.entity === 'role') {
             const guildId = await resolveGuildId();
-            const userId =
-              command.mention.entityId ||
-              command.params?.userId;
+            const userId = command.mention.entityId || command.params?.userId;
             const roleId =
-              command.mention.subEntityId ||
-              command.params?.roleId;
+              command.mention.subEntityId || command.params?.roleId;
             if (!userId || !roleId) {
               return {
                 success: false,
-                message:
-                  'User ID and Role ID are required.',
+                message: 'User ID and Role ID are required.',
                 error: 'Missing params',
                 metadata: { service: 'discord' },
               };
@@ -2860,8 +2858,10 @@ export class IntegrationChatService {
               };
             }
             const includeContent = command.params?.includeContent === true;
-            const connId = (connection as { _id?: { toString: () => string } })
-              ._id?.toString() ?? '';
+            const connId =
+              (
+                connection as { _id?: { toString: () => string } }
+              )._id?.toString() ?? '';
 
             if (
               (command.entity === 'spreadsheet' ||
@@ -2888,8 +2888,10 @@ export class IntegrationChatService {
               (command.entity === 'document' || command.entity === 'docs') &&
               includeContent
             ) {
-              const docResult =
-                await this.googleService.getDocumentContent(connId, fileId);
+              const docResult = await this.googleService.getDocumentContent(
+                connId,
+                fileId,
+              );
               return {
                 success: true,
                 message: docResult.success
@@ -3071,11 +3073,10 @@ export class IntegrationChatService {
                 metadata: { service: 'google' },
               };
             }
-            const role =
-              ((command.params?.role as string) || 'writer') as
-                | 'reader'
-                | 'writer'
-                | 'commenter';
+            const role = ((command.params?.role as string) || 'writer') as
+              | 'reader'
+              | 'writer'
+              | 'commenter';
             const shareResult = await this.googleService.shareFileWithUser(
               conn,
               fileId,
@@ -3092,14 +3093,12 @@ export class IntegrationChatService {
             const spreadsheetId =
               (command.mention.entityId as string) ||
               (command.params?.spreadsheetId as string);
-            const range =
-              (command.params?.range as string) || 'Sheet1!A1';
+            const range = (command.params?.range as string) || 'Sheet1!A1';
             const values = command.params?.values as string[][];
             if (!spreadsheetId || !values?.length) {
               return {
                 success: false,
-                message:
-                  'Spreadsheet ID and values are required for update.',
+                message: 'Spreadsheet ID and values are required for update.',
                 error: 'Missing params',
                 metadata: { service: 'google' },
               };
@@ -3396,7 +3395,8 @@ export class IntegrationChatService {
             if (!projectId) {
               return {
                 success: false,
-                message: 'Project ID is required to list environment variables.',
+                message:
+                  'Project ID is required to list environment variables.',
                 error: 'Missing params',
                 metadata: { service: 'vercel' },
               };
@@ -3517,8 +3517,7 @@ export class IntegrationChatService {
           if (command.entity === 'domain') {
             const projectId =
               command.mention.entityId || command.params?.projectId;
-            const domain =
-              command.params?.domain || command.params?.name;
+            const domain = command.params?.domain || command.params?.name;
             if (!projectId || !domain?.trim()) {
               return {
                 success: false,
@@ -3650,7 +3649,7 @@ export class IntegrationChatService {
                   error: 'Missing params',
                   metadata: { service: 'vercel' },
                 };
-                }
+              }
               const rolled = await this.vercelService.rollbackDeployment(
                 connectionId,
                 projectId,
@@ -3843,9 +3842,17 @@ export class IntegrationChatService {
     if (type === 'status') return 'status';
     if (type === 'optimize') return 'optimize';
 
-    if (entity === 'cost' || entity === 'ec2' || entity === 's3' || entity === 'rds' || entity === 'lambda') {
-      if (command.params?.forecast || action.includes('forecast')) return 'cost_forecast';
-      if (command.params?.anomalies || action.includes('anomal')) return 'cost_anomalies';
+    if (
+      entity === 'cost' ||
+      entity === 'ec2' ||
+      entity === 's3' ||
+      entity === 'rds' ||
+      entity === 'lambda'
+    ) {
+      if (command.params?.forecast || action.includes('forecast'))
+        return 'cost_forecast';
+      if (command.params?.anomalies || action.includes('anomal'))
+        return 'cost_anomalies';
       if (action.includes('cost') || entity !== 'cost') return 'cost_breakdown';
       return 'costs';
     }

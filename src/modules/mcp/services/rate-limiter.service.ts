@@ -1,9 +1,11 @@
 /**
  * Rate Limiter Service for MCP Tools
- * Redis-based rate limiting to prevent abuse and ensure fair usage
+ * Redis-based sliding window rate limiting to prevent abuse and ensure fair usage.
+ * Uses Redis sorted sets (ZADD/ZREMRANGEBYSCORE/ZCARD) for distributed sliding window counters.
  */
 
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { CacheService } from '../../../common/cache/cache.service';
 import { LoggerService } from '../../../common/logger/logger.service';
 import {
@@ -33,7 +35,8 @@ export class RateLimiterService {
   ) {}
 
   /**
-   * Check rate limit for a user/integration/method combination
+   * Check rate limit using Redis sliding window (sorted set).
+   * Each request adds a member with score=timestamp; we count members in the window and prune old ones.
    */
   async checkRateLimit(
     userId: string,
@@ -44,36 +47,43 @@ export class RateLimiterService {
     try {
       const config = RateLimiterService.DEFAULT_LIMITS[httpMethod];
       const key = this.getCacheKey(userId, integration, httpMethod);
+      const now = Date.now();
+      const windowStart = now - config.windowSeconds * 1000;
 
-      // Get current count
-      const currentCount = (await this.cacheService.get<number>(key)) || 0;
+      // Prune requests outside the sliding window
+      await this.cacheService.zremrangebyscore(key, -Infinity, windowStart);
 
-      // Increment count
-      const newCount = currentCount + 1;
+      // Add current request to the sorted set (score = timestamp)
+      await this.cacheService.zadd(key, now, `${now}:${randomUUID()}`);
+
+      // Refresh TTL so the key expires after the window
+      await this.cacheService.expire(key, config.windowSeconds + 60);
+
+      // Count requests in the current window
+      const currentCount = await this.cacheService.zcount(
+        key,
+        windowStart,
+        now,
+      );
 
       // Check if limit exceeded
-      const allowed = newCount <= config.requests;
+      const allowed = currentCount <= config.requests;
 
-      // Calculate reset time
-      const resetAt = new Date(Date.now() + config.windowSeconds * 1000);
+      const resetAt = new Date(now + config.windowSeconds * 1000);
 
       if (allowed) {
-        // Set/update the count with TTL
-        await this.cacheService.set(key, newCount, config.windowSeconds);
-
         return {
           allowed: true,
-          remaining: config.requests - newCount,
+          remaining: Math.max(0, config.requests - currentCount),
           resetAt,
         };
       } else {
-        // Rate limit exceeded
         this.logger.warn('Rate limit exceeded', {
           userId,
           integration,
           httpMethod,
           toolName,
-          currentCount: newCount,
+          currentCount,
           limit: config.requests,
           resetAt,
         });
@@ -170,7 +180,7 @@ export class RateLimiterService {
   }
 
   /**
-   * Get rate limit status for a user/integration/method
+   * Get rate limit status using sliding window count (ZCARD of current window).
    */
   async getRateLimitStatus(
     userId: string,
@@ -185,24 +195,13 @@ export class RateLimiterService {
     try {
       const config = RateLimiterService.DEFAULT_LIMITS[httpMethod];
       const key = this.getCacheKey(userId, integration, httpMethod);
+      const now = Date.now();
+      const windowStart = now - config.windowSeconds * 1000;
 
-      const current = (await this.cacheService.get<number>(key)) || 0;
-      let ttl = config.windowSeconds;
-      try {
-        const redisClient = (this.cacheService as any).redis;
-        if (redisClient) {
-          const ttlValue = await redisClient.ttl(key);
-          if (ttlValue > 0) {
-            ttl = ttlValue;
-          }
-        }
-      } catch (error) {
-        // Fallback to default window
-        this.logger.debug('Failed to get TTL from Redis, using default', {
-          error,
-        });
-      }
-      const resetAt = new Date(Date.now() + ttl * 1000);
+      await this.cacheService.zremrangebyscore(key, -Infinity, windowStart);
+      const current = await this.cacheService.zcard(key);
+
+      const resetAt = new Date(now + config.windowSeconds * 1000);
 
       return {
         current,
@@ -236,7 +235,7 @@ export class RateLimiterService {
   }
 
   /**
-   * Check if a request would be rate limited (dry run)
+   * Check if a request would be rate limited (dry run) — uses sliding window count.
    */
   async wouldBeRateLimited(
     userId: string,
@@ -246,8 +245,11 @@ export class RateLimiterService {
     try {
       const config = RateLimiterService.DEFAULT_LIMITS[httpMethod];
       const key = this.getCacheKey(userId, integration, httpMethod);
+      const now = Date.now();
+      const windowStart = now - config.windowSeconds * 1000;
 
-      const currentCount = (await this.cacheService.get<number>(key)) || 0;
+      await this.cacheService.zremrangebyscore(key, -Infinity, windowStart);
+      const currentCount = await this.cacheService.zcard(key);
       return currentCount >= config.requests;
     } catch (error) {
       // On error, assume not rate limited (fail open)
@@ -281,8 +283,8 @@ export class RateLimiterService {
       for (const method of methods) {
         const key = this.getCacheKey(userId, integration, method);
         try {
-          const exists = (await this.cacheService.get(key)) !== null;
-          if (exists) {
+          const count = await this.cacheService.zcard(key);
+          if (count > 0) {
             keys.push(key);
           }
         } catch {
@@ -306,7 +308,7 @@ export class RateLimiterService {
   }
 
   /**
-   * Get rate limit statistics for monitoring
+   * Get rate limit statistics for monitoring (uses CacheService.keys for Redis).
    */
   async getRateLimitStats(): Promise<{
     totalKeys: number;
@@ -314,47 +316,25 @@ export class RateLimiterService {
     keysByMethod: Record<string, number>;
   }> {
     try {
-      // Use Redis SCAN to find all rate limit keys
       const keysByIntegration: Record<string, number> = {};
       const keysByMethod: Record<string, number> = {};
-      let totalKeys = 0;
+      const pattern = `${this.CACHE_PREFIX}*`;
+      const keyList = await this.cacheService.keys(pattern);
 
-      // Get the underlying Redis client from CacheService
-      const redisClient = (this.cacheService as any).redis;
-      if (!redisClient) {
-        this.logger.warn('Redis client not available for stats gathering');
-        return { totalKeys: 0, keysByIntegration: {}, keysByMethod: {} };
+      for (const key of keyList) {
+        // Parse the key format: ratelimit:mcp:{userId}:{integration}:{httpMethod}
+        const parts = key.split(':');
+        if (parts.length >= 5) {
+          const integration = parts[3];
+          const httpMethod = parts[4];
+
+          keysByIntegration[integration] =
+            (keysByIntegration[integration] || 0) + 1;
+          keysByMethod[httpMethod] = (keysByMethod[httpMethod] || 0) + 1;
+        }
       }
 
-      let cursor = '0';
-      const pattern = `${this.CACHE_PREFIX}*`;
-
-      do {
-        const result = await redisClient.scan(
-          cursor,
-          'MATCH',
-          pattern,
-          'COUNT',
-          100,
-        );
-        cursor = result[0];
-        const keys = result[1];
-
-        for (const key of keys) {
-          totalKeys++;
-
-          // Parse the key format: ratelimit:mcp:{userId}:{integration}:{httpMethod}
-          const parts = key.split(':');
-          if (parts.length === 5) {
-            const integration = parts[3];
-            const httpMethod = parts[4];
-
-            keysByIntegration[integration] =
-              (keysByIntegration[integration] || 0) + 1;
-            keysByMethod[httpMethod] = (keysByMethod[httpMethod] || 0) + 1;
-          }
-        }
-      } while (cursor !== '0');
+      const totalKeys = keyList.length;
 
       this.logger.debug('Rate limit stats gathered', {
         totalKeys,

@@ -1,8 +1,15 @@
+/**
+ * TelemetryService - Persist telemetry spans to MongoDB
+ * Used by GenAI telemetry, request metrics, and telemetry ingestion.
+ */
+
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Telemetry, TelemetryDocument } from '../schemas/core/telemetry.schema';
+import { loggingService } from '../common/services/logging.service';
 
+/** Input shape for storeTelemetryData (used by genaiTelemetry) */
 export interface TelemetryStoreInput {
   trace_id: string;
   span_id: string;
@@ -33,55 +40,49 @@ export interface TelemetryStoreInput {
   max_tokens?: number;
   processing_latency_ms?: number;
   attributes?: Record<string, unknown>;
+  http_route?: string;
+  http_method?: string;
+  http_status_code?: number;
+  [key: string]: unknown;
 }
 
-/**
- * Service for storing and querying telemetry (span-style) data in MongoDB.
- * Used by GenAI telemetry and other instrumentation to persist OpenTelemetry-style spans.
- */
 @Injectable()
 export class TelemetryService {
   private readonly logger = new Logger(TelemetryService.name);
+
+  /** Static for legacy Express middleware - set by Nest or no-op */
+  static storeTelemetryData: (data: Partial<TelemetryStoreInput>) => Promise<unknown> =
+    async () => ({});
 
   constructor(
     @InjectModel(Telemetry.name)
     private readonly telemetryModel: Model<TelemetryDocument>,
   ) {}
 
-  /**
-   * Store a telemetry span record in MongoDB.
-   * Called asynchronously from recordGenAIUsage so it does not block the operation.
-   */
-  /** No-op when used from Express (server.ts). Nest uses TelemetryQueryService. */
-  static startBackgroundEnrichment(): void {
-    // No-op: Express server calls this; Nest uses modules/telemetry
-  }
-
-  /** Legacy static API for Express services. Returns stub data. */
-  static async queryTelemetry(_query: Record<string, unknown>) {
-    return { data: [] as unknown[], total: 0, page: 1, limit: 100 };
-  }
-
-  /** Legacy static API for Express services. Returns stub data. */
-  static async getPerformanceMetrics(_options?: Record<string, unknown>) {
-    return {
-      requests_per_minute: 0,
-      error_rate: 0,
-      avg_duration_ms: 0,
-      p95_duration_ms: 0,
-      top_operations: [],
-      cost_by_model: [],
-    };
-  }
-
   async storeTelemetryData(
     data: Partial<TelemetryStoreInput>,
   ): Promise<TelemetryDocument> {
     try {
-      const doc = await this.telemetryModel.create(data);
+      const defaults = {
+        tenant_id: data.tenant_id ?? 'default',
+        workspace_id: data.workspace_id ?? 'default',
+        user_id: data.user_id ?? 'anonymous',
+        request_id: data.request_id ?? data.span_id ?? `span_${Date.now()}`,
+        timestamp: data.timestamp ?? new Date(),
+        start_time: data.start_time ?? new Date(),
+        end_time: data.end_time ?? new Date(),
+        duration_ms: data.duration_ms ?? 0,
+        service_name: data.service_name ?? 'unknown',
+        operation_name: data.operation_name ?? 'unknown',
+        span_kind: (data.span_kind ??
+          'internal') as TelemetryStoreInput['span_kind'],
+        status: (data.status ?? 'success') as TelemetryStoreInput['status'],
+      };
+      const doc = new this.telemetryModel({ ...defaults, ...data });
+      await doc.save();
       return doc;
     } catch (error) {
-      this.logger.error('Failed to store telemetry data', {
+      loggingService.error('Failed to store telemetry data', {
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;

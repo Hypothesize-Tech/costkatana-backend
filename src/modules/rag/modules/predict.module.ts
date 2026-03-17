@@ -5,7 +5,7 @@ import {
   PatternResult,
   ModuleConfig,
 } from '../types/rag.types';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 export interface PredictModuleConfig extends ModuleConfig {
   confidenceThreshold?: number;
@@ -98,11 +98,13 @@ Question: "${query}"
 
 Predicted answer:`;
 
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
       const prediction =
-        typeof response.content === 'string' ? response.content.trim() : null;
+        typeof response === 'string' ? response.trim() : null;
 
       if (prediction) {
         return [prediction];

@@ -7,62 +7,81 @@
 export { CortexParser, cortexParser } from './core/parser';
 export { CortexEncoder, cortexEncoder } from './core/encoder';
 export { CortexDecoder, cortexDecoder } from './core/decoder';
-export { CorePrimitives, DomainPrimitives, getPrimitiveByValue, isValidPrimitive } from './core/primitives';
+export {
+  CorePrimitives,
+  DomainPrimitives,
+  getPrimitiveByValue,
+  isValidPrimitive,
+} from './core/primitives';
 
 // Relay components
 export { CortexRelayEngine, cortexRelay } from './relay/relayEngine';
 export { ModelRouter, modelRouter } from './relay/modelRouter';
-export { DynamicModelSelector, dynamicModelSelector } from './relay/dynamicModelSelector';
-export { IntelligentModelSelector, intelligentModelSelector } from './relay/intelligentModelSelector';
+export {
+  DynamicModelSelector,
+  dynamicModelSelector,
+} from './relay/dynamicModelSelector';
+export {
+  IntelligentModelSelector,
+  intelligentModelSelector,
+} from './relay/intelligentModelSelector';
 
 // Types
 export * from './types';
 
 // Enhancement modules
-export { BinarySerializer, SchemaBasedSerializer } from './serialization/binarySerializer';
-export { 
-  ControlFlowProcessor, 
-  ControlFlowBuilder, 
-  ControlFlowType, 
+export {
+  BinarySerializer,
+  SchemaBasedSerializer,
+} from './serialization/binarySerializer';
+export {
+  ControlFlowProcessor,
+  ControlFlowBuilder,
+  ControlFlowType,
   LogicalOperator,
   type IfThenElseFrame,
   type SwitchCaseFrame,
   type ForEachFrame,
   type WhileFrame,
   type TryCatchFrame,
-  type ParallelFrame
+  type ParallelFrame,
 } from './core/controlFlow';
-export { 
-  HybridExecutionEngine, 
+export {
+  HybridExecutionEngine,
   ToolType,
   type ToolRequest,
   type ToolResult,
-  type ToolExecutor
+  type ToolExecutor,
 } from './execution/hybridEngine';
-export { 
-  FragmentCacheManager, 
+export {
+  FragmentCacheManager,
   FragmentType,
   type CachedFragment,
-  type FragmentIdentification
+  type FragmentIdentification,
 } from './caching/fragmentCache';
-export { 
+export {
   ContextManager,
   type ContextFrame,
   type EntityContext,
   type GoalContext,
-  type ContextUpdateResult
+  type ContextUpdateResult,
 } from './context/contextManager';
 
 // Re-export the main service for convenience
 export { cortexService } from '../services/cortexService';
-export { cortexGatewayMiddleware, enableCortex, cortexResponse, cortexError } from '../middleware/cortexGateway';
+export {
+  cortexGatewayMiddleware,
+  enableCortex,
+  cortexResponse,
+  cortexError,
+} from '../middleware/cortexGateway';
 
 /**
  * Initialize Cortex with default configuration
  */
 export async function initializeCortex(): Promise<void> {
   const { loggingService } = await import('../services/logging.service');
-  
+
   loggingService.info('Initializing Cortex Meta-Language System', {
     version: '1.0.0',
     environment: process.env.NODE_ENV,
@@ -72,17 +91,17 @@ export async function initializeCortex(): Promise<void> {
       tokenReduction: process.env.CORTEX_TOKEN_REDUCTION !== 'false',
       semanticCaching: process.env.CORTEX_SEMANTIC_CACHING !== 'false',
       modelRouting: process.env.CORTEX_MODEL_ROUTING !== 'false',
-      neuralCompression: process.env.CORTEX_NEURAL_COMPRESSION === 'true'
-    }
+      neuralCompression: process.env.CORTEX_NEURAL_COMPRESSION === 'true',
+    },
   });
-  
+
   // Initialize dynamic model selection
   const { dynamicModelSelector } = await import('./relay/dynamicModelSelector');
   const models = await dynamicModelSelector.getAvailableModels();
-  
+
   loggingService.info('Cortex initialized with available models', {
     modelCount: models.length,
-    providers: Array.from(new Set(models.map(m => m.provider)))
+    providers: Array.from(new Set(models.map((m) => m.provider))),
   });
 }
 
@@ -94,7 +113,7 @@ export async function processThroughCortex(
   options?: {
     useCache?: boolean;
     modelOverride?: string;
-  }
+  },
 ): Promise<{
   response: string;
   metrics: any;
@@ -132,22 +151,22 @@ export const Cortex = {
     const { cortexDecoder } = await import('./core/decoder');
     return cortexDecoder.decode(response);
   },
-  
+
   // Metrics
   getMetrics: getCortexMetrics,
-  
+
   // Configuration
   initialize: initializeCortex,
   isEnabled: async () => {
     const { cortexService } = await import('../services/cortexService');
     return cortexService.isEnabled();
   },
-  
+
   // Cache management
   clearCache: async () => {
     const { cortexService } = await import('../services/cortexService');
     return cortexService.clearCache();
-  }
+  },
 };
 
 export default Cortex;

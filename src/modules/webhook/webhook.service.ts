@@ -27,6 +27,17 @@ import {
   GetDeliveriesQueryDto,
 } from './dto/webhook.dto';
 
+let webhookServiceInstance: WebhookService | null = null;
+
+export function getWebhookService(): WebhookService {
+  if (!webhookServiceInstance) {
+    throw new Error(
+      'WebhookService not initialized. Ensure WebhookModule is imported.',
+    );
+  }
+  return webhookServiceInstance;
+}
+
 @Injectable()
 export class WebhookService {
   private readonly templateCache = new Map<
@@ -42,7 +53,9 @@ export class WebhookService {
     private logger: LoggerService,
     private encryptionService: EncryptionService,
     private cacheService: CacheService,
-  ) {}
+  ) {
+    webhookServiceInstance = this;
+  }
 
   async createWebhook(
     userId: string,

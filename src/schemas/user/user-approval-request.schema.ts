@@ -58,6 +58,11 @@ export class UserApprovalRequest {
 export const UserApprovalRequestSchema =
   SchemaFactory.createForClass(UserApprovalRequest);
 
+/** Get Mongoose model for UserApprovalRequest (use when model is registered via MongooseModule) */
+export const getUserApprovalRequestModel = () =>
+  mongoose.models[UserApprovalRequest.name] ||
+  mongoose.model(UserApprovalRequest.name, UserApprovalRequestSchema);
+
 // Auto-expire documents
 UserApprovalRequestSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 

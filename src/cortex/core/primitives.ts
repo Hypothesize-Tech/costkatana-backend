@@ -81,7 +81,7 @@ export const PrimitiveIds = {
   action_report: 65,
   action_present: 66,
   action_demonstrate: 67,
-  
+
   // Concepts (1001-2000)
   concept_fox: 1123,
   concept_dog: 876,
@@ -121,7 +121,7 @@ export const PrimitiveIds = {
   concept_deadline: 1034,
   concept_movie: 1035,
   concept_franchise: 1036,
-  
+
   // Properties (2001-3000)
   prop_quick: 2001,
   prop_brown: 2002,
@@ -158,7 +158,7 @@ export const PrimitiveIds = {
   prop_main_themes: 2033,
   prop_plot: 2034,
   prop_color: 2035,
-  
+
   // Modifiers (3001-4000)
   mod_latest: 3001,
   mod_previous: 3002,
@@ -180,7 +180,7 @@ export const PrimitiveIds = {
   mod_or: 3018,
   mod_not: 3019,
   mod_definite: 3020,
-  mod_indefinite: 3021
+  mod_indefinite: 3021,
 };
 
 // Reverse mapping for decoding
@@ -200,7 +200,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     search: 'action_search',
     query: 'action_query',
     lookup: 'action_lookup',
-    
+
     // Content Generation
     create: 'action_create',
     generate: 'action_generate',
@@ -209,7 +209,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     write: 'action_write',
     design: 'action_design',
     build: 'action_build',
-    
+
     // Analysis and Processing
     analyze: 'action_analyze',
     evaluate: 'action_evaluate',
@@ -218,7 +218,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     inspect: 'action_inspect',
     review: 'action_review',
     audit: 'action_audit',
-    
+
     // Transformation
     transform: 'action_transform',
     convert: 'action_convert',
@@ -227,7 +227,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     modify: 'action_modify',
     update: 'action_update',
     enhance: 'action_enhance',
-    
+
     // Summarization and Extraction
     summarize: 'action_summarize',
     extract: 'action_extract',
@@ -235,7 +235,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     condense: 'action_condense',
     highlight: 'action_highlight',
     outline: 'action_outline',
-    
+
     // Comparison and Correlation
     compare: 'action_compare',
     contrast: 'action_contrast',
@@ -243,7 +243,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     match: 'action_match',
     differentiate: 'action_differentiate',
     relate: 'action_relate',
-    
+
     // Calculation and Computation
     calculate: 'action_calculate',
     compute: 'action_compute',
@@ -252,7 +252,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     predict: 'action_predict',
     forecast: 'action_forecast',
     project: 'action_project',
-    
+
     // Organization
     organize: 'action_organize',
     categorize: 'action_categorize',
@@ -261,7 +261,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     sort: 'action_sort',
     filter: 'action_filter',
     rank: 'action_rank',
-    
+
     // Validation
     validate: 'action_validate',
     verify: 'action_verify',
@@ -269,7 +269,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     check: 'action_check',
     test: 'action_test',
     prove: 'action_prove',
-    
+
     // Communication
     explain: 'action_explain',
     describe: 'action_describe',
@@ -277,7 +277,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     report: 'action_report',
     present: 'action_present',
     demonstrate: 'action_demonstrate',
-    
+
     // Decision Making
     decide: 'action_decide',
     choose: 'action_choose',
@@ -285,14 +285,14 @@ export const CorePrimitives: PrimitiveVocabulary = {
     recommend: 'action_recommend',
     suggest: 'action_suggest',
     advise: 'action_advise',
-    
+
     // Planning
     plan: 'action_plan',
     schedule: 'action_schedule',
     coordinate: 'action_coordinate',
     orchestrate: 'action_orchestrate',
     strategize: 'action_strategize',
-    
+
     // Execution
     execute: 'action_execute',
     perform: 'action_perform',
@@ -300,27 +300,27 @@ export const CorePrimitives: PrimitiveVocabulary = {
     deploy: 'action_deploy',
     activate: 'action_activate',
     trigger: 'action_trigger',
-    
+
     // Monitoring
     monitor: 'action_monitor',
     track: 'action_track',
     observe: 'action_observe',
     watch: 'action_watch',
     supervise: 'action_supervise',
-    
+
     // Optimization
     optimize: 'action_optimize',
     improve: 'action_improve',
     refine: 'action_refine',
     streamline: 'action_streamline',
-    
+
     // Learning
     learn: 'action_learn',
     train: 'action_train',
     evolve: 'action_evolve',
-    discover: 'action_discover'
+    discover: 'action_discover',
   },
-  
+
   // ============= Concepts =============
   concepts: {
     // Documents and Content
@@ -334,7 +334,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     post: 'concept_post',
     comment: 'concept_comment',
     note: 'concept_note',
-    
+
     // Data Structures
     data: 'concept_data',
     database: 'concept_database',
@@ -344,7 +344,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     schema: 'concept_schema',
     index: 'concept_index',
     query: 'concept_query',
-    
+
     // People and Organizations
     person: 'concept_person',
     user: 'concept_user',
@@ -354,7 +354,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     organization: 'concept_organization',
     company: 'concept_company',
     department: 'concept_department',
-    
+
     // Time and Events
     time: 'concept_time',
     date: 'concept_date',
@@ -364,7 +364,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     meeting: 'concept_meeting',
     appointment: 'concept_appointment',
     deadline: 'concept_deadline',
-    
+
     // Places and Locations
     location: 'concept_location',
     address: 'concept_address',
@@ -372,7 +372,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     country: 'concept_country',
     region: 'concept_region',
     coordinate: 'concept_coordinate',
-    
+
     // Systems and Processes
     system: 'concept_system',
     process: 'concept_process',
@@ -381,7 +381,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     service: 'concept_service',
     application: 'concept_application',
     platform: 'concept_platform',
-    
+
     // Financial
     cost: 'concept_cost',
     price: 'concept_price',
@@ -391,7 +391,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     profit: 'concept_profit',
     invoice: 'concept_invoice',
     transaction: 'concept_transaction',
-    
+
     // Metrics and Measurements
     metric: 'concept_metric',
     measurement: 'concept_measurement',
@@ -400,7 +400,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     score: 'concept_score',
     rating: 'concept_rating',
     percentage: 'concept_percentage',
-    
+
     // AI and ML Specific
     model: 'concept_model',
     algorithm: 'concept_algorithm',
@@ -410,14 +410,14 @@ export const CorePrimitives: PrimitiveVocabulary = {
     classification: 'concept_classification',
     token: 'concept_token',
     embedding: 'concept_embedding',
-    
+
     // Media
     image: 'concept_image',
     video: 'concept_video',
     audio: 'concept_audio',
     file: 'concept_file',
     folder: 'concept_folder',
-    
+
     // Abstract Concepts
     idea: 'concept_idea',
     concept: 'concept_concept',
@@ -426,7 +426,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     rule: 'concept_rule',
     pattern: 'concept_pattern',
     trend: 'concept_trend',
-    
+
     // Problems and Solutions
     problem: 'concept_problem',
     issue: 'concept_issue',
@@ -434,43 +434,43 @@ export const CorePrimitives: PrimitiveVocabulary = {
     solution: 'concept_solution',
     answer: 'concept_answer',
     resolution: 'concept_resolution',
-    
+
     // Goals and Objectives
     goal: 'concept_goal',
     objective: 'concept_objective',
     target: 'concept_target',
     milestone: 'concept_milestone',
     achievement: 'concept_achievement',
-    
+
     // Products and Services
     product: 'concept_product',
     feature: 'concept_feature',
     component: 'concept_component',
     module: 'concept_module',
     package: 'concept_package',
-    
+
     // Communication
     conversation: 'concept_conversation',
     discussion: 'concept_discussion',
     dialogue: 'concept_dialogue',
     feedback: 'concept_feedback',
     response: 'concept_response',
-    
+
     // Security
     security: 'concept_security',
     authentication: 'concept_authentication',
     authorization: 'concept_authorization',
     permission: 'concept_permission',
     credential: 'concept_credential',
-    
+
     // Quality
     quality: 'concept_quality',
     standard: 'concept_standard',
     requirement: 'concept_requirement',
     specification: 'concept_specification',
-    criterion: 'concept_criterion'
+    criterion: 'concept_criterion',
   },
-  
+
   // ============= Properties =============
   properties: {
     // Identification
@@ -480,7 +480,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     identifier: 'prop_identifier',
     label: 'prop_label',
     tag: 'prop_tag',
-    
+
     // Description
     description: 'prop_description',
     summary: 'prop_summary',
@@ -488,7 +488,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     content: 'prop_content',
     body: 'prop_body',
     text: 'prop_text',
-    
+
     // Status and State
     status: 'prop_status',
     state: 'prop_state',
@@ -496,7 +496,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     stage: 'prop_stage',
     condition: 'prop_condition',
     mode: 'prop_mode',
-    
+
     // Quality and Characteristics
     quality: 'prop_quality',
     accuracy: 'prop_accuracy',
@@ -504,21 +504,21 @@ export const CorePrimitives: PrimitiveVocabulary = {
     reliability: 'prop_reliability',
     performance: 'prop_performance',
     efficiency: 'prop_efficiency',
-    
+
     // Sentiment and Emotion
     sentiment: 'prop_sentiment',
     emotion: 'prop_emotion',
     mood: 'prop_mood',
     tone: 'prop_tone',
     attitude: 'prop_attitude',
-    
+
     // Importance and Priority
     priority: 'prop_priority',
     importance: 'prop_importance',
     urgency: 'prop_urgency',
     severity: 'prop_severity',
     criticality: 'prop_criticality',
-    
+
     // Size and Quantity
     size: 'prop_size',
     length: 'prop_length',
@@ -526,21 +526,21 @@ export const CorePrimitives: PrimitiveVocabulary = {
     quantity: 'prop_quantity',
     amount: 'prop_amount',
     volume: 'prop_volume',
-    
+
     // Time Properties
     timestamp: 'prop_timestamp',
     duration: 'prop_duration',
     frequency: 'prop_frequency',
     interval: 'prop_interval',
     deadline: 'prop_deadline',
-    
+
     // Location Properties
     location: 'prop_location',
     position: 'prop_position',
     coordinates: 'prop_coordinates',
     address: 'prop_address',
     region: 'prop_region',
-    
+
     // Categorization
     category: 'prop_category',
     type: 'prop_type',
@@ -548,27 +548,27 @@ export const CorePrimitives: PrimitiveVocabulary = {
     group: 'prop_group',
     domain: 'prop_domain',
     topic: 'prop_topic',
-    
+
     // Relationships
     relationship: 'prop_relationship',
     connection: 'prop_connection',
     association: 'prop_association',
     dependency: 'prop_dependency',
-    
+
     // Attributes
     color: 'prop_color',
     shape: 'prop_shape',
     texture: 'prop_texture',
     material: 'prop_material',
     style: 'prop_style',
-    
+
     // Themes and Concepts
     theme: 'prop_theme',
     main_themes: 'prop_main_themes',
     key_points: 'prop_key_points',
     key_takeaways: 'prop_key_takeaways',
     highlights: 'prop_highlights',
-    
+
     // Causes and Effects
     cause: 'prop_cause',
     effect: 'prop_effect',
@@ -576,26 +576,26 @@ export const CorePrimitives: PrimitiveVocabulary = {
     purpose: 'prop_purpose',
     consequence: 'prop_consequence',
     impact: 'prop_impact',
-    
+
     // Sources and Origins
     source: 'prop_source',
     origin: 'prop_origin',
     author: 'prop_author',
     creator: 'prop_creator',
     owner: 'prop_owner',
-    
+
     // Targets and Destinations
     target: 'prop_target',
     destination: 'prop_destination',
     recipient: 'prop_recipient',
     audience: 'prop_audience',
-    
+
     // Constraints
     constraint: 'prop_constraint',
     limitation: 'prop_limitation',
     restriction: 'prop_restriction',
     requirement: 'prop_requirement',
-    
+
     // Metrics
     metric: 'prop_metric',
     score: 'prop_score',
@@ -603,21 +603,21 @@ export const CorePrimitives: PrimitiveVocabulary = {
     rank: 'prop_rank',
     percentage: 'prop_percentage',
     ratio: 'prop_ratio',
-    
+
     // Configuration
     configuration: 'prop_configuration',
     setting: 'prop_setting',
     parameter: 'prop_parameter',
     option: 'prop_option',
     preference: 'prop_preference',
-    
+
     // Versions
     version: 'prop_version',
     revision: 'prop_revision',
     edition: 'prop_edition',
-    release: 'prop_release'
+    release: 'prop_release',
   },
-  
+
   // ============= Modifiers =============
   modifiers: {
     // Temporal
@@ -628,7 +628,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     recent: 'mod_recent',
     past: 'mod_past',
     future: 'mod_future',
-    
+
     // Quantifiers
     all: 'mod_all',
     any: 'mod_any',
@@ -639,7 +639,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     most: 'mod_most',
     few: 'mod_few',
     many: 'mod_many',
-    
+
     // Logical
     and: 'mod_and',
     or: 'mod_or',
@@ -647,7 +647,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     if: 'mod_if',
     then: 'mod_then',
     else: 'mod_else',
-    
+
     // Comparison
     more: 'mod_more',
     less: 'mod_less',
@@ -655,49 +655,49 @@ export const CorePrimitives: PrimitiveVocabulary = {
     greater: 'mod_greater',
     lesser: 'mod_lesser',
     between: 'mod_between',
-    
+
     // Definiteness
     definite: 'mod_definite',
     indefinite: 'mod_indefinite',
     specific: 'mod_specific',
     general: 'mod_general',
-    
+
     // Certainty
     certain: 'mod_certain',
     probable: 'mod_probable',
     possible: 'mod_possible',
     unlikely: 'mod_unlikely',
     impossible: 'mod_impossible',
-    
+
     // Speed
     fast: 'mod_fast',
     slow: 'mod_slow',
     quick: 'mod_quick',
     immediate: 'mod_immediate',
     gradual: 'mod_gradual',
-    
+
     // Size
     large: 'mod_large',
     small: 'mod_small',
     medium: 'mod_medium',
     tiny: 'mod_tiny',
     huge: 'mod_huge',
-    
+
     // Quality
     good: 'mod_good',
     bad: 'mod_bad',
     best: 'mod_best',
     worst: 'mod_worst',
     optimal: 'mod_optimal',
-    
+
     // Position
     first: 'mod_first',
     last: 'mod_last',
     middle: 'mod_middle',
     beginning: 'mod_beginning',
-    end: 'mod_end'
+    end: 'mod_end',
   },
-  
+
   // ============= Relations =============
   relations: {
     // Spatial
@@ -709,7 +709,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     outside: 'rel_outside',
     near: 'rel_near',
     far: 'rel_far',
-    
+
     // Temporal
     before: 'rel_before',
     after: 'rel_after',
@@ -717,7 +717,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     while: 'rel_while',
     since: 'rel_since',
     until: 'rel_until',
-    
+
     // Logical
     causes: 'rel_causes',
     caused_by: 'rel_caused_by',
@@ -725,7 +725,7 @@ export const CorePrimitives: PrimitiveVocabulary = {
     depends_on: 'rel_depends_on',
     influences: 'rel_influences',
     correlates_with: 'rel_correlates_with',
-    
+
     // Hierarchical
     parent_of: 'rel_parent_of',
     child_of: 'rel_child_of',
@@ -733,14 +733,14 @@ export const CorePrimitives: PrimitiveVocabulary = {
     contained_by: 'rel_contained_by',
     part_of: 'rel_part_of',
     has_part: 'rel_has_part',
-    
+
     // Associative
     related_to: 'rel_related_to',
     associated_with: 'rel_associated_with',
     connected_to: 'rel_connected_to',
     linked_to: 'rel_linked_to',
     refers_to: 'rel_refers_to',
-    
+
     // Comparative
     similar_to: 'rel_similar_to',
     different_from: 'rel_different_from',
@@ -748,20 +748,20 @@ export const CorePrimitives: PrimitiveVocabulary = {
     opposite_of: 'rel_opposite_of',
     greater_than: 'rel_greater_than',
     less_than: 'rel_less_than',
-    
+
     // Ownership
     owns: 'rel_owns',
     owned_by: 'rel_owned_by',
     belongs_to: 'rel_belongs_to',
     has: 'rel_has',
-    
+
     // Communication
     sends_to: 'rel_sends_to',
     receives_from: 'rel_receives_from',
     responds_to: 'rel_responds_to',
     asks: 'rel_asks',
-    answers: 'rel_answers'
-  }
+    answers: 'rel_answers',
+  },
 };
 
 /**
@@ -775,53 +775,55 @@ export const DomainPrimitives = {
       invest: 'action_invest',
       divest: 'action_divest',
       hedge: 'action_hedge',
-      arbitrage: 'action_arbitrage'
+      arbitrage: 'action_arbitrage',
     },
     concepts: {
       stock: 'concept_stock',
       bond: 'concept_bond',
       derivative: 'concept_derivative',
-      portfolio: 'concept_portfolio'
-    }
+      portfolio: 'concept_portfolio',
+    },
   },
-  
+
   // Medical domain
   medical: {
     actions: {
       diagnose: 'action_diagnose',
       treat: 'action_treat',
       prescribe: 'action_prescribe',
-      examine: 'action_examine'
+      examine: 'action_examine',
     },
     concepts: {
       patient: 'concept_patient',
       symptom: 'concept_symptom',
       diagnosis: 'concept_diagnosis',
-      treatment: 'concept_treatment'
-    }
+      treatment: 'concept_treatment',
+    },
   },
-  
+
   // Legal domain
   legal: {
     actions: {
       prosecute: 'action_prosecute',
       defend: 'action_defend',
       adjudicate: 'action_adjudicate',
-      appeal: 'action_appeal'
+      appeal: 'action_appeal',
     },
     concepts: {
       case: 'concept_case',
       law: 'concept_law',
       contract: 'concept_contract',
-      verdict: 'concept_verdict'
-    }
-  }
+      verdict: 'concept_verdict',
+    },
+  },
 };
 
 /**
  * Utility function to get primitive by value
  */
-export function getPrimitiveByValue(value: string): { type: string; key: string } | null {
+export function getPrimitiveByValue(
+  value: string,
+): { type: string; key: string } | null {
   for (const [type, primitives] of Object.entries(CorePrimitives)) {
     for (const [key, val] of Object.entries(primitives)) {
       if (val === value) {

@@ -5,7 +5,7 @@ import {
   PatternResult,
   ModuleConfig,
 } from '../types/rag.types';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 export interface RewriteModuleConfig extends ModuleConfig {
   methods?: ('expansion' | 'reformulation' | 'hyde' | 'decomposition')[];
@@ -135,11 +135,12 @@ Query: "${query}"
 
 Alternative queries:`;
 
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
-      const content =
-        typeof response.content === 'string' ? response.content : '';
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
+      const content = typeof response === 'string' ? response : '';
 
       // Parse alternatives
       const alternatives = content
@@ -190,11 +191,13 @@ Original query: "${query}"`;
 
       prompt += '\n\nReformulated query:';
 
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
       const reformulated =
-        typeof response.content === 'string' ? response.content.trim() : query;
+        typeof response === 'string' ? response.trim() : query;
 
       return reformulated || query;
     } catch (error) {
@@ -216,11 +219,13 @@ Question: "${query}"
 
 Hypothetical answer:`;
 
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
       const hypothesis =
-        typeof response.content === 'string' ? response.content.trim() : query;
+        typeof response === 'string' ? response.trim() : query;
 
       this.logger.log('HyDE hypothesis generated', {
         originalQuery: query.substring(0, 50),
@@ -247,11 +252,12 @@ Complex query: "${query}"
 
 Sub-queries:`;
 
-      const response = await this.bedrockService.invoke([
-        { role: 'user', content: prompt },
-      ]);
-      const content =
-        typeof response.content === 'string' ? response.content : '';
+      const response = await BedrockService.invokeModel(
+        prompt,
+        'amazon.nova-pro-v1:0',
+        { useSystemPrompt: false },
+      );
+      const content = typeof response === 'string' ? response : '';
 
       const subQueries = content
         .split('\n')

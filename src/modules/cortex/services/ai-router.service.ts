@@ -661,9 +661,7 @@ export class AIRouterService {
           contentType: 'application/json',
           accept: 'application/json',
           body: JSON.stringify({
-            messages: [
-              { role: 'user', content: request.prompt },
-            ],
+            messages: [{ role: 'user', content: request.prompt }],
             max_tokens: baseParams.max_tokens,
             temperature: baseParams.temperature,
             top_p: baseParams.top_p,

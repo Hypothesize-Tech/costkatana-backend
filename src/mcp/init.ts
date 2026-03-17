@@ -3,7 +3,7 @@
  * Registers all integration tools
  */
 
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 import { initializeVercelMCP } from './integrations/vercel.mcp';
 import { initializeGitHubMCP } from './integrations/github.mcp';
 import { initializeGoogleMCP } from './integrations/google.mcp';

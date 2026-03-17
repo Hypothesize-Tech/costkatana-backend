@@ -170,8 +170,6 @@ const ROLE_PERMISSIONS: Record<InternalRole, Set<PrivilegedOperation>> = {
 export class InternalAccessControlService
   implements OnModuleInit, OnModuleDestroy
 {
-  private readonly auditLog: InternalAuditEntry[] = [];
-
   // Pending dual approval requests
   private pendingApprovals: Map<string, DualApprovalRequest> = new Map();
 
@@ -555,10 +553,29 @@ export class InternalAccessControlService
   }
 
   /**
-   * Get audit log
+   * Get audit log from persistent storage
    */
-  getAuditLog(limit: number = 100): InternalAuditEntry[] {
-    return this.auditLog.slice(-limit);
+  async getAuditLog(limit: number = 100): Promise<InternalAuditEntry[]> {
+    const docs = await this.auditModel
+      .find()
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .lean();
+    return docs.map((doc) => ({
+      timestamp: new Date(doc.timestamp),
+      operatorId: String(doc.operatorId),
+      operatorEmail: doc.operatorEmail,
+      operation: (doc.details as any)?.operation ?? 'unknown',
+      resource: (doc.details as any)?.resource,
+      result:
+        doc.severity === 'warning'
+          ? 'denied'
+          : doc.severity === 'info'
+            ? 'success'
+            : 'pending_approval',
+      reason: (doc.details as any)?.reason,
+      ipAddress: (doc.details as any)?.ipAddress,
+    }));
   }
 
   /**
@@ -736,21 +753,6 @@ export class InternalAccessControlService
     resource?: string,
   ): Promise<void> {
     try {
-      const localEntry: InternalAuditEntry = {
-        timestamp: new Date(),
-        operatorId: operator.operatorId,
-        operatorEmail: operator.email,
-        operation,
-        resource,
-        result,
-        reason,
-        ipAddress: operator.ipAddress,
-      };
-      this.auditLog.push(localEntry);
-      if (this.auditLog.length > 5000) {
-        this.auditLog.shift();
-      }
-
       const auditEntry = {
         timestamp: Date.now(),
         operatorId: operator.operatorId,

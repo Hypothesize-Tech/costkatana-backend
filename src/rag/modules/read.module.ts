@@ -11,7 +11,7 @@ import {
 } from '../types/rag.types';
 import { Document } from '@langchain/core/documents';
 import { ChatBedrockConverse } from '@langchain/aws';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 export class ReadModule extends BaseRAGModule {
   protected config: ReadConfig;
@@ -23,7 +23,7 @@ export class ReadModule extends BaseRAGModule {
       maxTokens: 4000,
       compressionRatio: 0.5,
       extractionStrategy: 'key-points',
-    }
+    },
   ) {
     super('ReadModule', 'read', config);
     this.config = config;
@@ -37,16 +37,13 @@ export class ReadModule extends BaseRAGModule {
   }
 
   protected async executeInternal(
-    input: RAGModuleInput
+    input: RAGModuleInput,
   ): Promise<RAGModuleOutput> {
     const { query, documents, config } = input;
 
     if (!documents || documents.length === 0) {
       return {
-        ...this.createSuccessOutput(
-          { extractedContext: '' },
-          { empty: true }
-        ),
+        ...this.createSuccessOutput({ extractedContext: '' }, { empty: true }),
         documents: [],
         query,
       };
@@ -59,13 +56,13 @@ export class ReadModule extends BaseRAGModule {
       const extractedContext = await this.extractContext(
         query,
         documents,
-        effectiveConfig
+        effectiveConfig,
       );
 
       // Compress if needed
       const finalContext = await this.compressContext(
         extractedContext,
-        effectiveConfig
+        effectiveConfig,
       );
 
       loggingService.info('Context extracted and processed', {
@@ -84,7 +81,7 @@ export class ReadModule extends BaseRAGModule {
             originalLength: extractedContext.length,
             finalLength: finalContext.length,
             strategy: effectiveConfig.extractionStrategy,
-          }
+          },
         ),
         documents,
         query,
@@ -97,14 +94,14 @@ export class ReadModule extends BaseRAGModule {
 
       // Fallback to simple concatenation
       const fallbackContext = documents
-        .map(doc => doc.pageContent)
+        .map((doc) => doc.pageContent)
         .join('\n\n')
         .substring(0, effectiveConfig.maxTokens || 4000);
 
       return {
         ...this.createSuccessOutput(
           { extractedContext: fallbackContext },
-          { fallback: true }
+          { fallback: true },
         ),
         documents,
         query,
@@ -118,7 +115,7 @@ export class ReadModule extends BaseRAGModule {
   private async extractContext(
     query: string,
     documents: Document[],
-    config: ReadConfig
+    config: ReadConfig,
   ): Promise<string> {
     const strategy = config.extractionStrategy || 'key-points';
 
@@ -139,10 +136,13 @@ export class ReadModule extends BaseRAGModule {
    * Full context extraction (no summarization)
    */
   private fullExtraction(documents: Document[]): string {
-    return documents.map((doc, idx) => {
-      const source = doc.metadata.fileName || doc.metadata.source || `Doc ${idx + 1}`;
-      return `[${source}]\n${doc.pageContent}`;
-    }).join('\n\n---\n\n');
+    return documents
+      .map((doc, idx) => {
+        const source =
+          doc.metadata.fileName || doc.metadata.source || `Doc ${idx + 1}`;
+        return `[${source}]\n${doc.pageContent}`;
+      })
+      .join('\n\n---\n\n');
   }
 
   /**
@@ -150,11 +150,12 @@ export class ReadModule extends BaseRAGModule {
    */
   private async summaryExtraction(
     query: string,
-    documents: Document[]
+    documents: Document[],
   ): Promise<string> {
     const summaries: string[] = [];
 
-    for (const doc of documents.slice(0, 5)) { // Limit to avoid too many calls
+    for (const doc of documents.slice(0, 5)) {
+      // Limit to avoid too many calls
       try {
         const summary = await this.summarizeDocument(query, doc);
         summaries.push(summary);
@@ -172,18 +173,20 @@ export class ReadModule extends BaseRAGModule {
    */
   private async keyPointsExtraction(
     query: string,
-    documents: Document[]
+    documents: Document[],
   ): Promise<string> {
     const keyPoints: string[] = [];
 
     for (const doc of documents.slice(0, 5)) {
       try {
         const points = await this.extractKeyPoints(query, doc);
-        const source = doc.metadata.fileName || doc.metadata.source || 'Document';
+        const source =
+          doc.metadata.fileName || doc.metadata.source || 'Document';
         keyPoints.push(`[${source}]\n${points}`);
       } catch (error) {
         // Fallback to truncated content
-        const source = doc.metadata.fileName || doc.metadata.source || 'Document';
+        const source =
+          doc.metadata.fileName || doc.metadata.source || 'Document';
         keyPoints.push(`[${source}]\n${doc.pageContent.substring(0, 300)}`);
       }
     }
@@ -196,7 +199,7 @@ export class ReadModule extends BaseRAGModule {
    */
   private async summarizeDocument(
     query: string,
-    document: Document
+    document: Document,
   ): Promise<string> {
     const prompt = `Summarize the following document excerpt in 2-3 sentences, focusing on information relevant to this query: "${query}"
 
@@ -206,8 +209,8 @@ ${document.pageContent.substring(0, 2000)}
 Summary:`;
 
     const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-    return typeof response.content === 'string' 
-      ? response.content.trim() 
+    return typeof response.content === 'string'
+      ? response.content.trim()
       : document.pageContent.substring(0, 300);
   }
 
@@ -216,7 +219,7 @@ Summary:`;
    */
   private async extractKeyPoints(
     query: string,
-    document: Document
+    document: Document,
   ): Promise<string> {
     const prompt = `Extract the 3 most important points from this document that are relevant to the query: "${query}"
 
@@ -226,8 +229,8 @@ ${document.pageContent.substring(0, 2000)}
 Key points (bullet points):`;
 
     const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-    return typeof response.content === 'string' 
-      ? response.content.trim() 
+    return typeof response.content === 'string'
+      ? response.content.trim()
       : document.pageContent.substring(0, 300);
   }
 
@@ -236,7 +239,7 @@ Key points (bullet points):`;
    */
   private async compressContext(
     context: string,
-    config: ReadConfig
+    config: ReadConfig,
   ): Promise<string> {
     const maxTokens = config.maxTokens || 4000;
     const estimatedTokens = Math.ceil(context.length / 4); // Rough estimate: 1 token ≈ 4 chars
@@ -248,7 +251,7 @@ Key points (bullet points):`;
     // Simple compression: truncate and add ellipsis
     const compressionRatio = config.compressionRatio || 0.5;
     const targetLength = maxTokens * 4 * compressionRatio;
-    
+
     if (context.length > targetLength) {
       loggingService.info('Compressing context', {
         component: 'ReadModule',
@@ -304,4 +307,3 @@ Key points (bullet points):`;
     return true;
   }
 }
-

@@ -279,7 +279,7 @@ export class MCPRateLimitMiddleware implements NestMiddleware {
       await this.trackMCPConnection(req);
 
       // Get current rate limit record
-      const record = await this.cacheService.get(cacheKey) as
+      const record = (await this.cacheService.get(cacheKey)) as
         | { count: number; resetTime: number }
         | undefined
         | null;

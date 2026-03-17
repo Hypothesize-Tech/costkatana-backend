@@ -13,7 +13,7 @@ import {
 import { RetrieveModule } from '../modules/retrieve.module';
 import { ReadModule } from '../modules/read.module';
 import { ChatBedrockConverse } from '@langchain/aws';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 export class NaiveRAGPattern extends BaseRAGPattern {
   private retrieveModule: RetrieveModule;
@@ -22,10 +22,10 @@ export class NaiveRAGPattern extends BaseRAGPattern {
 
   constructor(config: RAGConfig) {
     super('NaiveRAG', 'naive', config);
-    
+
     this.retrieveModule = new RetrieveModule(config.modules.retrieve);
     this.readModule = new ReadModule(config.modules.read);
-    
+
     this.llm = new ChatBedrockConverse({
       model: 'anthropic.claude-3-sonnet-20240229-v1:0',
       region: process.env.AWS_REGION || 'us-east-1',
@@ -36,7 +36,7 @@ export class NaiveRAGPattern extends BaseRAGPattern {
 
   protected async executePattern(
     query: string,
-    context: RAGContext
+    context: RAGContext,
   ): Promise<RAGResult> {
     const startTime = Date.now();
     const modulesUsed: any[] = ['retrieve', 'read'];
@@ -73,9 +73,12 @@ export class NaiveRAGPattern extends BaseRAGPattern {
         throw new Error('Context extraction failed');
       }
 
-      const extractedContext = typeof readResult.data === 'object' && readResult.data !== null && 'extractedContext' in readResult.data
-        ? String(readResult.data.extractedContext)
-        : '';
+      const extractedContext =
+        typeof readResult.data === 'object' &&
+        readResult.data !== null &&
+        'extractedContext' in readResult.data
+          ? String(readResult.data.extractedContext)
+          : '';
 
       // Step 3: Generate answer
       const generationStart = Date.now();
@@ -105,7 +108,8 @@ export class NaiveRAGPattern extends BaseRAGPattern {
               generate: generationDuration,
             },
           },
-          cacheHit: (retrieveResult.metadata?.cacheHit as boolean | undefined) ?? false,
+          cacheHit:
+            (retrieveResult.metadata?.cacheHit as boolean | undefined) ?? false,
         },
       };
     } catch (error) {
@@ -116,7 +120,8 @@ export class NaiveRAGPattern extends BaseRAGPattern {
 
       return {
         success: false,
-        answer: 'I apologize, but I encountered an error while processing your request.',
+        answer:
+          'I apologize, but I encountered an error while processing your request.',
         documents: [],
         sources: [],
         metadata: {
@@ -142,7 +147,7 @@ export class NaiveRAGPattern extends BaseRAGPattern {
    */
   private async generateAnswer(
     query: string,
-    context: string
+    context: string,
   ): Promise<string> {
     const prompt = `You are a helpful AI assistant. Answer the following question based on the provided context. If the context doesn't contain enough information to answer the question, say so.
 
@@ -154,8 +159,8 @@ Question: ${query}
 Answer:`;
 
     const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-    return typeof response.content === 'string' 
-      ? response.content.trim() 
+    return typeof response.content === 'string'
+      ? response.content.trim()
       : 'Unable to generate response';
   }
 
@@ -164,7 +169,7 @@ Answer:`;
    */
   private extractSources(documents: any[]): string[] {
     const sources = new Set<string>();
-    
+
     for (const doc of documents) {
       const source = doc.metadata?.fileName || doc.metadata?.source;
       if (source) {
@@ -179,7 +184,8 @@ Answer:`;
     return {
       name: 'Naive RAG',
       type: 'naive',
-      description: 'Simple retrieve-then-read pattern with single-pass retrieval and generation',
+      description:
+        'Simple retrieve-then-read pattern with single-pass retrieval and generation',
       useCases: [
         'Simple factual queries',
         'Quick lookups',
@@ -192,4 +198,3 @@ Answer:`;
     };
   }
 }
-

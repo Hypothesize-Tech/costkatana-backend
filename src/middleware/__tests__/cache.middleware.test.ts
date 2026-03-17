@@ -1,7 +1,7 @@
 import request from 'supertest';
 import express, { Request, Response } from 'express';
 import { cacheMiddleware } from '../cache.middleware';
-import { redisService } from '../../services/redis.service';
+import { redisService } from '../../common/services/redis.service';
 
 // Mock the redisService with its high-level methods
 jest.mock('../../services/redis.service', () => ({
@@ -36,16 +36,16 @@ describe('cacheMiddleware', () => {
     });
 
     // Act
-    const response = await request(app)
-      .post('/test')
-      .send({ prompt: 'hello' });
+    const response = await request(app).post('/test').send({ prompt: 'hello' });
 
     // Assert
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ message: 'cached response' });
     expect(response.headers['x-cache']).toBe('HIT');
     expect(response.headers['x-cache-type']).toBe('EXACT');
-    expect(mockedRedisService.checkCache).toHaveBeenCalledWith('hello', { model: undefined });
+    expect(mockedRedisService.checkCache).toHaveBeenCalledWith('hello', {
+      model: undefined,
+    });
     expect(mockedRedisService.storeCache).not.toHaveBeenCalled();
   });
 
@@ -69,7 +69,7 @@ describe('cacheMiddleware', () => {
     expect(mockedRedisService.storeCache).toHaveBeenCalledWith(
       'new prompt',
       { message: 'original response' },
-      { model: 'test-model', ttl: 3600 }
+      { model: 'test-model', ttl: 3600 },
     );
   });
 
@@ -103,7 +103,7 @@ describe('cacheMiddleware', () => {
     expect(mockedRedisService.storeCache).toHaveBeenCalledWith(
       'ttl test',
       { message: 'original response' },
-      { model: 'ttl-model', ttl: 600 }
+      { model: 'ttl-model', ttl: 600 },
     );
   });
 });

@@ -5,7 +5,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { CortexModelRouterService } from './cortex-model-router.service';
 import { CortexEncoderService } from './cortex-encoder.service';
 import { CortexDecoderService } from './cortex-decoder.service';
@@ -250,7 +250,7 @@ export class CortexRelayService {
     const temperature = 0.7;
     const maxTokens = 2000;
 
-    return await this.bedrockService.invokeModelDirectly(modelId, {
+    return await BedrockService.invokeModelDirectly(modelId, {
       prompt: encodedQuery,
       max_tokens: maxTokens,
       temperature,

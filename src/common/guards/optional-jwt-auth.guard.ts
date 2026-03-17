@@ -129,7 +129,9 @@ export class OptionalJwtAuthGuard implements CanActivate {
       }
 
       // Fetch user - standard tokens use 'id'; support 'sub' for JWT spec compatibility
-      const userId = (payload as { id?: string; sub?: string }).id ?? (payload as { sub?: string }).sub;
+      const userId =
+        (payload as { id?: string; sub?: string }).id ??
+        (payload as { sub?: string }).sub;
       const user = await this.userModel.findById(userId);
       if (!user) {
         throw new Error('User not found');

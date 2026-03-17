@@ -18,7 +18,7 @@ import { Model } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import {
   UserBehaviorPattern,
   UserBehaviorPatternDocument,
@@ -532,13 +532,13 @@ Focus on:
 
 Return valid JSON array of recommendations.`;
 
-      const response = await this.bedrockService.invokeModel(
+      const response = await BedrockService.invokeModel(
         prompt,
         'anthropic.claude-3-5-haiku-20241022-v1:0',
-        { maxTokens: 2000, temperature: 0.3 },
+        { useSystemPrompt: false },
       );
 
-      let recommendationsText = response.response;
+      let recommendationsText = typeof response === 'string' ? response : '';
 
       // Extract JSON from the response
       const jsonMatch = recommendationsText.match(/\[[\s\S]*\]/);

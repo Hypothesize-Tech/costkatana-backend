@@ -15,7 +15,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import {
   EnrichedMetadata,
   MetadataEnrichmentResult,
@@ -448,7 +448,7 @@ Return ONLY a valid JSON object with the above properties.`;
       ),
     ]);
 
-    return result.response;
+    return typeof result === 'string' ? result : '';
   }
 
   /**

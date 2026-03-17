@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { v4 as uuidv4 } from 'uuid';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { CostEstimator } from '../utils/cost-estimator';
 
 /**
@@ -521,7 +521,7 @@ export class CortexStreamingOrchestratorService
         async () => {
           // Use Bedrock service to encode the input with a simple prompt
           const prompt = `Please encode the following text for processing: ${execution.inputText}`;
-          const result = await this.bedrockService.invokeModelDirectly(
+          const result = await BedrockService.invokeModelDirectly(
             execution.config.models.encoder,
             {
               prompt,
@@ -616,7 +616,7 @@ export class CortexStreamingOrchestratorService
         async () => {
           // Use Bedrock service to process the encoded input with a simple prompt
           const prompt = `Please process and analyze the following content: ${processorInput}`;
-          const result = await this.bedrockService.invokeModelDirectly(
+          const result = await BedrockService.invokeModelDirectly(
             execution.config.models.processor,
             {
               prompt,
@@ -712,7 +712,7 @@ export class CortexStreamingOrchestratorService
         async () => {
           // Use Bedrock service to decode the processed input with a simple prompt
           const prompt = `Please provide a well-formatted response based on the following processed content: ${decoderInput}`;
-          const result = await this.bedrockService.invokeModelDirectly(
+          const result = await BedrockService.invokeModelDirectly(
             execution.config.models.decoder,
             {
               prompt,

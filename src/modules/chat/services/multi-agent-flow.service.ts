@@ -9,7 +9,7 @@ import { WebSearchService } from './web-search.service';
 import { TrendingDetectorService } from './trending-detector.service';
 import { MongoDBChatAgentService } from './mongodb-chat-agent.service';
 import { LangchainOrchestratorService } from '../langchain/langchain-orchestrator.service';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Usage } from '../../../schemas/core/usage.schema';
@@ -534,18 +534,10 @@ Provide a concise summary highlighting the most relevant and current information
 
     try {
       const response = await this.retryExecutor(async () => {
-        return await this.bedrockService.invokeModel(
-          prompt,
-          'amazon.nova-pro-v1:0',
-          {
-            temperature: 0.1,
-            maxTokens: 1000,
-          },
-        );
+        return await BedrockService.invokeModel(prompt, 'amazon.nova-pro-v1:0');
       });
 
-      const summary =
-        typeof response === 'string' ? response : response?.response || '';
+      const summary = typeof response === 'string' ? response : String(response ?? '');
       const cost =
         typeof response === 'object' && response && 'cost' in response
           ? (response as any).cost
@@ -741,14 +733,10 @@ ${
         : 'amazon.nova-pro-v1:0';
 
       const response = await this.retryExecutor(async () => {
-        return await this.bedrockService.invokeModel(prompt, modelId, {
-          temperature: 0.7,
-          maxTokens: 2000,
-        });
+        return await BedrockService.invokeModel(prompt, modelId);
       });
 
-      const aiResponse =
-        typeof response === 'string' ? response : response?.response || '';
+      const aiResponse = typeof response === 'string' ? response : '';
       const responseMessage = new AIMessage(aiResponse);
       const cost =
         typeof response === 'object' && response && 'cost' in response
@@ -827,20 +815,13 @@ Return only a JSON object: {"passed": boolean, "score": number, "issues": string
 
     try {
       const evaluation = await this.retryExecutor(async () => {
-        return await this.bedrockService.invokeModel(
+        return await BedrockService.invokeModel(
           qualityPrompt,
           'amazon.nova-pro-v1:0',
-          {
-            temperature: 0.1,
-            maxTokens: 500,
-          },
         );
       });
 
-      const evalText =
-        typeof evaluation === 'string'
-          ? evaluation
-          : evaluation?.response || '';
+      const evalText = typeof evaluation === 'string' ? evaluation : '';
       const evalData = this.parseQualityEvaluation(evalText);
 
       return {

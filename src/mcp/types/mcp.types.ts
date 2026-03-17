@@ -3,7 +3,7 @@
  * Based on Model Context Protocol specification
  */
 
-export type MCPMessageType = 
+export type MCPMessageType =
   | 'initialize'
   | 'initialized'
   | 'tools/list'

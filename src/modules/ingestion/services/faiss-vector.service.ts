@@ -111,7 +111,11 @@ export class FaissVectorService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private configService: ConfigService,
     private embeddingsService: SafeBedrockEmbeddingsService,
-    @Inject(forwardRef(() => require('./vector-write-queue.service').VectorWriteQueueService))
+    @Inject(
+      forwardRef(
+        () => require('./vector-write-queue.service').VectorWriteQueueService,
+      ),
+    )
     private writeQueueService: VectorWriteQueueService,
   ) {
     this.config = {

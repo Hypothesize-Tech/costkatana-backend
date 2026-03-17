@@ -51,6 +51,17 @@ interface ProactiveSuggestion {
   actionRequired: boolean;
 }
 
+let realtimeUpdateServiceInstance: RealtimeUpdateService | null = null;
+
+export function getRealtimeUpdateService(): RealtimeUpdateService {
+  if (!realtimeUpdateServiceInstance) {
+    throw new Error(
+      'RealtimeUpdateService not initialized. Ensure UsageModule is imported.',
+    );
+  }
+  return realtimeUpdateServiceInstance;
+}
+
 @Injectable()
 export class RealtimeUpdateService implements OnModuleDestroy {
   private readonly logger = new Logger(RealtimeUpdateService.name);
@@ -68,6 +79,7 @@ export class RealtimeUpdateService implements OnModuleDestroy {
     @Inject(CacheService) private cacheService: CacheService,
     private budgetService: BudgetService,
   ) {
+    realtimeUpdateServiceInstance = this;
     this.initializeRedis();
     this.startHeartbeat();
     this.startCleanup();

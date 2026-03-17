@@ -44,7 +44,9 @@ export class AgentController {
 
   constructor(
     private readonly agentService: AgentService,
-    @Inject(forwardRef(() => require('../chat/services/chat.service').ChatService))
+    @Inject(
+      forwardRef(() => require('../chat/services/chat.service').ChatService),
+    )
     private readonly chatService: ChatService,
   ) {}
 

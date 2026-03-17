@@ -9,7 +9,7 @@ import type {
   IntegrationType,
   ToolSchema,
 } from '../../mcp/types/mcp.types';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 export interface MCPIntegrationRequest {
   userId: string;
@@ -362,9 +362,7 @@ Return ONLY a JSON object with the extracted parameters. If a parameter cannot b
       );
 
       const responseStr =
-        typeof result.response === 'string'
-          ? result.response
-          : JSON.stringify(result.response);
+        typeof result === 'string' ? result : JSON.stringify(result);
 
       try {
         const extractedParams = JSON.parse(responseStr) as Record<

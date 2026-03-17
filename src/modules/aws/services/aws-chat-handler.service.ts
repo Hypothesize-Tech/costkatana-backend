@@ -43,6 +43,18 @@ export interface AWSChatResponse {
   approvalToken?: string; // Token for approval
 }
 
+let awsChatHandlerServiceInstance: AwsChatHandlerService | null = null;
+
+/** Get the singleton instance (set when Nest bootstraps). Use for tools/MCP outside DI. */
+export function getAwsChatHandlerService(): AwsChatHandlerService {
+  if (!awsChatHandlerServiceInstance) {
+    throw new Error(
+      'AwsChatHandlerService not initialized. Ensure AwsModule is imported.',
+    );
+  }
+  return awsChatHandlerServiceInstance;
+}
+
 @Injectable()
 export class AwsChatHandlerService implements OnModuleInit, OnModuleDestroy {
   private approvalTokens = new Map<
@@ -68,6 +80,7 @@ export class AwsChatHandlerService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    awsChatHandlerServiceInstance = this;
     // Clean up expired tokens every 5 minutes
     this.cleanupInterval = setInterval(
       () => this.cleanupExpiredTokens(),
@@ -76,6 +89,7 @@ export class AwsChatHandlerService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy() {
+    awsChatHandlerServiceInstance = null;
     // Clean up the interval
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);

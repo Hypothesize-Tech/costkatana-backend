@@ -3,7 +3,7 @@
  * Handles different request formats for various model providers
  */
 
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 export interface ModelRequest {
   modelId: string;
@@ -21,7 +21,7 @@ export class BedrockModelFormatter {
    */
   public static formatRequestBody(request: ModelRequest): string {
     const { modelId } = request;
-    
+
     if (modelId.includes('anthropic.claude')) {
       return this.formatClaudeRequest(request);
     } else if (modelId.includes('amazon.nova')) {
@@ -41,7 +41,7 @@ export class BedrockModelFormatter {
       return this.formatClaudeRequest(request);
     }
   }
-  
+
   /**
    * Parse response body based on model provider
    */
@@ -52,7 +52,9 @@ export class BedrockModelFormatter {
       } else if (modelId.includes('amazon.nova')) {
         return responseBody.output?.message?.content?.[0]?.text || '';
       } else if (modelId.includes('amazon.titan')) {
-        return responseBody.results?.[0]?.outputText || responseBody.outputText || '';
+        return (
+          responseBody.results?.[0]?.outputText || responseBody.outputText || ''
+        );
       } else if (modelId.includes('meta.llama')) {
         return responseBody.generation || '';
       } else if (modelId.includes('mistral')) {
@@ -63,19 +65,21 @@ export class BedrockModelFormatter {
         return responseBody.completions?.[0]?.data?.text || '';
       } else {
         // Try common response formats
-        return responseBody.content?.[0]?.text || 
-               responseBody.output?.message?.content?.[0]?.text ||
-               responseBody.results?.[0]?.outputText ||
-               responseBody.generation ||
-               responseBody.text ||
-               JSON.stringify(responseBody);
+        return (
+          responseBody.content?.[0]?.text ||
+          responseBody.output?.message?.content?.[0]?.text ||
+          responseBody.results?.[0]?.outputText ||
+          responseBody.generation ||
+          responseBody.text ||
+          JSON.stringify(responseBody)
+        );
       }
     } catch (error) {
       loggingService.warn('Failed to parse response body', { modelId, error });
       return JSON.stringify(responseBody);
     }
   }
-  
+
   /**
    * Format request for Claude models
    */
@@ -83,27 +87,27 @@ export class BedrockModelFormatter {
     const body: any = {
       anthropic_version: 'bedrock-2023-05-31',
       max_tokens: request.maxTokens,
-      temperature: request.temperature || 0.5
+      temperature: request.temperature || 0.5,
     };
-    
+
     // Only add system prompt if it's provided and not undefined
     if (request.systemPrompt && request.systemPrompt.trim()) {
       body.system = request.systemPrompt;
     }
-    
+
     if (request.messages) {
       body.messages = request.messages;
     } else if (request.prompt) {
       body.messages = [{ role: 'user', content: request.prompt }];
     }
-    
+
     if (request.topP !== undefined) {
       body.top_p = request.topP;
     }
-    
+
     return JSON.stringify(body);
   }
-  
+
   /**
    * Format request for Amazon Nova models
    */
@@ -111,40 +115,42 @@ export class BedrockModelFormatter {
     const body: any = {
       inferenceConfig: {
         maxTokens: request.maxTokens || 2048,
-        temperature: request.temperature || 0.7
-      }
+        temperature: request.temperature || 0.7,
+      },
     };
-    
-    // Add topP if provided  
+
+    // Add topP if provided
     if (request.topP !== undefined) {
       body.inferenceConfig.topP = request.topP;
     }
-    
+
     // Combine system prompt with user message for Nova
     let userMessage = '';
     if (request.systemPrompt) {
       userMessage = request.systemPrompt + '\n\n';
     }
-    
+
     if (request.messages && request.messages.length > 0) {
       // Take the last user message
       const lastMessage = request.messages[request.messages.length - 1];
-      userMessage += Array.isArray(lastMessage.content) 
+      userMessage += Array.isArray(lastMessage.content)
         ? lastMessage.content.map((c: any) => c.text || c).join(' ')
         : String(lastMessage.content || '');
     } else if (request.prompt) {
       userMessage += String(request.prompt || '');
     }
-    
+
     // Nova format: simple messages array without system
-    body.messages = [{ 
-      role: 'user', 
-      content: [{ text: userMessage }] 
-    }];
-    
+    body.messages = [
+      {
+        role: 'user',
+        content: [{ text: userMessage }],
+      },
+    ];
+
     return JSON.stringify(body);
   }
-  
+
   /**
    * Format request for Amazon Titan models
    */
@@ -153,54 +159,54 @@ export class BedrockModelFormatter {
       inputText: request.prompt || '',
       textGenerationConfig: {
         maxTokenCount: request.maxTokens,
-        temperature: request.temperature || 0.5
-      }
+        temperature: request.temperature || 0.5,
+      },
     };
-    
+
     if (request.messages && request.messages.length > 0) {
       // Titan doesn't support message format, convert to text
       body.inputText = request.messages
-        .map(msg => `${msg.role}: ${msg.content}`)
+        .map((msg) => `${msg.role}: ${msg.content}`)
         .join('\n');
     }
-    
+
     if (request.topP !== undefined) {
       body.textGenerationConfig.topP = request.topP;
     }
-    
+
     return JSON.stringify(body);
   }
-  
+
   /**
    * Format request for Meta Llama models
    */
   private static formatLlamaRequest(request: ModelRequest): string {
     const body: any = {
       max_gen_len: request.maxTokens,
-      temperature: request.temperature || 0.5
+      temperature: request.temperature || 0.5,
     };
-    
+
     if (request.messages && request.messages.length > 0) {
       // Convert messages to Llama prompt format
       const promptParts = [];
       if (request.systemPrompt) {
         promptParts.push(`System: ${request.systemPrompt}`);
       }
-      request.messages.forEach(msg => {
+      request.messages.forEach((msg) => {
         promptParts.push(`${msg.role}: ${msg.content}`);
       });
       body.prompt = promptParts.join('\n') + '\nassistant:';
     } else if (request.prompt) {
       body.prompt = request.prompt;
     }
-    
+
     if (request.topP !== undefined) {
       body.top_p = request.topP;
     }
-    
+
     return JSON.stringify(body);
   }
-  
+
   /**
    * Format request for Mistral models
    */
@@ -208,23 +214,23 @@ export class BedrockModelFormatter {
     const body: any = {
       prompt: request.prompt || '',
       max_tokens: request.maxTokens,
-      temperature: request.temperature || 0.5
+      temperature: request.temperature || 0.5,
     };
-    
+
     if (request.messages && request.messages.length > 0) {
       // Convert messages to prompt
       body.prompt = request.messages
-        .map(msg => `${msg.role}: ${msg.content}`)
+        .map((msg) => `${msg.role}: ${msg.content}`)
         .join('\n');
     }
-    
+
     if (request.topP !== undefined) {
       body.top_p = request.topP;
     }
-    
+
     return JSON.stringify(body);
   }
-  
+
   /**
    * Format request for Cohere models
    */
@@ -232,22 +238,22 @@ export class BedrockModelFormatter {
     const body: any = {
       prompt: request.prompt || '',
       max_tokens: request.maxTokens,
-      temperature: request.temperature || 0.5
+      temperature: request.temperature || 0.5,
     };
-    
+
     if (request.messages && request.messages.length > 0) {
       body.prompt = request.messages
-        .map(msg => `${msg.role}: ${msg.content}`)
+        .map((msg) => `${msg.role}: ${msg.content}`)
         .join('\n');
     }
-    
+
     if (request.topP !== undefined) {
       body.p = request.topP;
     }
-    
+
     return JSON.stringify(body);
   }
-  
+
   /**
    * Format request for AI21 models
    */
@@ -255,35 +261,37 @@ export class BedrockModelFormatter {
     const body: any = {
       prompt: request.prompt || '',
       maxTokens: request.maxTokens,
-      temperature: request.temperature || 0.5
+      temperature: request.temperature || 0.5,
     };
-    
+
     if (request.messages && request.messages.length > 0) {
       body.prompt = request.messages
-        .map(msg => `${msg.role}: ${msg.content}`)
+        .map((msg) => `${msg.role}: ${msg.content}`)
         .join('\n');
     }
-    
+
     if (request.topP !== undefined) {
       body.topP = request.topP;
     }
-    
+
     return JSON.stringify(body);
   }
-  
+
   /**
    * Check if a model supports streaming
    */
   public static supportsStreaming(modelId: string): boolean {
     // Most models support streaming except some older ones
-    if (modelId.includes('titan-embed') || 
-        modelId.includes('cohere.embed') ||
-        modelId.includes('stability.')) {
+    if (
+      modelId.includes('titan-embed') ||
+      modelId.includes('cohere.embed') ||
+      modelId.includes('stability.')
+    ) {
       return false;
     }
     return true;
   }
-  
+
   /**
    * Get the maximum context window for a model
    */
@@ -310,16 +318,16 @@ export class BedrockModelFormatter {
       'mistral.mixtral': 32000,
       'mistral.mistral-7b': 32000,
       // Default
-      'default': 4096
+      default: 4096,
     };
-    
+
     // Find the best match
     for (const [pattern, window] of Object.entries(contextWindows)) {
       if (modelId.includes(pattern)) {
         return window;
       }
     }
-    
+
     return contextWindows.default;
   }
 }

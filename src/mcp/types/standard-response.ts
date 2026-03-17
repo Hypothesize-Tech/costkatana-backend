@@ -59,7 +59,7 @@ export interface MCPToolResponse<T = any> {
  */
 export function createSuccessResponse<T>(
   data: T,
-  metadata: Partial<MCPToolMetadata>
+  metadata: Partial<MCPToolMetadata>,
 ): MCPToolResponse<T> {
   return {
     success: true,
@@ -82,7 +82,7 @@ export function createSuccessResponse<T>(
  */
 export function createErrorResponse(
   error: MCPToolError,
-  metadata: Partial<MCPToolMetadata>
+  metadata: Partial<MCPToolMetadata>,
 ): MCPToolResponse {
   return {
     success: false,
@@ -105,7 +105,7 @@ export function createErrorResponse(
  */
 export function createConfirmationResponse(
   confirmation: MCPConfirmationRequest,
-  metadata: Partial<MCPToolMetadata>
+  metadata: Partial<MCPToolMetadata>,
 ): MCPToolResponse {
   return {
     success: false,

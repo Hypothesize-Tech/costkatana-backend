@@ -19,7 +19,7 @@ import {
   getPatternConfig,
 } from '../config/default.config';
 import { ChatBedrockConverse } from '@langchain/aws';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 import { redisService } from '../../services/redis.service';
 import { ragEvaluator } from '../evaluation';
 
@@ -71,7 +71,11 @@ export class ModularRAGOrchestrator {
       let result = await pattern.execute(input.query, input.context);
 
       // Step 4: Optional evaluation (RAGAS-aligned metrics)
-      if (input.config?.evaluation?.enabled && result.success && result.answer) {
+      if (
+        input.config?.evaluation?.enabled &&
+        result.success &&
+        result.answer
+      ) {
         result = await this.runEvaluationIfEnabled(result, input);
       }
 
@@ -99,17 +103,30 @@ export class ModularRAGOrchestrator {
 
           const fallbackPattern = await this.getPattern(
             this.config.fallbackPattern,
-            input.config
+            input.config,
           );
-          let fallbackResult = await fallbackPattern.execute(input.query, input.context);
-          if (input.config?.evaluation?.enabled && fallbackResult.success && fallbackResult.answer) {
-            fallbackResult = await this.runEvaluationIfEnabled(fallbackResult, input);
+          let fallbackResult = await fallbackPattern.execute(
+            input.query,
+            input.context,
+          );
+          if (
+            input.config?.evaluation?.enabled &&
+            fallbackResult.success &&
+            fallbackResult.answer
+          ) {
+            fallbackResult = await this.runEvaluationIfEnabled(
+              fallbackResult,
+              input,
+            );
           }
           return fallbackResult;
         } catch (fallbackError) {
           loggingService.error('RAG Orchestrator: Fallback also failed', {
             component: 'ModularRAGOrchestrator',
-            error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+            error:
+              fallbackError instanceof Error
+                ? fallbackError.message
+                : String(fallbackError),
           });
         }
       }
@@ -117,7 +134,8 @@ export class ModularRAGOrchestrator {
       // Return error result
       return {
         success: false,
-        answer: 'I apologize, but I encountered an error while processing your request.',
+        answer:
+          'I apologize, but I encountered an error while processing your request.',
         documents: [],
         sources: [],
         metadata: {
@@ -144,9 +162,13 @@ export class ModularRAGOrchestrator {
    */
   private async runEvaluationIfEnabled(
     result: RAGResult,
-    input: OrchestratorInput
+    input: OrchestratorInput,
   ): Promise<RAGResult> {
-    if (!input.config?.evaluation?.enabled || !result.success || !result.answer) {
+    if (
+      !input.config?.evaluation?.enabled ||
+      !result.success ||
+      !result.answer
+    ) {
       return result;
     }
     try {
@@ -154,7 +176,8 @@ export class ModularRAGOrchestrator {
         query: input.query,
         answer: result.answer,
         documents: result.documents,
-        groundTruth: (input.config.evaluation as { groundTruth?: string }).groundTruth,
+        groundTruth: (input.config.evaluation as { groundTruth?: string })
+          .groundTruth,
       };
       const metrics = await ragEvaluator.evaluate(evalInput);
       const evaluation = {
@@ -191,7 +214,7 @@ export class ModularRAGOrchestrator {
    * Select the appropriate pattern for the query
    */
   private async selectPattern(
-    input: OrchestratorInput
+    input: OrchestratorInput,
   ): Promise<RAGPatternType> {
     // If pattern explicitly specified, use it
     if (input.preferredPattern) {
@@ -208,10 +231,13 @@ export class ModularRAGOrchestrator {
     try {
       const cached = await redisService.get(cacheKey);
       if (cached && typeof cached === 'string') {
-        loggingService.info('RAG Orchestrator: Using cached pattern selection', {
-          component: 'ModularRAGOrchestrator',
-          pattern: cached,
-        });
+        loggingService.info(
+          'RAG Orchestrator: Using cached pattern selection',
+          {
+            component: 'ModularRAGOrchestrator',
+            pattern: cached,
+          },
+        );
         return cached as RAGPatternType;
       }
     } catch (error) {
@@ -242,9 +268,7 @@ export class ModularRAGOrchestrator {
   /**
    * Analyze query to determine characteristics
    */
-  private async analyzeQuery(
-    query: string,
-  ): Promise<QueryAnalysis> {
+  private async analyzeQuery(query: string): Promise<QueryAnalysis> {
     if (!this.llm) {
       // Fallback to heuristic analysis
       return this.heuristicAnalysis(query);
@@ -265,8 +289,11 @@ Pattern: [naive/adaptive/iterative/recursive]
 Confidence: [0.0-1.0]
 Reasoning: [brief explanation]`;
 
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      const content = typeof response.content === 'string' ? response.content : '';
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      const content =
+        typeof response.content === 'string' ? response.content : '';
 
       // Parse response
       const complexityMatch = content.match(/Complexity:\s*(\w+)/i);
@@ -275,9 +302,17 @@ Reasoning: [brief explanation]`;
       const confidenceMatch = content.match(/Confidence:\s*([\d.]+)/i);
       const reasoningMatch = content.match(/Reasoning:\s*(.+)/i);
 
-      const complexity = (complexityMatch?.[1]?.toLowerCase() || 'moderate') as 'simple' | 'moderate' | 'complex';
-      const type = (typeMatch?.[1]?.toLowerCase() || 'factual') as 'factual' | 'analytical' | 'comparative' | 'exploratory';
-      const suggestedPattern = (patternMatch?.[1]?.toLowerCase() || 'adaptive') as RAGPatternType;
+      const complexity = (complexityMatch?.[1]?.toLowerCase() || 'moderate') as
+        | 'simple'
+        | 'moderate'
+        | 'complex';
+      const type = (typeMatch?.[1]?.toLowerCase() || 'factual') as
+        | 'factual'
+        | 'analytical'
+        | 'comparative'
+        | 'exploratory';
+      const suggestedPattern = (patternMatch?.[1]?.toLowerCase() ||
+        'adaptive') as RAGPatternType;
       const confidence = parseFloat(confidenceMatch?.[1] || '0.7');
       const reasoning = reasoningMatch?.[1]?.trim() || 'LLM-based analysis';
 
@@ -306,7 +341,7 @@ Reasoning: [brief explanation]`;
 
     // Detect complexity
     let complexity: 'simple' | 'moderate' | 'complex' = 'moderate';
-    
+
     // Simple queries
     if (
       lowerQuery.match(/^(what is|define|who is|when was|where is)/) &&
@@ -328,19 +363,30 @@ Reasoning: [brief explanation]`;
     }
 
     // Detect type
-    let type: 'factual' | 'analytical' | 'comparative' | 'exploratory' = 'factual';
-    
-    if (lowerQuery.includes('compare') || lowerQuery.includes('versus') || lowerQuery.includes('vs')) {
+    let type: 'factual' | 'analytical' | 'comparative' | 'exploratory' =
+      'factual';
+
+    if (
+      lowerQuery.includes('compare') ||
+      lowerQuery.includes('versus') ||
+      lowerQuery.includes('vs')
+    ) {
       type = 'comparative';
-    } else if (lowerQuery.includes('analyze') || lowerQuery.includes('evaluate')) {
+    } else if (
+      lowerQuery.includes('analyze') ||
+      lowerQuery.includes('evaluate')
+    ) {
       type = 'analytical';
-    } else if (lowerQuery.includes('explore') || lowerQuery.includes('investigate')) {
+    } else if (
+      lowerQuery.includes('explore') ||
+      lowerQuery.includes('investigate')
+    ) {
       type = 'exploratory';
     }
 
     // Determine pattern
     let suggestedPattern: RAGPatternType;
-    
+
     if (complexity === 'simple') {
       suggestedPattern = 'naive';
     } else if (type === 'comparative' || lowerQuery.includes('compare')) {
@@ -366,7 +412,7 @@ Reasoning: [brief explanation]`;
    */
   private async getPattern(
     patternType: RAGPatternType,
-    customConfig?: Partial<RAGConfig>
+    customConfig?: Partial<RAGConfig>,
   ): Promise<any> {
     // Get base config for pattern
     let config = getPatternConfig(patternType);
@@ -407,7 +453,7 @@ Reasoning: [brief explanation]`;
    */
   updateConfig(newConfig: Partial<OrchestratorConfig>): void {
     this.config = { ...this.config, ...newConfig };
-    
+
     loggingService.info('RAG Orchestrator configuration updated', {
       component: 'ModularRAGOrchestrator',
       config: this.config,
@@ -424,4 +470,3 @@ Reasoning: [brief explanation]`;
 
 // Singleton instance
 export const modularRAGOrchestrator = new ModularRAGOrchestrator();
-

@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Usage, UsageSchema } from '../../schemas/core/usage.schema';
 import { GenAITelemetryService } from '../../utils/genaiTelemetry';
-import { BedrockService } from '../../services/bedrock.service';
+import { BedrockService } from './bedrock.service';
 
 /**
  * Bedrock module – provides BedrockService for RAG and other LLM consumers.

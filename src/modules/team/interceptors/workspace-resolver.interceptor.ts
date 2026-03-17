@@ -23,8 +23,9 @@ export class WorkspaceResolverInterceptor implements NestInterceptor {
     const user = request.user as { id?: string; workspaceId?: string } | null;
 
     if (user?.id && !user.workspaceId) {
-      const workspaceId =
-        await this.workspaceService.getUserDefaultWorkspaceId(user.id);
+      const workspaceId = await this.workspaceService.getUserDefaultWorkspaceId(
+        user.id,
+      );
       if (workspaceId) {
         user.workspaceId = workspaceId;
       }

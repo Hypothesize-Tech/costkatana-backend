@@ -1,7 +1,11 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { WebSearchTool, type WebSearchRequest, type WebSearchResult } from '../tools/webSearch.tool';
-import { loggingService } from '../services/logging.service';
+import {
+  WebSearchTool,
+  type WebSearchRequest,
+  type WebSearchResult,
+} from '../tools/webSearch.tool';
+import { loggingService } from '../common/services/logging.service';
 
 // Singleton instance for web scraper
 let webSearchInstance: WebSearchTool | null = null;
@@ -36,24 +40,26 @@ export interface LinkMetadata {
 async function extractWithWebScraperTool(url: string): Promise<LinkMetadata> {
   try {
     const webSearchTool = getWebSearchInstance();
-    
+
     // Use direct URL scraping (no Puppeteer, just axios + cheerio)
     const searchRequest: WebSearchRequest = {
       operation: 'scrape', // Direct URL fetch
       url,
       cache: {
         enabled: true,
-        key: `link_metadata_${Buffer.from(url).toString('base64').substring(0, 50)}`
-      }
+        key: `link_metadata_${Buffer.from(url).toString('base64').substring(0, 50)}`,
+      },
     };
 
     loggingService.info('Using WebScraperTool for link extraction', {
       url,
-      method: 'google-search-api'
+      method: 'google-search-api',
     });
 
     // Call the web scraper tool
-    const resultString = await webSearchTool._call(JSON.stringify(searchRequest));
+    const resultString = await webSearchTool._call(
+      JSON.stringify(searchRequest),
+    );
     const result: WebSearchResult = JSON.parse(resultString);
 
     if (!result.success) {
@@ -76,9 +82,9 @@ async function extractWithWebScraperTool(url: string): Promise<LinkMetadata> {
           const language = match[1];
           const code = match[2];
           if (code && code.trim().length > 10) {
-            codeBlocks.push({ 
-              language, 
-              code: code.trim().substring(0, 2000) 
+            codeBlocks.push({
+              language,
+              code: code.trim().substring(0, 2000),
             });
           }
         }
@@ -86,11 +92,12 @@ async function extractWithWebScraperTool(url: string): Promise<LinkMetadata> {
     }
 
     const urlObj = new URL(url);
-    
+
     return {
       url,
       title: result.data.title ?? urlObj.hostname.replace('www.', ''),
-      description: result.data.summary ?? result.data.extractedText?.substring(0, 300),
+      description:
+        result.data.summary ?? result.data.extractedText?.substring(0, 300),
       fullContent: result.data.extractedText?.substring(0, 15000),
       codeBlocks: codeBlocks.length > 0 ? codeBlocks : undefined,
       siteName: urlObj.hostname.replace('www.', ''),
@@ -101,7 +108,7 @@ async function extractWithWebScraperTool(url: string): Promise<LinkMetadata> {
   } catch (error) {
     loggingService.error('Web scraping failed', {
       url,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     });
     throw error; // Re-throw to fallback to cheerio method
   }
@@ -111,24 +118,27 @@ async function extractWithWebScraperTool(url: string): Promise<LinkMetadata> {
  * Extract metadata from a URL using Open Graph tags and HTML meta tags
  * Works for any public link that can be accessed
  * Also scrapes full content including text, code blocks, and images
- * 
+ *
  * Strategy:
  * 1. Use fast axios + cheerio approach as default
  * 2. Fallback to WebScraperTool if cheerio fails
  */
-export async function extractLinkMetadata(url: string, useAdvancedScraping: boolean = false): Promise<LinkMetadata> {
+export async function extractLinkMetadata(
+  url: string,
+  useAdvancedScraping: boolean = false,
+): Promise<LinkMetadata> {
   // Try web scraper tool if explicitly requested
   if (useAdvancedScraping) {
     try {
       loggingService.debug('Using web scraper tool', {
         url,
-        reason: 'explicitly requested'
+        reason: 'explicitly requested',
       });
       return await extractWithWebScraperTool(url);
     } catch (error) {
       loggingService.warn('Web scraper failed, falling back to cheerio', {
         url,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
       // Continue to fallback method
     }
@@ -138,49 +148,74 @@ export async function extractLinkMetadata(url: string, useAdvancedScraping: bool
   try {
     // Validate URL
     const urlObj = new URL(url);
-    
+
     // Fetch the page with a timeout for any public link
     const response = await axios.get(url, {
       timeout: 10000, // Increased timeout for content-heavy pages
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; CostKatanaBot/1.0; +https://costkatana.com)',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'User-Agent':
+          'Mozilla/5.0 (compatible; CostKatanaBot/1.0; +https://costkatana.com)',
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
       },
       maxRedirects: 5,
       validateStatus: (status) => status < 400, // Accept any status < 400
     });
 
-    const html = typeof response.data === 'string' ? response.data : String(response.data);
+    const html =
+      typeof response.data === 'string' ? response.data : String(response.data);
     const $ = cheerio.load(html);
 
     // Extract Open Graph tags (preferred - most modern sites use these)
     const ogTitle = $('meta[property="og:title"]').attr('content')?.trim();
-    const ogDescription = $('meta[property="og:description"]').attr('content')?.trim();
+    const ogDescription = $('meta[property="og:description"]')
+      .attr('content')
+      ?.trim();
     const ogImage = $('meta[property="og:image"]').attr('content')?.trim();
-    const ogSiteName = $('meta[property="og:site_name"]').attr('content')?.trim();
+    const ogSiteName = $('meta[property="og:site_name"]')
+      .attr('content')
+      ?.trim();
     const ogType = $('meta[property="og:type"]').attr('content')?.trim();
 
     // Fallback to Twitter Card tags
-    const twitterTitle = $('meta[name="twitter:title"]').attr('content')?.trim();
-    const twitterDescription = $('meta[name="twitter:description"]').attr('content')?.trim();
-    const twitterImage = $('meta[name="twitter:image"]').attr('content')?.trim();
+    const twitterTitle = $('meta[name="twitter:title"]')
+      .attr('content')
+      ?.trim();
+    const twitterDescription = $('meta[name="twitter:description"]')
+      .attr('content')
+      ?.trim();
+    const twitterImage = $('meta[name="twitter:image"]')
+      .attr('content')
+      ?.trim();
 
     // Fallback to standard HTML meta tags
-    const metaDescription = $('meta[name="description"]').attr('content')?.trim();
+    const metaDescription = $('meta[name="description"]')
+      .attr('content')
+      ?.trim();
     const htmlTitle = $('title').text()?.trim();
-    
+
     // Try to get h1 as additional fallback
     const h1Text = $('h1').first().text()?.trim();
 
     // EXTRACT FULL CONTENT
     // Remove unwanted elements
-    $('script, style, nav, header, footer, .nav, .navbar, .header, .footer, .sidebar, .cookie-banner, .ad, .advertisement, .social-share, .comments').remove();
-    
+    $(
+      'script, style, nav, header, footer, .nav, .navbar, .header, .footer, .sidebar, .cookie-banner, .ad, .advertisement, .social-share, .comments',
+    ).remove();
+
     // Extract main content - try multiple selectors
     let fullContent = '';
-    const contentSelectors = ['main', 'article', '.content', '.main-content', '.post-content', '.article-content', 'body'];
-    
+    const contentSelectors = [
+      'main',
+      'article',
+      '.content',
+      '.main-content',
+      '.post-content',
+      '.article-content',
+      'body',
+    ];
+
     for (const selector of contentSelectors) {
       const element = $(selector).first();
       if (element.length > 0) {
@@ -188,33 +223,36 @@ export async function extractLinkMetadata(url: string, useAdvancedScraping: bool
         break;
       }
     }
-    
+
     // Fallback to body if no specific content area found
     if (!fullContent || fullContent.length < 100) {
       fullContent = $('body').text();
     }
-    
+
     // Clean up the content
     fullContent = fullContent
-      .replace(/\s+/g, ' ')  // Normalize whitespace
-      .replace(/\n\s*\n/g, '\n')  // Remove empty lines
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .replace(/\n\s*\n/g, '\n') // Remove empty lines
       .trim()
       .substring(0, 15000); // Limit to 15000 chars to avoid token limits
 
     // EXTRACT CODE BLOCKS
     const codeBlocks: Array<{ language?: string; code: string }> = [];
-    
+
     // Look for code in pre/code tags
     $('pre code, pre, code.block, .code-block').each((_i, elem) => {
       const $elem = $(elem);
       const code = $elem.text().trim();
-      
-      if (code && code.length > 10) { // Only include meaningful code blocks
+
+      if (code && code.length > 10) {
+        // Only include meaningful code blocks
         // Try to detect language from class names
         const classes = $elem.attr('class') ?? '';
         const langMatch = classes.match(/language-(\w+)|lang-(\w+)|(\w+)-code/);
-        const language = langMatch ? (langMatch[1] || langMatch[2] || langMatch[3]) : undefined;
-        
+        const language = langMatch
+          ? langMatch[1] || langMatch[2] || langMatch[3]
+          : undefined;
+
         codeBlocks.push({ language, code: code.substring(0, 2000) }); // Limit each code block
       }
     });
@@ -236,16 +274,19 @@ export async function extractLinkMetadata(url: string, useAdvancedScraping: bool
 
     // For GitHub repositories, extract repository info
     if (urlObj.hostname.includes('github.com')) {
-      const pathParts = urlObj.pathname.split('/').filter(p => p);
+      const pathParts = urlObj.pathname.split('/').filter((p) => p);
       if (pathParts.length >= 2) {
         const owner = pathParts[0];
         const repo = pathParts[1];
         const repoPath = `${owner}/${repo}`;
-        
+
         // Try to extract description from meta tags or use default
-        const repoDescription = ogDescription ?? twitterDescription ?? metaDescription ?? 
+        const repoDescription =
+          ogDescription ??
+          twitterDescription ??
+          metaDescription ??
           `GitHub repository: ${repoPath}. This is a code repository hosted on GitHub.`;
-        
+
         return {
           url,
           title: ogTitle ?? twitterTitle ?? htmlTitle ?? `${owner}/${repo}`,
@@ -261,14 +302,20 @@ export async function extractLinkMetadata(url: string, useAdvancedScraping: bool
     }
 
     // For YouTube videos, extract video ID and construct metadata
-    if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
+    if (
+      urlObj.hostname.includes('youtube.com') ||
+      urlObj.hostname.includes('youtu.be')
+    ) {
       const videoId = extractYouTubeVideoId(url);
       if (videoId) {
         return {
           url,
           title: ogTitle ?? twitterTitle ?? htmlTitle ?? 'YouTube Video',
           description: ogDescription ?? twitterDescription ?? metaDescription,
-          image: ogImage ?? twitterImage ?? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+          image:
+            ogImage ??
+            twitterImage ??
+            `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
           siteName: 'YouTube',
           type: 'video',
           fullContent: fullContent.length > 100 ? fullContent : undefined,
@@ -281,8 +328,16 @@ export async function extractLinkMetadata(url: string, useAdvancedScraping: bool
     // This works for all public websites that can be accessed
     const metadata: LinkMetadata = {
       url,
-      title: ogTitle ?? twitterTitle ?? htmlTitle ?? h1Text ?? urlObj.hostname.replace('www.', ''),
-      description: ogDescription ?? twitterDescription ?? metaDescription ?? 
+      title:
+        ogTitle ??
+        twitterTitle ??
+        htmlTitle ??
+        h1Text ??
+        urlObj.hostname.replace('www.', ''),
+      description:
+        ogDescription ??
+        twitterDescription ??
+        metaDescription ??
         `Content from ${urlObj.hostname.replace('www.', '')}. This is a public link that can be accessed.`,
       image: ogImage ?? twitterImage,
       siteName: ogSiteName ?? urlObj.hostname.replace('www.', ''),
@@ -296,20 +351,25 @@ export async function extractLinkMetadata(url: string, useAdvancedScraping: bool
     return metadata;
   } catch (error) {
     // Fallback to basic URL info if fetch fails (network error, timeout, etc.)
-    loggingService.warn('Cheerio-based scraping failed, returning basic metadata', {
-      url,
-      error: error instanceof Error ? error.message : String(error)
-    });
-    
+    loggingService.warn(
+      'Cheerio-based scraping failed, returning basic metadata',
+      {
+        url,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    );
+
     const urlObj = new URL(url);
-    
+
     // Try to extract meaningful info from URL path
-    const pathParts = urlObj.pathname.split('/').filter(p => p);
+    const pathParts = urlObj.pathname.split('/').filter((p) => p);
     const lastPathPart = pathParts[pathParts.length - 1];
-    
+
     return {
       url,
-      title: lastPathPart ? `${urlObj.hostname.replace('www.', '')} - ${lastPathPart}` : urlObj.hostname.replace('www.', ''),
+      title: lastPathPart
+        ? `${urlObj.hostname.replace('www.', '')} - ${lastPathPart}`
+        : urlObj.hostname.replace('www.', ''),
       description: `Public link to ${urlObj.hostname.replace('www.', '')}. Metadata extraction failed, but this is a public link.`,
       siteName: urlObj.hostname.replace('www.', ''),
       type: 'website',
@@ -317,7 +377,7 @@ export async function extractLinkMetadata(url: string, useAdvancedScraping: bool
     };
   }
 }
- 
+
 /**
  * Extract YouTube video ID from various YouTube URL formats
  */
@@ -353,14 +413,14 @@ export function isValidUrl(urlString: string): boolean {
  * Extract all URLs from a text string
  */
 export function extractUrlsFromText(text: string): string[] {
-  const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`[\]]+|www\.[^\s<>"{}|\\^`[\]]+)/gi;
+  const urlPattern =
+    /(https?:\/\/[^\s<>"{}|\\^`[\]]+|www\.[^\s<>"{}|\\^`[\]]+)/gi;
   const matches = text.match(urlPattern);
-  
+
   if (!matches) return [];
-  
+
   return matches.map((url: string) => {
     // Add protocol if missing
     return url.startsWith('http') ? url : `https://${url}`;
   });
 }
-

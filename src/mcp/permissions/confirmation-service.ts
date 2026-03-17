@@ -4,7 +4,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 import { redisService } from '../../services/redis.service';
 import { IntegrationType } from '../types/permission.types';
 import { AuditLogger } from '../utils/audit-logger';
@@ -41,7 +41,7 @@ export class ConfirmationService {
     toolName: string,
     resource: string,
     action: string,
-    impact: string
+    impact: string,
   ): Promise<ConfirmationRequest> {
     const confirmationId = uuidv4();
     const now = new Date();
@@ -61,11 +61,7 @@ export class ConfirmationService {
 
     // Store in Redis with TTL
     const key = this.getRedisKey(confirmationId);
-    await redisService.set(
-      key,
-      JSON.stringify(request),
-      this.TIMEOUT_SECONDS
-    );
+    await redisService.set(key, JSON.stringify(request), this.TIMEOUT_SECONDS);
 
     loggingService.info('Confirmation request created', {
       confirmationId,
@@ -84,7 +80,7 @@ export class ConfirmationService {
    */
   static async waitForConfirmation(
     confirmationId: string,
-    timeoutSeconds: number = this.TIMEOUT_SECONDS
+    timeoutSeconds: number = this.TIMEOUT_SECONDS,
   ): Promise<ConfirmationResponse> {
     const responseKey = this.getResponseRedisKey(confirmationId);
     const startTime = Date.now();
@@ -92,13 +88,13 @@ export class ConfirmationService {
     // Poll for response (check every 500ms)
     while (Date.now() - startTime < timeoutSeconds * 1000) {
       const responseData = await redisService.get(responseKey);
-      
+
       if (responseData) {
         const response = JSON.parse(responseData);
-        
+
         // Clean up
         await this.cleanup(confirmationId);
-        
+
         loggingService.info('Confirmation received', {
           confirmationId,
           confirmed: response.confirmed,
@@ -108,7 +104,7 @@ export class ConfirmationService {
       }
 
       // Wait 500ms before next check
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
     // Timeout
@@ -131,7 +127,7 @@ export class ConfirmationService {
    */
   static async submitConfirmation(
     confirmationId: string,
-    confirmed: boolean
+    confirmed: boolean,
   ): Promise<boolean> {
     // Check if request exists
     const requestKey = this.getRedisKey(confirmationId);
@@ -158,7 +154,7 @@ export class ConfirmationService {
     await redisService.set(
       responseKey,
       JSON.stringify(response),
-      60 // Keep for 1 minute
+      60, // Keep for 1 minute
     );
 
     // Log confirmation
@@ -169,7 +165,7 @@ export class ConfirmationService {
       request.resource,
       request.action,
       confirmed,
-      false
+      false,
     );
 
     loggingService.info('Confirmation submitted', {
@@ -186,7 +182,7 @@ export class ConfirmationService {
    * Get pending confirmation request
    */
   static async getConfirmationRequest(
-    confirmationId: string
+    confirmationId: string,
   ): Promise<ConfirmationRequest | null> {
     const key = this.getRedisKey(confirmationId);
     const data = await redisService.get(key);
@@ -222,22 +218,29 @@ export class ConfirmationService {
   /**
    * Get all pending confirmations for user (Production implementation)
    */
-  static async getPendingConfirmations(userId: string): Promise<ConfirmationRequest[]> {
+  static async getPendingConfirmations(
+    userId: string,
+  ): Promise<ConfirmationRequest[]> {
     try {
       // Use UserApprovalRequest model instead of scanning Redis
-      const { UserApprovalRequest } = await import('../../models/UserApprovalRequest');
-      
-      const approvals = await UserApprovalRequest.find({
+      const { getUserApprovalRequestModel } =
+        await import('../../schemas/user/user-approval-request.schema');
+
+      const approvals = await getUserApprovalRequestModel().find({
         userId,
         requestType: 'dangerous_operation',
         status: 'pending',
         expiresAt: { $gt: new Date() },
-      }).sort({ createdAt: -1 }).limit(10).lean();
+      })
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .lean();
 
-      return approvals.map(approval => ({
+      return approvals.map((approval: Record<string, unknown>) => ({
         confirmationId: approval._id.toString(),
         userId: approval.userId.toString(),
-        integration: (approval.requestData.integration as IntegrationType) || 'vercel',
+        integration:
+          (approval.requestData.integration as IntegrationType) || 'vercel',
         toolName: approval.requestData.toolName || '',
         resource: approval.requestData.resource || '',
         action: approval.requestData.action || '',
@@ -287,7 +290,7 @@ export class ConfirmationService {
   static generateImpactDescription(
     _integration: IntegrationType,
     toolName: string,
-    resource: string
+    resource: string,
   ): string {
     if (toolName.includes('delete')) {
       return `⚠️ This will permanently delete ${resource}. This action cannot be undone.`;

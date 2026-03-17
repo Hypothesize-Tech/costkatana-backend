@@ -11,7 +11,7 @@ import {
   AIModelPricingDocument,
 } from '../../../schemas/ai/ai-model-pricing.schema';
 import { WebScraperService } from './web-scraper.service';
-import { BedrockService } from '@/services/bedrock.service';
+import { BedrockService } from '@/modules/bedrock/bedrock.service';
 import { ServiceHelper } from '@/utils/serviceHelper';
 
 export interface ProviderPricing {
@@ -364,7 +364,7 @@ export class RealtimePricingService implements OnModuleInit, OnModuleDestroy {
 
       const response = await ServiceHelper.withRetry(
         () =>
-          this.bedrockService.invokeModelDirectly(
+          BedrockService.invokeModelDirectly(
             'amazon.nova-lite-v1:0',
             payload,
           ),

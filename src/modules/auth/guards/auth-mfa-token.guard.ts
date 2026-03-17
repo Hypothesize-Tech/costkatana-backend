@@ -134,7 +134,9 @@ export class AuthMfaTokenGuard implements CanActivate {
       // Try regular access token (for setup flow)
       try {
         const payload = this.authService.verifyAccessToken(token);
-        const accessTokenUserId = (payload as { id?: string; sub?: string }).id ?? (payload as { sub?: string }).sub;
+        const accessTokenUserId =
+          (payload as { id?: string; sub?: string }).id ??
+          (payload as { sub?: string }).sub;
         this.logger.log('Access token verified successfully', {
           component: 'AuthMfaTokenGuard',
           operation: 'canActivate',

@@ -53,7 +53,9 @@ describe('Chat RAG E2E Tests', () => {
 
       expect(result.success).toBe(true);
       expect(result.metadata.pattern).toBeDefined();
-      expect(['naive', 'adaptive', 'iterative']).toContain(result.metadata.pattern);
+      expect(['naive', 'adaptive', 'iterative']).toContain(
+        result.metadata.pattern,
+      );
     });
 
     it('should handle follow-up questions with conversation context', async () => {
@@ -62,7 +64,10 @@ describe('Chat RAG E2E Tests', () => {
         conversationId: 'e2e-test-conv-3',
         recentMessages: [
           { role: 'user', content: 'Tell me about serverless' },
-          { role: 'assistant', content: 'Serverless is a cloud computing model...' },
+          {
+            role: 'assistant',
+            content: 'Serverless is a cloud computing model...',
+          },
         ],
       };
 
@@ -229,4 +234,3 @@ describe('Chat RAG E2E Tests', () => {
     });
   });
 });
-

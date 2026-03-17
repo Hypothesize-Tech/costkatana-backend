@@ -5,24 +5,24 @@
 
 // ============= Core Expression Types =============
 
-export type FrameType = 
-  | 'query' 
-  | 'answer' 
-  | 'event' 
-  | 'state' 
-  | 'entity' 
-  | 'list' 
+export type FrameType =
+  | 'query'
+  | 'answer'
+  | 'event'
+  | 'state'
+  | 'entity'
+  | 'list'
   | 'error'
   | 'context'
   | 'temporal_query'
   | 'multimodal_query'
   | 'meta_instruction';
 
-export type PrimitiveType = 
-  | 'action' 
-  | 'concept' 
-  | 'property' 
-  | 'modifier' 
+export type PrimitiveType =
+  | 'action'
+  | 'concept'
+  | 'property'
+  | 'modifier'
   | 'relation';
 
 export interface CortexPrimitive {
@@ -225,14 +225,25 @@ export interface CortexPlugin {
   version: string;
   description?: string;
   author?: string;
-  
+
   // Lifecycle hooks
   onInit?(context: PluginContext): Promise<void>;
-  onEncode?(input: string, options: EncodeOptions, context: PluginContext): Promise<CortexQuery>;
+  onEncode?(
+    input: string,
+    options: EncodeOptions,
+    context: PluginContext,
+  ): Promise<CortexQuery>;
   onOptimize?(query: CortexQuery, context: PluginContext): Promise<CortexQuery>;
   onRoute?(query: CortexQuery, context: PluginContext): Promise<ModelSelection>;
-  onExecute?(query: CortexQuery, context: PluginContext): Promise<CortexResponse>;
-  onDecode?(response: CortexResponse, options: DecodeOptions, context: PluginContext): Promise<string>;
+  onExecute?(
+    query: CortexQuery,
+    context: PluginContext,
+  ): Promise<CortexResponse>;
+  onDecode?(
+    response: CortexResponse,
+    options: DecodeOptions,
+    context: PluginContext,
+  ): Promise<string>;
   onCache?(fragment: CortexFragment, context: PluginContext): Promise<void>;
   onMetrics?(metrics: ResponseMetrics, context: PluginContext): Promise<void>;
   onError?(error: Error, context: PluginContext): Promise<void>;
@@ -244,7 +255,7 @@ export interface CortexPlugin {
 export interface CortexConfig {
   enabled: boolean;
   mode: 'mandatory' | 'optional' | 'disabled';
-  
+
   optimization: {
     tokenReduction: boolean;
     semanticCaching: boolean;
@@ -254,7 +265,7 @@ export interface CortexConfig {
     fragmentCaching: boolean;
     predictivePrefetching: boolean;
   };
-  
+
   gateway: {
     headerName: string;
     queryParam: string;
@@ -262,28 +273,28 @@ export interface CortexConfig {
     defaultEnabled: boolean;
     allowOverride: boolean;
   };
-  
+
   cache: {
     provider: 'redis' | 'memory' | 'hybrid';
     ttl: number;
     maxSize: number;
     evictionPolicy: 'lru' | 'lfu' | 'fifo';
   };
-  
+
   plugins: {
     enabled: string[];
     config: Record<string, any>;
     autoLoad: boolean;
     directory?: string;
   };
-  
+
   monitoring: {
     metricsEnabled: boolean;
     loggingLevel: 'debug' | 'info' | 'warn' | 'error';
     traceEnabled: boolean;
     sampleRate: number;
   };
-  
+
   limits: {
     maxExpressionDepth: number;
     maxRoleCount: number;
@@ -340,7 +351,15 @@ export interface TemporalContext {
   timeframe: 'past' | 'present' | 'future';
   duration?: number;
   reference?: Date;
-  granularity?: 'millisecond' | 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year';
+  granularity?:
+    | 'millisecond'
+    | 'second'
+    | 'minute'
+    | 'hour'
+    | 'day'
+    | 'week'
+    | 'month'
+    | 'year';
 }
 
 export interface MultimodalData {
@@ -370,7 +389,10 @@ export const isCortexExpression = (obj: any): obj is CortexExpression => {
 };
 
 export const isCortexQuery = (obj: any): obj is CortexQuery => {
-  return isCortexExpression(obj) && ('optimizationHints' in obj || 'routingPreferences' in obj);
+  return (
+    isCortexExpression(obj) &&
+    ('optimizationHints' in obj || 'routingPreferences' in obj)
+  );
 };
 
 export const isCortexResponse = (obj: any): obj is CortexResponse => {
@@ -378,6 +400,18 @@ export const isCortexResponse = (obj: any): obj is CortexResponse => {
 };
 
 export const isValidFrameType = (frame: string): frame is FrameType => {
-  const validFrames: FrameType[] = ['query', 'answer', 'event', 'state', 'entity', 'list', 'error', 'context', 'temporal_query', 'multimodal_query', 'meta_instruction'];
+  const validFrames: FrameType[] = [
+    'query',
+    'answer',
+    'event',
+    'state',
+    'entity',
+    'list',
+    'error',
+    'context',
+    'temporal_query',
+    'multimodal_query',
+    'meta_instruction',
+  ];
   return validFrames.includes(frame as FrameType);
 };

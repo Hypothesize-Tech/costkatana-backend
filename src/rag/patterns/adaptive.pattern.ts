@@ -16,7 +16,7 @@ import { RetrieveModule } from '../modules/retrieve.module';
 import { RerankModule } from '../modules/rerank.module';
 import { ReadModule } from '../modules/read.module';
 import { ChatBedrockConverse } from '@langchain/aws';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 export class AdaptiveRAGPattern extends BaseRAGPattern {
   private retrieveModule: RetrieveModule;
@@ -26,11 +26,11 @@ export class AdaptiveRAGPattern extends BaseRAGPattern {
 
   constructor(config: RAGConfig) {
     super('AdaptiveRAG', 'adaptive', config);
-    
+
     this.retrieveModule = new RetrieveModule(config.modules.retrieve);
     this.rerankModule = new RerankModule(config.modules.rerank);
     this.readModule = new ReadModule(config.modules.read);
-    
+
     this.llm = new ChatBedrockConverse({
       model: 'anthropic.claude-3-sonnet-20240229-v1:0',
       region: process.env.AWS_REGION || 'us-east-1',
@@ -41,7 +41,7 @@ export class AdaptiveRAGPattern extends BaseRAGPattern {
 
   protected async executePattern(
     query: string,
-    context: RAGContext
+    context: RAGContext,
   ): Promise<RAGResult> {
     const startTime = Date.now();
     const modulesUsed: any[] = [];
@@ -50,7 +50,7 @@ export class AdaptiveRAGPattern extends BaseRAGPattern {
     try {
       // Step 1: Judge whether retrieval is needed
       const decision = await this.judgeRetrievalNecessity(query, context);
-      
+
       loggingService.info('Adaptive RAG: Retrieval decision made', {
         component: 'AdaptiveRAGPattern',
         decision: decision.retrievalDecision,
@@ -99,9 +99,12 @@ export class AdaptiveRAGPattern extends BaseRAGPattern {
             config: this.config.modules.read,
           });
 
-          const extractedContext = typeof readResult.data === 'object' && readResult.data !== null && 'extractedContext' in readResult.data
-            ? String(readResult.data.extractedContext)
-            : '';
+          const extractedContext =
+            typeof readResult.data === 'object' &&
+            readResult.data !== null &&
+            'extractedContext' in readResult.data
+              ? String(readResult.data.extractedContext)
+              : '';
 
           // Generate answer with context
           const genStart = Date.now();
@@ -128,7 +131,7 @@ export class AdaptiveRAGPattern extends BaseRAGPattern {
 
         if (retrievalResult.success && retrievalResult.documents) {
           documents = retrievalResult.documents;
-          
+
           const readResult = await this.readModule.execute({
             query,
             documents,
@@ -136,12 +139,19 @@ export class AdaptiveRAGPattern extends BaseRAGPattern {
             config: this.config.modules.read,
           });
 
-          const extractedContext = typeof readResult.data === 'object' && readResult.data !== null && 'extractedContext' in readResult.data
-            ? String(readResult.data.extractedContext)
-            : '';
+          const extractedContext =
+            typeof readResult.data === 'object' &&
+            readResult.data !== null &&
+            'extractedContext' in readResult.data
+              ? String(readResult.data.extractedContext)
+              : '';
 
           const genStart = Date.now();
-          answer = await this.generateHybrid(query, parametricAnswer, extractedContext);
+          answer = await this.generateHybrid(
+            query,
+            parametricAnswer,
+            extractedContext,
+          );
           generationDuration = Date.now() - genStart;
 
           sources = this.extractSources(documents);
@@ -212,7 +222,8 @@ export class AdaptiveRAGPattern extends BaseRAGPattern {
 
       return {
         success: false,
-        answer: 'I apologize, but I encountered an error while processing your request.',
+        answer:
+          'I apologize, but I encountered an error while processing your request.',
         documents: [],
         sources: [],
         metadata: {
@@ -238,7 +249,7 @@ export class AdaptiveRAGPattern extends BaseRAGPattern {
    */
   private async judgeRetrievalNecessity(
     query: string,
-    _context: RAGContext
+    _context: RAGContext,
   ): Promise<AdaptiveState> {
     const prompt = `You are a judge deciding whether external information retrieval is needed to answer a question.
 
@@ -252,9 +263,14 @@ Decide if this question requires:
 Respond with ONLY one of these three words: retrieve, parametric, or hybrid`;
 
     try {
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      const content = typeof response.content === 'string' ? response.content.toLowerCase().trim() : 'hybrid';
-      
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      const content =
+        typeof response.content === 'string'
+          ? response.content.toLowerCase().trim()
+          : 'hybrid';
+
       let decision: 'retrieve' | 'parametric' | 'hybrid' = 'hybrid';
       if (content.includes('retrieve')) decision = 'retrieve';
       else if (content.includes('parametric')) decision = 'parametric';
@@ -282,15 +298,16 @@ Respond with ONLY one of these three words: retrieve, parametric, or hybrid`;
   /**
    * Calculate confidence in the decision
    */
-  private calculateDecisionConfidence(
-    query: string,
-    decision: string
-  ): number {
+  private calculateDecisionConfidence(query: string, decision: string): number {
     const lowerQuery = query.toLowerCase();
-    
+
     // High confidence for retrieve if query has specific indicators
     if (decision === 'retrieve') {
-      if (lowerQuery.match(/\b(how|guide|documentation|specific|latest|current)\b/)) {
+      if (
+        lowerQuery.match(
+          /\b(how|guide|documentation|specific|latest|current)\b/,
+        )
+      ) {
         return 0.9;
       }
       return 0.7;
@@ -318,15 +335,18 @@ Question: ${query}
 Answer:`;
 
     const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-    return typeof response.content === 'string' 
-      ? response.content.trim() 
+    return typeof response.content === 'string'
+      ? response.content.trim()
       : 'Unable to generate response';
   }
 
   /**
    * Generate answer with retrieved context
    */
-  private async generateWithContext(query: string, context: string): Promise<string> {
+  private async generateWithContext(
+    query: string,
+    context: string,
+  ): Promise<string> {
     const prompt = `Answer the following question based on the provided context.
 
 Context:
@@ -337,8 +357,8 @@ Question: ${query}
 Answer:`;
 
     const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-    return typeof response.content === 'string' 
-      ? response.content.trim() 
+    return typeof response.content === 'string'
+      ? response.content.trim()
       : 'Unable to generate response';
   }
 
@@ -348,7 +368,7 @@ Answer:`;
   private async generateHybrid(
     query: string,
     parametricAnswer: string,
-    context: string
+    context: string,
   ): Promise<string> {
     const prompt = `You have both your general knowledge and external context. Combine them to give the best answer.
 
@@ -362,8 +382,8 @@ Question: ${query}
 Final integrated answer:`;
 
     const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-    return typeof response.content === 'string' 
-      ? response.content.trim() 
+    return typeof response.content === 'string'
+      ? response.content.trim()
       : parametricAnswer;
   }
 
@@ -372,7 +392,7 @@ Final integrated answer:`;
    */
   private async selfReflect(
     answer: string,
-    documents: any[]
+    documents: any[],
   ): Promise<SelfReflectionResult> {
     // Simple heuristic-based reflection for efficiency
     const answerLength = answer.length;
@@ -396,7 +416,9 @@ Final integrated answer:`;
       needsRetrieval,
       answerQuality,
       confidence,
-      missingInformation: needsRetrieval ? ['Additional context needed'] : undefined,
+      missingInformation: needsRetrieval
+        ? ['Additional context needed']
+        : undefined,
     };
   }
 
@@ -405,7 +427,7 @@ Final integrated answer:`;
    */
   private async correctiveRetrieval(
     query: string,
-    context: RAGContext
+    context: RAGContext,
   ): Promise<{ answer: string; documents: any[]; sources: string[] }> {
     const retrieveResult = await this.retrieveModule.execute({
       query,
@@ -428,9 +450,12 @@ Final integrated answer:`;
       config: this.config.modules.read,
     });
 
-    const extractedContext = typeof readResult.data === 'object' && readResult.data !== null && 'extractedContext' in readResult.data
-      ? String(readResult.data.extractedContext)
-      : '';
+    const extractedContext =
+      typeof readResult.data === 'object' &&
+      readResult.data !== null &&
+      'extractedContext' in readResult.data
+        ? String(readResult.data.extractedContext)
+        : '';
     const answer = await this.generateWithContext(query, extractedContext);
 
     return {
@@ -445,7 +470,7 @@ Final integrated answer:`;
    */
   private extractSources(documents: any[]): string[] {
     const sources = new Set<string>();
-    
+
     for (const doc of documents) {
       const source = doc.metadata?.fileName || doc.metadata?.source;
       if (source) {
@@ -460,9 +485,10 @@ Final integrated answer:`;
     return {
       name: 'Adaptive RAG',
       type: 'adaptive',
-      description: 'Intelligently decides whether to retrieve or use parametric knowledge with self-reflection',
+      description:
+        'Intelligently decides whether to retrieve or use parametric knowledge with self-reflection',
       useCases: [
-        'Mixed query types (some need retrieval, some don\'t)',
+        "Mixed query types (some need retrieval, some don't)",
         'Cost-optimized scenarios',
         'Latency-sensitive applications',
         'General-purpose assistants',
@@ -473,4 +499,3 @@ Final integrated answer:`;
     };
   }
 }
-

@@ -4,8 +4,8 @@
  */
 
 import mongoose from 'mongoose';
-import { MongoDBMCPAuditLog } from '../../models/MongoDBMCPAuditLog';
-import { loggingService } from '../../services/logging.service';
+import { MongodbMcpAuditLog } from '../../schemas/security/mongodb-mcp-audit-log.schema';
+import { loggingService } from '../../common/services/logging.service';
 import { IntegrationType, HttpMethod } from '../types/permission.types';
 import { MCPToolResponse } from '../types/standard-response';
 
@@ -44,7 +44,7 @@ export class AuditLogger {
       confirmed?: boolean;
       connectionId?: string;
       ipAddress?: string;
-    } = {}
+    } = {},
   ): Promise<void> {
     const entry: AuditLogEntry = {
       timestamp: new Date(),
@@ -85,7 +85,7 @@ export class AuditLogger {
     resource: string,
     action: string,
     confirmed: boolean,
-    timedOut: boolean = false
+    timedOut: boolean = false,
   ): Promise<void> {
     const logEntry = {
       timestamp: new Date(),
@@ -112,7 +112,7 @@ export class AuditLogger {
     integration: IntegrationType,
     toolName: string,
     reason: string,
-    missingScope?: string
+    missingScope?: string,
   ): Promise<void> {
     const logEntry = {
       timestamp: new Date(),
@@ -137,11 +137,18 @@ export class AuditLogger {
       return {};
     }
 
-    const sanitized = { ...params as Record<string, unknown> };
-    const sensitiveKeys = ['password', 'token', 'secret', 'key', 'apiKey', 'accessToken'];
+    const sanitized = { ...(params as Record<string, unknown>) };
+    const sensitiveKeys = [
+      'password',
+      'token',
+      'secret',
+      'key',
+      'apiKey',
+      'accessToken',
+    ];
 
     for (const key of Object.keys(sanitized)) {
-      if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk))) {
+      if (sensitiveKeys.some((sk) => key.toLowerCase().includes(sk))) {
         sanitized[key] = '[REDACTED]';
       }
     }
@@ -162,14 +169,17 @@ export class AuditLogger {
         this.auditLogs = this.auditLogs.slice(-this.MAX_LOGS);
       }
 
-      await MongoDBMCPAuditLog.create({
+      const MongodbMcpAuditLogModel = (await import('../../common/utils/get-mongoose-models')).getMongodbMcpAuditLogModel();
+      await MongodbMcpAuditLogModel.create({
         ...entry,
         context: {
           userId: new mongoose.Types.ObjectId(entry.userId),
           connectionId: new mongoose.Types.ObjectId(entry.connectionId),
         },
       });
-      loggingService.debug('Audit log stored', { entryId: `${entry.userId}-${entry.timestamp.getTime()}` });
+      loggingService.debug('Audit log stored', {
+        entryId: `${entry.userId}-${entry.timestamp.getTime()}`,
+      });
     } catch (error) {
       loggingService.error('Failed to store audit log', {
         error: error instanceof Error ? error.message : String(error),
@@ -181,10 +191,14 @@ export class AuditLogger {
   /**
    * Store confirmation log entry
    */
-  private static async storeConfirmationLog(entry: Record<string, unknown>): Promise<void> {
+  private static async storeConfirmationLog(
+    entry: Record<string, unknown>,
+  ): Promise<void> {
     try {
       // In production, this would write to a persistent confirmation log database
-      loggingService.debug('Confirmation log stored', { entryId: `${entry.userId}-${entry.timestamp}` });
+      loggingService.debug('Confirmation log stored', {
+        entryId: `${entry.userId}-${entry.timestamp}`,
+      });
     } catch (error) {
       loggingService.error('Failed to store confirmation log', {
         error: error instanceof Error ? error.message : String(error),
@@ -196,10 +210,14 @@ export class AuditLogger {
   /**
    * Store permission denial log entry
    */
-  private static async storePermissionDenialLog(entry: Record<string, unknown>): Promise<void> {
+  private static async storePermissionDenialLog(
+    entry: Record<string, unknown>,
+  ): Promise<void> {
     try {
       // In production, this would write to a persistent security log database
-      loggingService.debug('Permission denial log stored', { entryId: `${entry.userId}-${entry.timestamp}` });
+      loggingService.debug('Permission denial log stored', {
+        entryId: `${entry.userId}-${entry.timestamp}`,
+      });
     } catch (error) {
       loggingService.error('Failed to store permission denial log', {
         error: error instanceof Error ? error.message : String(error),
@@ -218,7 +236,7 @@ export class AuditLogger {
       startDate?: Date;
       endDate?: Date;
       limit?: number;
-    } = {}
+    } = {},
   ): Promise<AuditLogEntry[]> {
     try {
       loggingService.info('Audit log query', {
@@ -227,24 +245,32 @@ export class AuditLogger {
       });
 
       // Filter logs from in-memory store
-      let filteredLogs = this.auditLogs.filter(log => log.userId === userId);
+      let filteredLogs = this.auditLogs.filter((log) => log.userId === userId);
 
       // Apply integration filter
       if (options.integration) {
-        filteredLogs = filteredLogs.filter(log => log.integration === options.integration);
+        filteredLogs = filteredLogs.filter(
+          (log) => log.integration === options.integration,
+        );
       }
 
       // Apply date range filters
       if (options.startDate) {
-        filteredLogs = filteredLogs.filter(log => log.timestamp >= options.startDate!);
+        filteredLogs = filteredLogs.filter(
+          (log) => log.timestamp >= options.startDate!,
+        );
       }
 
       if (options.endDate) {
-        filteredLogs = filteredLogs.filter(log => log.timestamp <= options.endDate!);
+        filteredLogs = filteredLogs.filter(
+          (log) => log.timestamp <= options.endDate!,
+        );
       }
 
       // Sort by timestamp (newest first)
-      filteredLogs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      filteredLogs.sort(
+        (a, b) => b.timestamp.getTime() - a.timestamp.getTime(),
+      );
 
       // Apply limit
       if (options.limit && options.limit > 0) {
@@ -273,21 +299,22 @@ export class AuditLogger {
     integrationBreakdown: Record<IntegrationType, number>;
   }> {
     try {
-      const logs = userId 
-        ? this.auditLogs.filter(log => log.userId === userId)
+      const logs = userId
+        ? this.auditLogs.filter((log) => log.userId === userId)
         : this.auditLogs;
 
       const stats = {
         totalLogs: logs.length,
-        successfulOperations: logs.filter(log => log.success).length,
-        failedOperations: logs.filter(log => !log.success).length,
-        dangerousOperations: logs.filter(log => log.dangerousOperation).length,
+        successfulOperations: logs.filter((log) => log.success).length,
+        failedOperations: logs.filter((log) => !log.success).length,
+        dangerousOperations: logs.filter((log) => log.dangerousOperation)
+          .length,
         integrationBreakdown: {} as Record<IntegrationType, number>,
       };
 
       // Calculate integration breakdown
       for (const log of logs) {
-        stats.integrationBreakdown[log.integration] = 
+        stats.integrationBreakdown[log.integration] =
           (stats.integrationBreakdown[log.integration] || 0) + 1;
       }
 
@@ -316,7 +343,9 @@ export class AuditLogger {
       cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
 
       const initialCount = this.auditLogs.length;
-      this.auditLogs = this.auditLogs.filter(log => log.timestamp > cutoffDate);
+      this.auditLogs = this.auditLogs.filter(
+        (log) => log.timestamp > cutoffDate,
+      );
       const clearedCount = initialCount - this.auditLogs.length;
 
       loggingService.info('Audit logs cleared', {

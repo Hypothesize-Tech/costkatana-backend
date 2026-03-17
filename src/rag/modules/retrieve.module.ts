@@ -9,8 +9,8 @@ import {
   RAGModuleOutput,
   RetrievalConfig,
 } from '../types/rag.types';
-import { retrievalService } from '../../services/retrieval.service';
-import { loggingService } from '../../services/logging.service';
+import { retrievalService } from '../services/retrieval.service';
+import { loggingService } from '../../common/services/logging.service';
 import { Document } from '@langchain/core/documents';
 
 export class RetrieveModule extends BaseRAGModule {
@@ -22,14 +22,14 @@ export class RetrieveModule extends BaseRAGModule {
       limit: 5,
       useCache: true,
       similarityThreshold: 0.7,
-    }
+    },
   ) {
     super('RetrieveModule', 'retrieve', config);
     this.config = config;
   }
 
   protected async executeInternal(
-    input: RAGModuleInput
+    input: RAGModuleInput,
   ): Promise<RAGModuleOutput> {
     const { query, context, config } = input;
 
@@ -66,7 +66,7 @@ export class RetrieveModule extends BaseRAGModule {
         case 'knowledge_base':
           result = await retrievalService.retrieveKnowledgeBase(
             query,
-            retrievalOptions.limit
+            retrievalOptions.limit,
           );
           break;
 
@@ -77,7 +77,7 @@ export class RetrieveModule extends BaseRAGModule {
           result = await retrievalService.retrieveUserDocuments(
             context.userId,
             query,
-            retrievalOptions
+            retrievalOptions,
           );
           break;
 
@@ -89,14 +89,17 @@ export class RetrieveModule extends BaseRAGModule {
               recentMessages: context?.recentMessages?.map((m) => m.content),
               currentTopic: context?.currentTopic,
             },
-            retrievalOptions
+            retrievalOptions,
           );
           break;
 
         default:
           // Use enhanced retrieval that includes Google Drive files
           if (context?.userId) {
-            result = await retrievalService.retrieveWithGoogleDriveFiles(query, retrievalOptions);
+            result = await retrievalService.retrieveWithGoogleDriveFiles(
+              query,
+              retrievalOptions,
+            );
           } else {
             result = await retrievalService.retrieve(query, retrievalOptions);
           }
@@ -107,7 +110,7 @@ export class RetrieveModule extends BaseRAGModule {
       if (effectiveConfig.similarityThreshold) {
         filteredDocs = this.filterBySimilarity(
           result.documents,
-          effectiveConfig.similarityThreshold
+          effectiveConfig.similarityThreshold,
         );
       }
 
@@ -147,7 +150,7 @@ export class RetrieveModule extends BaseRAGModule {
    */
   private determineStrategy(
     query: string,
-    config: RetrievalConfig
+    config: RetrievalConfig,
   ): 'knowledge_base' | 'user_documents' | 'contextual' | 'general' {
     const lowerQuery = query.toLowerCase();
 
@@ -162,7 +165,7 @@ export class RetrieveModule extends BaseRAGModule {
       lowerQuery.includes('my') ||
       lowerQuery.includes('our') ||
       config.filters?.source?.some((s) =>
-        ['user-upload', 'conversation'].includes(s)
+        ['user-upload', 'conversation'].includes(s),
       )
     ) {
       return 'user_documents';
@@ -189,7 +192,7 @@ export class RetrieveModule extends BaseRAGModule {
    */
   private filterBySimilarity(
     documents: Document[],
-    threshold: number
+    threshold: number,
   ): Document[] {
     return documents.filter((doc) => {
       const score = doc.metadata.score as number;
@@ -202,7 +205,7 @@ export class RetrieveModule extends BaseRAGModule {
    */
   async hybridSearch(
     query: string,
-    options: RetrievalConfig
+    options: RetrievalConfig,
   ): Promise<Document[]> {
     const alpha = options.hybridAlpha ?? 0.5;
 
@@ -213,17 +216,18 @@ export class RetrieveModule extends BaseRAGModule {
     });
 
     // Weight vector results by alpha
-    const weightedResults = vectorResults.documents.map(doc => ({
+    const weightedResults = vectorResults.documents.map((doc) => ({
       ...doc,
       metadata: {
         ...doc.metadata,
-        hybridScore: (doc.metadata.score as number ?? 0.5) * alpha,
+        hybridScore: ((doc.metadata.score as number) ?? 0.5) * alpha,
       },
     }));
 
     // Sort by hybrid score and return top results
-    weightedResults.sort((a, b) => 
-      (b.metadata.hybridScore as number) - (a.metadata.hybridScore as number)
+    weightedResults.sort(
+      (a, b) =>
+        (b.metadata.hybridScore as number) - (a.metadata.hybridScore as number),
     );
 
     return weightedResults.slice(0, options.limit ?? 5);
@@ -274,4 +278,3 @@ export class RetrieveModule extends BaseRAGModule {
     return true;
   }
 }
-

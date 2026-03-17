@@ -218,23 +218,11 @@ Input should be a JSON string with:
         url,
       });
 
-      // Fallback to cached/generated content if scraping fails
-      try {
-        const fallbackContent = this.generateScrapedContent(url, options);
-        return this.createSuccessResponse('web_search', {
-          operation: 'scrape',
-          url,
-          content: fallbackContent,
-          scrapeTime: this.generateDeterministicTiming(url, 'scrape'),
-          message: `Scraped content from ${url} (fallback mode)`,
-          fallback: true,
-        });
-      } catch (fallbackError) {
-        return this.createErrorResponse(
-          'web_search',
-          'Content scraping failed in both primary and fallback modes',
-        );
-      }
+      // Do not fall back to simulated content in production - return error instead
+      return this.createErrorResponse(
+        'web_search',
+        `Content scraping failed for ${url}: ${error.message}. Please try again later or use a different URL.`,
+      );
     }
   }
 
@@ -259,23 +247,11 @@ Input should be a JSON string with:
         url,
       });
 
-      // Fallback to cached/generated data if extraction fails
-      try {
-        const fallbackData = this.generateExtractedData(url, options);
-        return this.createSuccessResponse('web_search', {
-          operation: 'extract',
-          url,
-          extractedData: fallbackData,
-          extractionTime: this.generateDeterministicTiming(url, 'extract'),
-          message: `Extracted data from ${url} (fallback mode)`,
-          fallback: true,
-        });
-      } catch (fallbackError) {
-        return this.createErrorResponse(
-          'web_search',
-          'Data extraction failed in both primary and fallback modes',
-        );
-      }
+      // Do not fall back to simulated data in production - return error instead
+      return this.createErrorResponse(
+        'web_search',
+        `Data extraction failed for ${url}: ${error.message}. Please try again later or use a different URL.`,
+      );
     }
   }
 

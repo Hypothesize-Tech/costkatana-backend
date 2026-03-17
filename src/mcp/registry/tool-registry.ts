@@ -3,8 +3,13 @@
  * Central registry for all integration tools
  */
 
-import { loggingService } from '../../services/logging.service';
-import { ToolSchema, ToolRegistryEntry, ToolHandler, ToolExecutionContext } from '../types/tool-schema';
+import { loggingService } from '../../common/services/logging.service';
+import {
+  ToolSchema,
+  ToolRegistryEntry,
+  ToolHandler,
+  ToolExecutionContext,
+} from '../types/tool-schema';
 import { MCPToolDefinition } from '../types/mcp.types';
 import { IntegrationType } from '../types/permission.types';
 
@@ -21,7 +26,7 @@ export class ToolRegistry {
     options: {
       enabled?: boolean;
       rateLimitOverride?: number;
-    } = {}
+    } = {},
   ): void {
     const entry: ToolRegistryEntry = {
       schema,
@@ -62,14 +67,16 @@ export class ToolRegistry {
   /**
    * Get tools for specific integration
    */
-  static getToolsForIntegration(integration: IntegrationType): ToolRegistryEntry[] {
+  static getToolsForIntegration(
+    integration: IntegrationType,
+  ): ToolRegistryEntry[] {
     const toolNames = this.toolsByIntegration.get(integration);
     if (!toolNames) {
       return [];
     }
 
     return Array.from(toolNames)
-      .map(name => this.tools.get(name))
+      .map((name) => this.tools.get(name))
       .filter((tool): tool is ToolRegistryEntry => tool !== undefined);
   }
 
@@ -77,22 +84,24 @@ export class ToolRegistry {
    * Get enabled tools
    */
   static getEnabledTools(): ToolRegistryEntry[] {
-    return Array.from(this.tools.values()).filter(tool => tool.enabled);
+    return Array.from(this.tools.values()).filter((tool) => tool.enabled);
   }
 
   /**
    * Convert to MCP tool definitions
    */
-  static toMCPDefinitions(filterByIntegrations?: IntegrationType[]): MCPToolDefinition[] {
+  static toMCPDefinitions(
+    filterByIntegrations?: IntegrationType[],
+  ): MCPToolDefinition[] {
     let tools = this.getEnabledTools();
 
     if (filterByIntegrations && filterByIntegrations.length > 0) {
-      tools = tools.filter(tool => 
-        filterByIntegrations.includes(tool.schema.integration)
+      tools = tools.filter((tool) =>
+        filterByIntegrations.includes(tool.schema.integration),
       );
     }
 
-    return tools.map(tool => this.schemaToMCPDefinition(tool.schema));
+    return tools.map((tool) => this.schemaToMCPDefinition(tool.schema));
   }
 
   /**
@@ -142,10 +151,10 @@ export class ToolRegistry {
   static async executeTool(
     toolName: string,
     params: any,
-    context: ToolExecutionContext
+    context: ToolExecutionContext,
   ): Promise<any> {
     const tool = this.tools.get(toolName);
-    
+
     if (!tool) {
       throw new Error(`Tool '${toolName}' not found`);
     }
@@ -163,7 +172,7 @@ export class ToolRegistry {
 
     try {
       const result = await tool.handler(params, context);
-      
+
       loggingService.info('Tool executed successfully', {
         toolName,
         integration: tool.schema.integration,
@@ -192,7 +201,7 @@ export class ToolRegistry {
     }
 
     tool.enabled = enabled;
-    
+
     loggingService.info('Tool enabled status changed', {
       toolName,
       enabled,
@@ -220,7 +229,7 @@ export class ToolRegistry {
     byIntegration: Record<string, number>;
   } {
     const byIntegration: Record<string, number> = {};
-    
+
     for (const [integration, tools] of this.toolsByIntegration.entries()) {
       byIntegration[integration] = tools.size;
     }

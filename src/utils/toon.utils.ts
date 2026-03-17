@@ -41,20 +41,31 @@ export function encodeToTOON(
 }
 
 /**
- * Decode TOON format back to original data
+ * Decode TOON format back to original data.
+ * Accepts TOONEncoded object or JSON string that parses to it.
  */
-export function decodeFromTOON(toonData: TOONEncoded): TOONDecoded {
-  if (!toonData || toonData.format !== 'TOON') {
+export function decodeFromTOON(toonData: TOONEncoded | string): TOONDecoded {
+  let parsed: TOONEncoded;
+  if (typeof toonData === 'string') {
+    try {
+      parsed = JSON.parse(toonData) as TOONEncoded;
+    } catch {
+      throw new Error('Invalid TOON format: expected JSON string');
+    }
+  } else {
+    parsed = toonData;
+  }
+  if (!parsed || parsed.format !== 'TOON') {
     throw new Error('Invalid TOON format');
   }
 
-  const original = toonData.compressed
-    ? decompressData(toonData.data)
-    : toonData.data;
+  const original = parsed.compressed
+    ? decompressData(parsed.data)
+    : parsed.data;
 
   // Estimate token counts (rough approximation)
   const originalTokens = estimateTokens(JSON.stringify(original));
-  const compressedTokens = estimateTokens(JSON.stringify(toonData.data));
+  const compressedTokens = estimateTokens(JSON.stringify(parsed.data));
 
   return {
     original,
@@ -63,7 +74,7 @@ export function decodeFromTOON(toonData: TOONEncoded): TOONDecoded {
         originalTokens > 0 ? compressedTokens / originalTokens : 1,
       originalTokens,
       compressedTokens,
-      format: toonData.format,
+      format: parsed.format,
     },
   };
 }
@@ -179,4 +190,36 @@ export function isTOONFormat(data: any): boolean {
     data.version &&
     data.data !== undefined
   );
+}
+
+/** Extract structured data from text/object (for Cortex encoder) */
+export function extractStructuredData(input: unknown): any {
+  if (typeof input === 'string') {
+    try {
+      return JSON.parse(input);
+    } catch {
+      return { raw: input };
+    }
+  }
+  if (typeof input === 'object' && input !== null) return input;
+  return { raw: input };
+}
+
+/** Try to manually parse TOON-like string when standard parse fails */
+export function tryManualTOONParse(text: string): any | null {
+  if (!text || typeof text !== 'string') return null;
+  try {
+    const trimmed = text.trim();
+    const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    const arrMatch = trimmed.match(/\[[\s\S]*\]/);
+    if (arrMatch) {
+      return JSON.parse(arrMatch[0]);
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }

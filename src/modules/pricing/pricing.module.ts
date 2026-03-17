@@ -7,7 +7,7 @@ import {
 } from '../../schemas/ai/ai-model-pricing.schema';
 import { Usage, UsageSchema } from '../../schemas/core/usage.schema';
 import { GenAITelemetryService } from '@/utils/genaiTelemetry';
-import { BedrockService } from '@/services/bedrock.service';
+import { BedrockService } from '@/modules/bedrock/bedrock.service';
 
 // Controllers
 import { PricingController } from './pricing.controller';

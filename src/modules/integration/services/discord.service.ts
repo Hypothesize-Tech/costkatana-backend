@@ -318,11 +318,16 @@ export class DiscordService {
       ),
     );
     const members = Array.isArray(data) ? data : [];
-    return members.map((m: { user?: { id: string; username: string; discriminator?: string }; id?: string }) => ({
-      id: m.user?.id ?? m.id ?? '',
-      username: m.user?.username ?? 'Unknown',
-      discriminator: m.user?.discriminator ?? '0',
-    }));
+    return members.map(
+      (m: {
+        user?: { id: string; username: string; discriminator?: string };
+        id?: string;
+      }) => ({
+        id: m.user?.id ?? m.id ?? '',
+        username: m.user?.username ?? 'Unknown',
+        discriminator: m.user?.discriminator ?? '0',
+      }),
+    );
   }
 
   async createChannel(
@@ -420,7 +425,10 @@ export class DiscordService {
     );
   }
 
-  async listRoles(botToken: string, guildId: string): Promise<Array<{ id: string; name: string; color: number }>> {
+  async listRoles(
+    botToken: string,
+    guildId: string,
+  ): Promise<Array<{ id: string; name: string; color: number }>> {
     const { data } = await firstValueFrom(
       this.httpService.get(
         `${DiscordService.DISCORD_API_BASE}/guilds/${guildId}/roles`,

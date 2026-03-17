@@ -29,6 +29,9 @@ export type InterventionLogDocument = HydratedDocument<InterventionLog>;
 
 @Schema({ timestamps: true, collection: 'intervention_logs' })
 export class InterventionLog {
+  /** Static create for legacy Express middleware - set by Nest model injection or no-op */
+  static create: (doc: unknown) => Promise<unknown> = async () => ({});
+
   @Prop({ required: true, default: Date.now, index: true })
   timestamp: Date;
 

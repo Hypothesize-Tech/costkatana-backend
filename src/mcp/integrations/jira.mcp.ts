@@ -4,7 +4,11 @@
  */
 
 import { BaseIntegrationMCP } from './base-integration.mcp';
-import { createToolSchema, createParameter, CommonParameters } from '../registry/tool-metadata';
+import {
+  createToolSchema,
+  createParameter,
+  CommonParameters,
+} from '../registry/tool-metadata';
 
 // Note: Jira Cloud API base will be determined by the user's domain (stored in connection)
 const JIRA_API_VERSION = '/rest/api/3';
@@ -19,7 +23,7 @@ export class JiraMCP extends BaseIntegrationMCP {
   private buildJiraUrl(domainOrCloudId: string, path: string): string {
     // Check if it's a Cloud ID (UUID format) or a domain
     const isCloudId = domainOrCloudId.match(/^[a-f0-9-]{36}$/i);
-    
+
     if (isCloudId) {
       // OAuth 2.0 with Cloud ID uses Atlassian API format
       return `https://api.atlassian.com/ex/jira/${domainOrCloudId}${path}`;
@@ -33,16 +37,16 @@ export class JiraMCP extends BaseIntegrationMCP {
    * Get Jira Cloud domain from connection
    */
   private async getJiraDomain(connectionId: string): Promise<string> {
-    const { Integration } = await import('../../models/Integration');
+    const { Integration } = await import('../../schemas/integration/integration.schema');
     const conn = await Integration.findById(connectionId);
-    
+
     if (!conn) {
       throw new Error('JIRA connection not found');
     }
-    
+
     // Decrypt credentials
     const credentials = conn.getCredentials();
-    
+
     // For OAuth 2.0, use Cloud ID (Atlassian API format)
     // For API token, use siteUrl
     const cloudId = credentials.cloudId;
@@ -50,7 +54,7 @@ export class JiraMCP extends BaseIntegrationMCP {
       // Return Cloud ID for OAuth 2.0 (will be used in Atlassian API URL format)
       return cloudId;
     }
-    
+
     // Fallback to siteUrl for API token authentication
     const siteUrl = credentials.siteUrl;
     if (siteUrl) {
@@ -62,7 +66,7 @@ export class JiraMCP extends BaseIntegrationMCP {
         return siteUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
       }
     }
-    
+
     throw new Error('JIRA domain/cloudId not found in connection');
   }
 
@@ -77,7 +81,7 @@ export class JiraMCP extends BaseIntegrationMCP {
         'List Jira projects',
         'GET',
         [CommonParameters.limit],
-        { requiredScopes: ['read:jira-work'] }
+        { requiredScopes: ['read:jira-work'] },
       ),
       async (params, context) => {
         const domain = await this.getJiraDomain(context.connectionId);
@@ -89,14 +93,14 @@ export class JiraMCP extends BaseIntegrationMCP {
           context.connectionId,
           'GET',
           this.buildJiraUrl(domain, `${JIRA_API_VERSION}/project`),
-          { params: queryParams, timeout: 300000 } // 5 minutes
+          { params: queryParams, timeout: 300000 }, // 5 minutes
         );
 
         return {
           projects: data,
           count: data.length,
         };
-      }
+      },
     );
 
     // ===== ISSUE OPERATIONS =====
@@ -109,10 +113,13 @@ export class JiraMCP extends BaseIntegrationMCP {
         'List Jira issues using JQL',
         'GET',
         [
-          createParameter('jql', 'string', 'JQL query', { required: false, default: 'order by created DESC' }),
+          createParameter('jql', 'string', 'JQL query', {
+            required: false,
+            default: 'order by created DESC',
+          }),
           CommonParameters.limit,
         ],
-        { requiredScopes: ['read:jira-work'] }
+        { requiredScopes: ['read:jira-work'] },
       ),
       async (params, context) => {
         const domain = await this.getJiraDomain(context.connectionId);
@@ -125,7 +132,7 @@ export class JiraMCP extends BaseIntegrationMCP {
           context.connectionId,
           'GET',
           this.buildJiraUrl(domain, `${JIRA_API_VERSION}/search`),
-          { params: queryParams, timeout: 300000 } // 5 minutes
+          { params: queryParams, timeout: 300000 }, // 5 minutes
         );
 
         return {
@@ -133,7 +140,7 @@ export class JiraMCP extends BaseIntegrationMCP {
           total: data.total,
           count: data.issues?.length || 0,
         };
-      }
+      },
     );
 
     // Get issue
@@ -143,21 +150,28 @@ export class JiraMCP extends BaseIntegrationMCP {
         'jira',
         'Get details of a specific issue',
         'GET',
-        [createParameter('issueKey', 'string', 'Issue key (e.g., PROJ-123)', { required: true })],
-        { requiredScopes: ['read:jira-work'] }
+        [
+          createParameter('issueKey', 'string', 'Issue key (e.g., PROJ-123)', {
+            required: true,
+          }),
+        ],
+        { requiredScopes: ['read:jira-work'] },
       ),
       async (params, context) => {
         const domain = await this.getJiraDomain(context.connectionId);
-        
+
         const data = await this.makeRequest(
           context.connectionId,
           'GET',
-          this.buildJiraUrl(domain, `${JIRA_API_VERSION}/issue/${params.issueKey}`),
-          { timeout: 300000 } // 5 minutes
+          this.buildJiraUrl(
+            domain,
+            `${JIRA_API_VERSION}/issue/${params.issueKey}`,
+          ),
+          { timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Create issue
@@ -168,33 +182,43 @@ export class JiraMCP extends BaseIntegrationMCP {
         'Create a new Jira issue',
         'POST',
         [
-          createParameter('projectKey', 'string', 'Project key', { required: true }),
+          createParameter('projectKey', 'string', 'Project key', {
+            required: true,
+          }),
           CommonParameters.title,
           CommonParameters.description,
           createParameter('issueType', 'string', 'Issue type', {
             required: false,
             default: 'Task',
           }),
-          createParameter('priority', 'string', 'Priority', { required: false }),
-          createParameter('assignee', 'string', 'Assignee account ID', { required: false }),
+          createParameter('priority', 'string', 'Priority', {
+            required: false,
+          }),
+          createParameter('assignee', 'string', 'Assignee account ID', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['write:jira-work'] }
+        { requiredScopes: ['write:jira-work'] },
       ),
       async (params, context) => {
         const domain = await this.getJiraDomain(context.connectionId);
-        
+
         const body = {
           fields: {
             project: { key: params.projectKey },
             summary: params.title,
-            description: params.description ? {
-              type: 'doc',
-              version: 1,
-              content: [{
-                type: 'paragraph',
-                content: [{ type: 'text', text: params.description }],
-              }],
-            } : undefined,
+            description: params.description
+              ? {
+                  type: 'doc',
+                  version: 1,
+                  content: [
+                    {
+                      type: 'paragraph',
+                      content: [{ type: 'text', text: params.description }],
+                    },
+                  ],
+                }
+              : undefined,
             issuetype: { name: params.issueType || 'Task' },
             priority: params.priority ? { name: params.priority } : undefined,
             assignee: params.assignee ? { id: params.assignee } : undefined,
@@ -205,11 +229,11 @@ export class JiraMCP extends BaseIntegrationMCP {
           context.connectionId,
           'POST',
           this.buildJiraUrl(domain, `${JIRA_API_VERSION}/issue`),
-          { body, timeout: 300000 } // 5 minutes
+          { body, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Update issue
@@ -220,28 +244,38 @@ export class JiraMCP extends BaseIntegrationMCP {
         'Update an existing issue',
         'PUT',
         [
-          createParameter('issueKey', 'string', 'Issue key (e.g., PROJ-123)', { required: true }),
-          createParameter('summary', 'string', 'New summary', { required: false }),
-          createParameter('description', 'string', 'New description', { required: false }),
-          createParameter('priority', 'string', 'New priority', { required: false }),
+          createParameter('issueKey', 'string', 'Issue key (e.g., PROJ-123)', {
+            required: true,
+          }),
+          createParameter('summary', 'string', 'New summary', {
+            required: false,
+          }),
+          createParameter('description', 'string', 'New description', {
+            required: false,
+          }),
+          createParameter('priority', 'string', 'New priority', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['write:jira-work'] }
+        { requiredScopes: ['write:jira-work'] },
       ),
       async (params, context) => {
         const domain = await this.getJiraDomain(context.connectionId);
         const { issueKey, ...fields } = params;
 
         const body: any = { fields: {} };
-        
+
         if (fields.summary) body.fields.summary = fields.summary;
         if (fields.description) {
           body.fields.description = {
             type: 'doc',
             version: 1,
-            content: [{
-              type: 'paragraph',
-              content: [{ type: 'text', text: fields.description }],
-            }],
+            content: [
+              {
+                type: 'paragraph',
+                content: [{ type: 'text', text: fields.description }],
+              },
+            ],
           };
         }
         if (fields.priority) body.fields.priority = { name: fields.priority };
@@ -250,14 +284,14 @@ export class JiraMCP extends BaseIntegrationMCP {
           context.connectionId,
           'PUT',
           this.buildJiraUrl(domain, `${JIRA_API_VERSION}/issue/${issueKey}`),
-          { body, timeout: 300000 } // 5 minutes
+          { body, timeout: 300000 }, // 5 minutes
         );
 
         return {
           success: true,
           message: `Issue ${issueKey} updated successfully`,
         };
-      }
+      },
     );
 
     // Delete issue
@@ -267,11 +301,15 @@ export class JiraMCP extends BaseIntegrationMCP {
         'jira',
         'Delete a Jira issue',
         'DELETE',
-        [createParameter('issueKey', 'string', 'Issue key (e.g., PROJ-123)', { required: true })],
+        [
+          createParameter('issueKey', 'string', 'Issue key (e.g., PROJ-123)', {
+            required: true,
+          }),
+        ],
         {
           requiredScopes: ['delete:jira-work'],
           dangerous: true,
-        }
+        },
       ),
       async (params, context) => {
         const domain = await this.getJiraDomain(context.connectionId);
@@ -279,15 +317,18 @@ export class JiraMCP extends BaseIntegrationMCP {
         await this.makeRequest(
           context.connectionId,
           'DELETE',
-          this.buildJiraUrl(domain, `${JIRA_API_VERSION}/issue/${params.issueKey}`),
-          { timeout: 300000 } // 5 minutes
+          this.buildJiraUrl(
+            domain,
+            `${JIRA_API_VERSION}/issue/${params.issueKey}`,
+          ),
+          { timeout: 300000 }, // 5 minutes
         );
 
         return {
           success: true,
           message: `Issue ${params.issueKey} deleted successfully`,
         };
-      }
+      },
     );
 
     // Add comment
@@ -298,34 +339,43 @@ export class JiraMCP extends BaseIntegrationMCP {
         'Add a comment to an issue',
         'POST',
         [
-          createParameter('issueKey', 'string', 'Issue key (e.g., PROJ-123)', { required: true }),
-          createParameter('comment', 'string', 'Comment text', { required: true }),
+          createParameter('issueKey', 'string', 'Issue key (e.g., PROJ-123)', {
+            required: true,
+          }),
+          createParameter('comment', 'string', 'Comment text', {
+            required: true,
+          }),
         ],
-        { requiredScopes: ['write:jira-work'] }
+        { requiredScopes: ['write:jira-work'] },
       ),
       async (params, context) => {
         const domain = await this.getJiraDomain(context.connectionId);
-        
+
         const body = {
           body: {
             type: 'doc',
             version: 1,
-            content: [{
-              type: 'paragraph',
-              content: [{ type: 'text', text: params.comment }],
-            }],
+            content: [
+              {
+                type: 'paragraph',
+                content: [{ type: 'text', text: params.comment }],
+              },
+            ],
           },
         };
 
         const data = await this.makeRequest(
           context.connectionId,
           'POST',
-          this.buildJiraUrl(domain, `${JIRA_API_VERSION}/issue/${params.issueKey}/comment`),
-          { body, timeout: 300000 } // 5 minutes
+          this.buildJiraUrl(
+            domain,
+            `${JIRA_API_VERSION}/issue/${params.issueKey}/comment`,
+          ),
+          { body, timeout: 300000 }, // 5 minutes
         );
 
         return data;
-      }
+      },
     );
 
     // Transition issue
@@ -336,48 +386,61 @@ export class JiraMCP extends BaseIntegrationMCP {
         'Transition an issue to a new status',
         'POST',
         [
-          createParameter('issueKey', 'string', 'Issue key (e.g., PROJ-123)', { required: true }),
-          createParameter('transitionId', 'string', 'Transition ID', { required: true }),
-          createParameter('comment', 'string', 'Optional comment', { required: false }),
+          createParameter('issueKey', 'string', 'Issue key (e.g., PROJ-123)', {
+            required: true,
+          }),
+          createParameter('transitionId', 'string', 'Transition ID', {
+            required: true,
+          }),
+          createParameter('comment', 'string', 'Optional comment', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['write:jira-work'] }
+        { requiredScopes: ['write:jira-work'] },
       ),
       async (params, context) => {
         const domain = await this.getJiraDomain(context.connectionId);
-        
+
         const body: any = {
           transition: { id: params.transitionId },
         };
 
         if (params.comment) {
           body.update = {
-            comment: [{
-              add: {
-                body: {
-                  type: 'doc',
-                  version: 1,
-                  content: [{
-                    type: 'paragraph',
-                    content: [{ type: 'text', text: params.comment }],
-                  }],
+            comment: [
+              {
+                add: {
+                  body: {
+                    type: 'doc',
+                    version: 1,
+                    content: [
+                      {
+                        type: 'paragraph',
+                        content: [{ type: 'text', text: params.comment }],
+                      },
+                    ],
+                  },
                 },
               },
-            }],
+            ],
           };
         }
 
         await this.makeRequest(
           context.connectionId,
           'POST',
-          this.buildJiraUrl(domain, `${JIRA_API_VERSION}/issue/${params.issueKey}/transitions`),
-          { body, timeout: 300000 } // 5 minutes
+          this.buildJiraUrl(
+            domain,
+            `${JIRA_API_VERSION}/issue/${params.issueKey}/transitions`,
+          ),
+          { body, timeout: 300000 }, // 5 minutes
         );
 
         return {
           success: true,
           message: `Issue ${params.issueKey} transitioned successfully`,
         };
-      }
+      },
     );
   }
 }

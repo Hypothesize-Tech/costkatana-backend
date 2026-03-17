@@ -15,20 +15,29 @@ const logger = new Logger('OptimizationUtils');
 
 /**
  * Compression details interface
+ * technique must match aiCostTracker.types for compatibility
  */
 export interface CompressionDetails {
-  technique: string;
+  technique:
+    | 'json_compression'
+    | 'pattern_replacement'
+    | 'abbreviation'
+    | 'deduplication';
   originalSize: number;
   compressedSize: number;
   compressionRatio: number;
-  reversible?: boolean;
+  reversible: boolean;
 }
 
 /**
- * Context trimming details
+ * Context trimming details - technique must match aiCostTracker.types
  */
 export interface ContextTrimDetails {
-  technique: string;
+  technique:
+    | 'summarization'
+    | 'relevance_filtering'
+    | 'sliding_window'
+    | 'importance_scoring';
   originalMessages: number;
   trimmedMessages: number;
   preservedContext: string[];
@@ -627,29 +636,52 @@ export function suggestRequestFusion(
 /**
  * Generate comprehensive optimization suggestions
  */
+/** Map aiCostTracker.types.AIProvider (google) to modelDiscovery.types.AIProvider (google-ai) */
+function toModelDiscoveryProvider(p: AIProvider | string): AIProvider {
+  if (typeof p === 'string') {
+    const mapping: Record<string, AIProvider> = {
+      google: AIProvider.Google,
+      'google-ai': AIProvider.Google,
+      openai: AIProvider.OpenAI,
+      anthropic: AIProvider.Anthropic,
+      'aws-bedrock': AIProvider.AWSBedrock,
+      cohere: AIProvider.Cohere,
+      huggingface: AIProvider.HuggingFace,
+      deepseek: AIProvider.DeepSeek,
+      grok: AIProvider.Grok,
+      ollama: AIProvider.Ollama,
+      replicate: AIProvider.Replicate,
+      azure: AIProvider.Azure,
+    };
+    return mapping[p.toLowerCase()] ?? (p as AIProvider);
+  }
+  return p;
+}
+
 export function generateOptimizationSuggestions(
   prompt: string,
-  provider: AIProvider,
+  provider: AIProvider | string,
   model: string,
   conversationHistory?: ConversationMessage[],
 ): OptimizationResult {
+  const resolvedProvider = toModelDiscoveryProvider(provider);
   const suggestions: OptimizationSuggestion[] = [];
   const startTime = Date.now();
 
-  const originalTokens = estimateTokens(prompt, provider);
+  const originalTokens = estimateTokens(prompt, resolvedProvider);
   let originalCost = 0;
   try {
     originalCost = calculateCost(
       originalTokens,
       150,
-      providerEnumToString(provider),
+      providerEnumToString(resolvedProvider),
       model,
     );
   } catch (error) {
     logger.warn('Failed to calculate cost for model, using fallback pricing', {
       component: 'optimizationUtils',
       operation: 'generateOptimizationSuggestions',
-      provider,
+      provider: resolvedProvider,
       model,
       error: error instanceof Error ? error.message : String(error),
       fallbackPricing: 'GPT-4o-mini rates',
@@ -664,14 +696,14 @@ export function generateOptimizationSuggestions(
   if (compressionResult.compressionRatio < 0.9) {
     const compressedTokens = estimateTokens(
       compressionResult.compressedPrompt,
-      provider,
+      resolvedProvider,
     );
     let compressedCost = 0;
     try {
       compressedCost = calculateCost(
         compressedTokens,
         150,
-        providerEnumToString(provider),
+        providerEnumToString(resolvedProvider),
         model,
       );
     } catch (error) {
@@ -680,7 +712,7 @@ export function generateOptimizationSuggestions(
         {
           component: 'optimizationUtils',
           operation: 'generateOptimizationSuggestions',
-          provider,
+          provider: resolvedProvider,
           model,
           error: error instanceof Error ? error.message : String(error),
           fallbackPricing: 'GPT-4o-mini rates',
@@ -713,14 +745,14 @@ export function generateOptimizationSuggestions(
     if (jsonCompressionResult.compressionRatio < 0.95) {
       const jsonCompressedTokens = estimateTokens(
         jsonCompressionResult.compressedPrompt,
-        provider,
+        resolvedProvider,
       );
       let jsonCompressedCost = 0;
       try {
         jsonCompressedCost = calculateCost(
           jsonCompressedTokens,
           150,
-          providerEnumToString(provider),
+          providerEnumToString(resolvedProvider),
           model,
         );
       } catch (error) {
@@ -729,7 +761,7 @@ export function generateOptimizationSuggestions(
           {
             component: 'optimizationUtils',
             operation: 'generateOptimizationSuggestions',
-            provider,
+            provider: resolvedProvider,
             model,
             error: error instanceof Error ? error.message : String(error),
             fallbackPricing: 'GPT-4o-mini rates',
@@ -763,7 +795,7 @@ export function generateOptimizationSuggestions(
     const contextTrimResult = trimConversationContext(
       conversationHistory,
       originalTokens * 0.7,
-      provider,
+      resolvedProvider,
     );
     if (
       contextTrimResult.trimmedMessages.length <
@@ -771,14 +803,14 @@ export function generateOptimizationSuggestions(
     ) {
       const contextTokens = estimateConversationTokens(
         contextTrimResult.trimmedMessages,
-        provider,
+        resolvedProvider,
       );
       let contextCost = 0;
       try {
         contextCost = calculateCost(
           contextTokens,
           150,
-          providerEnumToString(provider),
+          providerEnumToString(resolvedProvider),
           model,
         );
       } catch (error) {
@@ -787,7 +819,7 @@ export function generateOptimizationSuggestions(
           {
             component: 'optimizationUtils',
             operation: 'generateOptimizationSuggestions',
-            provider,
+            provider: resolvedProvider,
             model,
             error: error instanceof Error ? error.message : String(error),
             fallbackPricing: 'GPT-4o-mini rates',
@@ -815,7 +847,7 @@ export function generateOptimizationSuggestions(
 
   // Model suggestion
   const modelSuggestion = suggestAlternativeModel(
-    provider,
+    resolvedProvider,
     model,
     originalTokens,
   );

@@ -2,6 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage } from 'mongoose';
 import { Usage, UsageDocument } from '@/schemas/analytics/usage.schema';
+import {
+  TagHierarchy as TagHierarchyModel,
+  TagHierarchyDocument,
+} from '@/schemas/tagging/tag-hierarchy.schema';
+import {
+  CostAllocationRule as CostAllocationRuleModel,
+  CostAllocationRuleDocument,
+} from '@/schemas/tagging/cost-allocation-rule.schema';
 
 export interface TagHierarchy {
   id: string;
@@ -113,6 +121,10 @@ export class TaggingService {
   constructor(
     @InjectModel(Usage.name)
     private readonly usageModel: Model<UsageDocument>,
+    @InjectModel(TagHierarchyModel.name)
+    private readonly tagHierarchyModel: Model<TagHierarchyDocument>,
+    @InjectModel(CostAllocationRuleModel.name)
+    private readonly costAllocationRuleModel: Model<CostAllocationRuleDocument>,
   ) {}
 
   async getTagAnalytics(
@@ -338,18 +350,27 @@ export class TaggingService {
       description?: string;
     },
   ): Promise<TagHierarchy> {
-    const hierarchy: TagHierarchy = {
-      id: this.generateTagId(),
+    const hierarchyDoc = new this.tagHierarchyModel({
       name: data.name,
       parent: data.parent,
       children: [],
       color: data.color ?? this.generateRandomColor(),
       description: data.description,
       createdBy: userId,
-      createdAt: new Date(),
       isActive: true,
+    });
+    await hierarchyDoc.save();
+    return {
+      id: hierarchyDoc._id.toString(),
+      name: hierarchyDoc.name,
+      parent: hierarchyDoc.parent,
+      children: hierarchyDoc.children ?? [],
+      color: hierarchyDoc.color,
+      description: hierarchyDoc.description,
+      createdBy: hierarchyDoc.createdBy,
+      createdAt: (hierarchyDoc as any).createdAt ?? new Date(),
+      isActive: hierarchyDoc.isActive,
     };
-    return hierarchy;
   }
 
   async getTagSuggestions(
@@ -416,8 +437,7 @@ export class TaggingService {
       costCenter: string;
     },
   ): Promise<CostAllocationRule> {
-    const rule: CostAllocationRule = {
-      id: this.generateTagId(),
+    const ruleDoc = new this.costAllocationRuleModel({
       name: data.name,
       tagFilters: data.tagFilters,
       allocationPercentage: data.allocationPercentage,
@@ -426,8 +446,19 @@ export class TaggingService {
       costCenter: data.costCenter,
       createdBy: userId,
       isActive: true,
+    });
+    await ruleDoc.save();
+    return {
+      id: ruleDoc._id.toString(),
+      name: ruleDoc.name,
+      tagFilters: ruleDoc.tagFilters,
+      allocationPercentage: ruleDoc.allocationPercentage,
+      department: ruleDoc.department,
+      team: ruleDoc.team,
+      costCenter: ruleDoc.costCenter,
+      createdBy: ruleDoc.createdBy,
+      isActive: ruleDoc.isActive,
     };
-    return rule;
   }
 
   isCircuitBreakerOpen(): boolean {

@@ -4,7 +4,7 @@
  */
 
 import { CortexExpression, CortexFrame } from '../types';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 /**
  * Control flow frame types
@@ -16,7 +16,7 @@ export enum ControlFlowType {
   WHILE = 'while',
   TRY_CATCH = 'try_catch',
   PARALLEL = 'parallel',
-  SEQUENTIAL = 'sequential'
+  SEQUENTIAL = 'sequential',
 }
 
 /**
@@ -32,7 +32,7 @@ export enum LogicalOperator {
   GREATER_THAN = 'greater_than',
   LESS_THAN = 'less_than',
   CONTAINS = 'contains',
-  MATCHES = 'matches'
+  MATCHES = 'matches',
 }
 
 /**
@@ -102,7 +102,7 @@ export class ControlFlowProcessor {
    */
   public async processControlFlow(
     frame: CortexFrame,
-    context: Map<string, any>
+    context: Map<string, any>,
   ): Promise<any> {
     switch (frame.type) {
       case 'control_if':
@@ -121,104 +121,112 @@ export class ControlFlowProcessor {
         throw new Error(`Unknown control flow type: ${frame.type}`);
     }
   }
-  
+
   /**
    * Process if-then-else logic
    */
   private async processIfThenElse(
     frame: IfThenElseFrame,
-    context: Map<string, any>
+    context: Map<string, any>,
   ): Promise<any> {
-    const conditionResult = await this.evaluateCondition(frame.condition, context);
-    
+    const conditionResult = await this.evaluateCondition(
+      frame.condition,
+      context,
+    );
+
     if (conditionResult) {
       return this.evaluateExpression(frame.then, context);
     } else if (frame.else) {
       return this.evaluateExpression(frame.else, context);
     }
-    
+
     return null;
   }
-  
+
   /**
    * Process switch-case logic
    */
   private async processSwitchCase(
     frame: SwitchCaseFrame,
-    context: Map<string, any>
+    context: Map<string, any>,
   ): Promise<any> {
     const value = await this.evaluateValue(frame.value, context);
-    
+
     for (const caseItem of frame.cases) {
       const matchValue = await this.evaluateValue(caseItem.match, context);
       if (value === matchValue) {
         return this.evaluateExpression(caseItem.expression, context);
       }
     }
-    
+
     if (frame.default) {
       return this.evaluateExpression(frame.default, context);
     }
-    
+
     return null;
   }
-  
+
   /**
    * Process for-each loop
    */
   private async processForEach(
     frame: ForEachFrame,
-    context: Map<string, any>
+    context: Map<string, any>,
   ): Promise<any[]> {
     const results: any[] = [];
     const collection = await this.evaluateValue(frame.collection, context);
-    
+
     if (!Array.isArray(collection)) {
       throw new Error('ForEach requires an array collection');
     }
-    
+
     for (const item of collection) {
       // Create new context with loop variable
       const loopContext = new Map(context);
       loopContext.set(frame.variable, item);
-      
-      const result = await this.evaluateExpression(frame.expression, loopContext);
+
+      const result = await this.evaluateExpression(
+        frame.expression,
+        loopContext,
+      );
       results.push(result);
     }
-    
+
     return results;
   }
-  
+
   /**
    * Process while loop
    */
   private async processWhile(
     frame: WhileFrame,
-    context: Map<string, any>
+    context: Map<string, any>,
   ): Promise<any[]> {
     const results: any[] = [];
     const maxIterations = frame.maxIterations || 1000;
     let iterations = 0;
-    
+
     while (await this.evaluateCondition(frame.condition, context)) {
       if (iterations >= maxIterations) {
-        throw new Error(`While loop exceeded maximum iterations: ${maxIterations}`);
+        throw new Error(
+          `While loop exceeded maximum iterations: ${maxIterations}`,
+        );
       }
-      
+
       const result = await this.evaluateExpression(frame.expression, context);
       results.push(result);
       iterations++;
     }
-    
+
     return results;
   }
-  
+
   /**
    * Process try-catch logic
    */
   private async processTryCatch(
     frame: TryCatchFrame,
-    context: Map<string, any>
+    context: Map<string, any>,
   ): Promise<any> {
     try {
       return await this.evaluateExpression(frame.try, context);
@@ -236,102 +244,117 @@ export class ControlFlowProcessor {
       }
     }
   }
-  
+
   /**
    * Process parallel execution
    */
   private async processParallel(
     frame: ParallelFrame,
-    context: Map<string, any>
+    context: Map<string, any>,
   ): Promise<any[]> {
-    const promises = frame.expressions.map(expr => 
-      this.evaluateExpression(expr, context)
+    const promises = frame.expressions.map((expr) =>
+      this.evaluateExpression(expr, context),
     );
-    
+
     if (frame.waitAll) {
       return Promise.all(promises);
     } else {
-      return Promise.race(promises).then(result => [result]);
+      return Promise.race(promises).then((result) => [result]);
     }
   }
-  
+
   /**
    * Evaluate a condition
    */
   private async evaluateCondition(
     condition: Condition,
-    context: Map<string, any>
+    context: Map<string, any>,
   ): Promise<boolean> {
     const left = await this.evaluateValue(condition.left, context);
-    const right = condition.right !== undefined 
-      ? await this.evaluateValue(condition.right, context)
-      : undefined;
-    
+    const right =
+      condition.right !== undefined
+        ? await this.evaluateValue(condition.right, context)
+        : undefined;
+
     switch (condition.operator) {
       case LogicalOperator.AND:
-        return condition.nested 
-          ? (await Promise.all(condition.nested.map(c => this.evaluateCondition(c, context)))).every(Boolean)
+        return condition.nested
+          ? (
+              await Promise.all(
+                condition.nested.map((c) => this.evaluateCondition(c, context)),
+              )
+            ).every(Boolean)
           : Boolean(left && right);
-      
+
       case LogicalOperator.OR:
         return condition.nested
-          ? (await Promise.all(condition.nested.map(c => this.evaluateCondition(c, context)))).some(Boolean)
+          ? (
+              await Promise.all(
+                condition.nested.map((c) => this.evaluateCondition(c, context)),
+              )
+            ).some(Boolean)
           : Boolean(left || right);
-      
+
       case LogicalOperator.NOT:
         return !left;
-      
+
       case LogicalOperator.EQUALS:
         return left === right;
-      
+
       case LogicalOperator.NOT_EQUALS:
         return left !== right;
-      
+
       case LogicalOperator.GREATER_THAN:
         return left > right;
-      
+
       case LogicalOperator.LESS_THAN:
         return left < right;
-      
+
       case LogicalOperator.CONTAINS:
         return String(left).includes(String(right));
-      
+
       case LogicalOperator.MATCHES:
         return new RegExp(String(right)).test(String(left));
-      
+
       default:
         throw new Error(`Unknown operator: ${condition.operator}`);
     }
   }
-  
+
   /**
    * Evaluate a value (resolve references, etc.)
    */
-  private async evaluateValue(value: any, context: Map<string, any>): Promise<any> {
+  private async evaluateValue(
+    value: any,
+    context: Map<string, any>,
+  ): Promise<any> {
     // Handle context references
     if (typeof value === 'string' && value.startsWith('$')) {
       const key = value.substring(1);
       return context.get(key);
     }
-    
+
     // Handle nested expressions
     if (typeof value === 'object' && value !== null && 'type' in value) {
       return this.evaluateExpression(value, context);
     }
-    
+
     return value;
   }
-  
+
   /**
    * Evaluate an expression
    */
   private async evaluateExpression(
     expression: CortexExpression,
-    context: Map<string, any>
+    context: Map<string, any>,
   ): Promise<any> {
     // This would integrate with the main Cortex processor
     // For now, return a placeholder
-    loggingService.debug('Evaluating expression', { expression, contextSize: context.size });
+    loggingService.debug('Evaluating expression', {
+      expression,
+      contextSize: context.size,
+    });
     return expression;
   }
 }
@@ -347,91 +370,91 @@ export class ControlFlowBuilder {
   public static ifThenElse(
     condition: Condition,
     thenExpr: CortexExpression,
-    elseExpr?: CortexExpression
+    elseExpr?: CortexExpression,
   ): IfThenElseFrame {
     return {
       type: 'control_if',
       condition,
       then: thenExpr,
-      else: elseExpr
+      else: elseExpr,
     };
   }
-  
+
   /**
    * Build a switch-case expression
    */
   public static switchCase(
     value: any,
     cases: Array<{ match: any; expression: CortexExpression }>,
-    defaultExpr?: CortexExpression
+    defaultExpr?: CortexExpression,
   ): SwitchCaseFrame {
     return {
       type: 'control_switch',
       value,
       cases,
-      default: defaultExpr
+      default: defaultExpr,
     };
   }
-  
+
   /**
    * Build a for-each loop
    */
   public static forEach(
     collection: any[],
     variable: string,
-    expression: CortexExpression
+    expression: CortexExpression,
   ): ForEachFrame {
     return {
       type: 'control_foreach',
       collection,
       variable,
-      expression
+      expression,
     };
   }
-  
+
   /**
    * Build a while loop
    */
   public static while(
     condition: Condition,
     expression: CortexExpression,
-    maxIterations?: number
+    maxIterations?: number,
   ): WhileFrame {
     return {
       type: 'control_while',
       condition,
       expression,
-      maxIterations
+      maxIterations,
     };
   }
-  
+
   /**
    * Build a try-catch block
    */
   public static tryCatch(
     tryExpr: CortexExpression,
     catchExpr?: CortexExpression,
-    finallyExpr?: CortexExpression
+    finallyExpr?: CortexExpression,
   ): TryCatchFrame {
     return {
       type: 'control_try',
       try: tryExpr,
       catch: catchExpr,
-      finally: finallyExpr
+      finally: finallyExpr,
     };
   }
-  
+
   /**
    * Build a parallel execution block
    */
   public static parallel(
     expressions: CortexExpression[],
-    waitAll: boolean = true
+    waitAll: boolean = true,
   ): ParallelFrame {
     return {
       type: 'control_parallel',
       expressions,
-      waitAll
+      waitAll,
     };
   }
 }

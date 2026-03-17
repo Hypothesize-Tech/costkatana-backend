@@ -1762,18 +1762,14 @@ Return a JSON object with this structure:
       {
         name: 'Pull request ready',
         status: ['open', 'merged'],
-        emoji:
-          statusStr === 'open' || statusStr === 'merged'
-            ? '🎉'
-            : '⏳',
+        emoji: statusStr === 'open' || statusStr === 'merged' ? '🎉' : '⏳',
       },
     ];
 
     statusMessage += `\n\n**Progress Steps:**\n`;
     steps.forEach((step, index) => {
       const isCompleted =
-        ['open', 'merged'].includes(statusStr) &&
-        index < steps.length - 1;
+        ['open', 'merged'].includes(statusStr) && index < steps.length - 1;
       const isCurrent = step.status.includes(statusStr);
       const prefix = isCompleted ? '✅' : isCurrent ? step.emoji : '⏳';
       statusMessage += `${prefix} ${step.name}\n`;

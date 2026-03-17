@@ -22,7 +22,10 @@ describe('NaiveRAGPattern', () => {
         conversationId: 'test-conv',
       };
 
-      const result = await naivePattern.execute('What is cost optimization?', context);
+      const result = await naivePattern.execute(
+        'What is cost optimization?',
+        context,
+      );
 
       expect(result.success).toBe(true);
       expect(result.answer).toBeDefined();
@@ -36,7 +39,10 @@ describe('NaiveRAGPattern', () => {
         userId: 'test-user',
       };
 
-      const result = await naivePattern.execute('xyzabc nonexistent query', context);
+      const result = await naivePattern.execute(
+        'xyzabc nonexistent query',
+        context,
+      );
 
       expect(result.success).toBeDefined();
       expect(result.answer).toBeDefined();
@@ -47,7 +53,10 @@ describe('NaiveRAGPattern', () => {
         userId: 'test-user',
       };
 
-      const result = await naivePattern.execute('How to optimize cloud costs?', context);
+      const result = await naivePattern.execute(
+        'How to optimize cloud costs?',
+        context,
+      );
 
       expect(result.metadata).toHaveProperty('performance');
       expect(result.metadata.performance).toHaveProperty('retrievalDuration');
@@ -65,4 +74,3 @@ describe('NaiveRAGPattern', () => {
     });
   });
 });
-

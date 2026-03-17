@@ -5,13 +5,13 @@
 
 import { BaseRAGModule } from './base.module';
 import {
-    RAGContext,
+  RAGContext,
   RAGModuleInput,
   RAGModuleOutput,
   RewriteConfig,
 } from '../types/rag.types';
 import { ChatBedrockConverse } from '@langchain/aws';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 
 export class RewriteModule extends BaseRAGModule {
   protected config: RewriteConfig;
@@ -22,11 +22,11 @@ export class RewriteModule extends BaseRAGModule {
       enabled: true,
       methods: ['expansion', 'reformulation'],
       expansionTerms: 3,
-    }
+    },
   ) {
     super('RewriteModule', 'rewrite', config);
     this.config = config;
-    
+
     this.llm = new ChatBedrockConverse({
       model: 'amazon.nova-micro-v1:0', // Use cheap model for query rewriting
       region: process.env.AWS_REGION ?? 'us-east-1',
@@ -36,7 +36,7 @@ export class RewriteModule extends BaseRAGModule {
   }
 
   protected async executeInternal(
-    input: RAGModuleInput
+    input: RAGModuleInput,
   ): Promise<RAGModuleOutput> {
     const { query, context, config } = input;
     const effectiveConfig = { ...this.config, ...config };
@@ -48,7 +48,7 @@ export class RewriteModule extends BaseRAGModule {
       // Apply each rewriting method
       for (const method of methods) {
         let methodResults: string[] = [];
-        
+
         switch (method) {
           case 'expansion': {
             const expanded = await this.expandQuery(query, effectiveConfig);
@@ -74,7 +74,7 @@ export class RewriteModule extends BaseRAGModule {
             break;
           }
         }
-        
+
         rewrittenQueries.push(...methodResults);
       }
 
@@ -95,7 +95,7 @@ export class RewriteModule extends BaseRAGModule {
             methods,
             originalQuery: query,
             rewrittenQueries: uniqueQueries,
-          }
+          },
         ),
         query: uniqueQueries[0], // Return best rewritten query
       };
@@ -104,13 +104,10 @@ export class RewriteModule extends BaseRAGModule {
         component: 'RewriteModule',
         error: error instanceof Error ? error.message : String(error),
       });
-      
+
       // Return original query on failure
       return {
-        ...this.createSuccessOutput(
-          { queries: [query] },
-          { fallback: true }
-        ),
+        ...this.createSuccessOutput({ queries: [query] }, { fallback: true }),
         query,
       };
     }
@@ -121,7 +118,7 @@ export class RewriteModule extends BaseRAGModule {
    */
   private async expandQuery(
     query: string,
-    config: RewriteConfig
+    config: RewriteConfig,
   ): Promise<string[]> {
     const expansionTerms = config.expansionTerms ?? 3;
 
@@ -132,14 +129,17 @@ Query: "${query}"
 
 Alternative queries:`;
 
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      const content = typeof response.content === 'string' ? response.content : '';
-      
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      const content =
+        typeof response.content === 'string' ? response.content : '';
+
       // Parse alternatives
       const alternatives = content
         .split('\n')
-        .map(line => line.replace(/^[-*\d.)\s]+/, '').trim())
-        .filter(line => line.length > 0 && line !== query)
+        .map((line) => line.replace(/^[-*\d.)\s]+/, '').trim())
+        .filter((line) => line.length > 0 && line !== query)
         .slice(0, expansionTerms);
 
       return alternatives;
@@ -157,18 +157,26 @@ Alternative queries:`;
    */
   private async reformulateQuery(
     query: string,
-    context?: RAGContext
+    context?: RAGContext,
   ): Promise<string> {
     try {
       let prompt = `Reformulate this search query to be more specific and effective for document retrieval. Preserve the core intent but make it clearer.
 
 Original query: "${query}"`;
 
-      if (context?.recentMessages && Array.isArray(context.recentMessages) && context.recentMessages.length > 0) {
+      if (
+        context?.recentMessages &&
+        Array.isArray(context.recentMessages) &&
+        context.recentMessages.length > 0
+      ) {
         const recentContext = context.recentMessages
           .slice(-2)
-          .map((m) => (typeof m === 'object' && m !== null && 'content' in m ? String(m.content) : ''))
-          .filter(c => c.length > 0)
+          .map((m) =>
+            typeof m === 'object' && m !== null && 'content' in m
+              ? String(m.content)
+              : '',
+          )
+          .filter((c) => c.length > 0)
           .join(' ');
         if (recentContext) {
           prompt += `\n\nConversation context: ${recentContext}`;
@@ -177,10 +185,11 @@ Original query: "${query}"`;
 
       prompt += '\n\nReformulated query:';
 
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      const reformulated = typeof response.content === 'string' 
-        ? response.content.trim() 
-        : query;
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      const reformulated =
+        typeof response.content === 'string' ? response.content.trim() : query;
 
       return reformulated || query;
     } catch (error) {
@@ -203,10 +212,11 @@ Question: "${query}"
 
 Hypothetical answer:`;
 
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      const hypothesis = typeof response.content === 'string' 
-        ? response.content.trim() 
-        : query;
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      const hypothesis =
+        typeof response.content === 'string' ? response.content.trim() : query;
 
       loggingService.info('HyDE hypothesis generated', {
         component: 'RewriteModule',
@@ -235,13 +245,16 @@ Complex query: "${query}"
 
 Sub-queries:`;
 
-      const response = await this.llm.invoke([{ role: 'user', content: prompt }]);
-      const content = typeof response.content === 'string' ? response.content : '';
-      
+      const response = await this.llm.invoke([
+        { role: 'user', content: prompt },
+      ]);
+      const content =
+        typeof response.content === 'string' ? response.content : '';
+
       const subQueries = content
         .split('\n')
-        .map(line => line.replace(/^[-*\d.)\s]+/, '').trim())
-        .filter(line => line.length > 0 && line !== query)
+        .map((line) => line.replace(/^[-*\d.)\s]+/, '').trim())
+        .filter((line) => line.length > 0 && line !== query)
         .slice(0, 3);
 
       return subQueries.length > 0 ? subQueries : [query];
@@ -282,4 +295,3 @@ Sub-queries:`;
     return true;
   }
 }
-

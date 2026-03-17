@@ -6,7 +6,7 @@ import {
   AIModelPricingDocument,
 } from '../../../schemas/ai/ai-model-pricing.schema';
 import { GoogleSearchService } from '../../../modules/utils/services/google-search.service';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { BusinessEventLoggingService } from '../../../common/services/business-event-logging.service';
 import {
   RawPricingData,
@@ -537,28 +537,33 @@ Return ONLY the JSON array:`;
         .map((result) => `${result.title}\n${result.snippet}`)
         .join('\n\n');
 
-      // Embed model name in the text for extraction
-      const fullText = `Target Model: ${modelName}\n\n${combinedText}`;
-
-      // Extract pricing using Bedrock
-      const pricingData = await BedrockService.extractPricingFromText(
+      // Extract pricing using Bedrock (returns single RawPricingData when successful)
+      const pricingResult = await BedrockService.extractPricingFromText(
         config.provider,
-        fullText,
+        modelName,
+        combinedText,
       );
 
-      // Find the pricing data that matches our model name
-      const matchingPricing = pricingData.find(
-        (pricing) =>
-          pricing.modelName.toLowerCase().includes(modelName.toLowerCase()) ||
-          pricing.modelId.toLowerCase().includes(modelName.toLowerCase()) ||
-          modelName.toLowerCase().includes(pricing.modelName.toLowerCase()) ||
-          modelName.toLowerCase().includes(pricing.modelId.toLowerCase()),
-      );
-
-      if (!matchingPricing) {
+      if (
+        !pricingResult.success ||
+        !pricingResult.data ||
+        Array.isArray(pricingResult.data)
+      ) {
         this.logger.warn(
           `No matching pricing found for ${config.provider} ${modelName} in extracted data`,
         );
+        return null;
+      }
+
+      const matchingPricing = pricingResult.data as RawPricingData;
+      if (
+        !matchingPricing.modelName
+          ?.toLowerCase()
+          .includes(modelName.toLowerCase()) &&
+        !matchingPricing.modelId
+          ?.toLowerCase()
+          .includes(modelName.toLowerCase())
+      ) {
         return null;
       }
 

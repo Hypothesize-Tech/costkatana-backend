@@ -5,7 +5,7 @@
 
 import { BaseIntegrationMCP } from './base-integration.mcp';
 import { createToolSchema, createParameter } from '../registry/tool-metadata';
-import { awsChatHandlerService } from '../../services/aws/awsChatHandler.service';
+import { getAwsChatHandlerService } from '../../modules/aws/services/aws-chat-handler.service';
 
 export class AWSMCP extends BaseIntegrationMCP {
   constructor() {
@@ -14,7 +14,7 @@ export class AWSMCP extends BaseIntegrationMCP {
 
   registerTools(): void {
     // ===== COST OPERATIONS =====
-    
+
     // Get costs
     this.registerTool(
       createToolSchema(
@@ -23,15 +23,35 @@ export class AWSMCP extends BaseIntegrationMCP {
         'Get AWS cost and usage data',
         'GET',
         [
-          createParameter('timeframe', 'string', 'Time period (today, week, month, year, custom)', { default: 'month' }),
-          createParameter('startDate', 'string', 'Start date for custom timeframe (YYYY-MM-DD)', { required: false }),
-          createParameter('endDate', 'string', 'End date for custom timeframe (YYYY-MM-DD)', { required: false }),
-          createParameter('granularity', 'string', 'Data granularity (DAILY, MONTHLY)', { default: 'MONTHLY', required: false }),
+          createParameter(
+            'timeframe',
+            'string',
+            'Time period (today, week, month, year, custom)',
+            { default: 'month' },
+          ),
+          createParameter(
+            'startDate',
+            'string',
+            'Start date for custom timeframe (YYYY-MM-DD)',
+            { required: false },
+          ),
+          createParameter(
+            'endDate',
+            'string',
+            'End date for custom timeframe (YYYY-MM-DD)',
+            { required: false },
+          ),
+          createParameter(
+            'granularity',
+            'string',
+            'Data granularity (DAILY, MONTHLY)',
+            { default: 'MONTHLY', required: false },
+          ),
         ],
-        { requiredScopes: ['costs:read'] }
+        { requiredScopes: ['costs:read'] },
       ),
       async (params, context) => {
-        const result = await awsChatHandlerService.processCommand({
+        const result = await getAwsChatHandlerService().processCommand({
           userId: context.userId,
           action: 'costs',
           params: {
@@ -47,7 +67,7 @@ export class AWSMCP extends BaseIntegrationMCP {
         }
 
         return result.data;
-      }
+      },
     );
 
     // Cost breakdown
@@ -58,15 +78,33 @@ export class AWSMCP extends BaseIntegrationMCP {
         'Get AWS cost breakdown by service',
         'GET',
         [
-          createParameter('timeframe', 'string', 'Time period (today, week, month, year, custom)', { default: 'month' }),
-          createParameter('startDate', 'string', 'Start date for custom timeframe (YYYY-MM-DD)', { required: false }),
-          createParameter('endDate', 'string', 'End date for custom timeframe (YYYY-MM-DD)', { required: false }),
-          createParameter('groupBy', 'string', 'Group by SERVICE or REGION', { default: 'SERVICE', required: false }),
+          createParameter(
+            'timeframe',
+            'string',
+            'Time period (today, week, month, year, custom)',
+            { default: 'month' },
+          ),
+          createParameter(
+            'startDate',
+            'string',
+            'Start date for custom timeframe (YYYY-MM-DD)',
+            { required: false },
+          ),
+          createParameter(
+            'endDate',
+            'string',
+            'End date for custom timeframe (YYYY-MM-DD)',
+            { required: false },
+          ),
+          createParameter('groupBy', 'string', 'Group by SERVICE or REGION', {
+            default: 'SERVICE',
+            required: false,
+          }),
         ],
-        { requiredScopes: ['costs:read'] }
+        { requiredScopes: ['costs:read'] },
       ),
       async (params, context) => {
-        const result = await awsChatHandlerService.processCommand({
+        const result = await getAwsChatHandlerService().processCommand({
           userId: context.userId,
           action: 'cost_breakdown',
           params: {
@@ -82,7 +120,7 @@ export class AWSMCP extends BaseIntegrationMCP {
         }
 
         return result.data;
-      }
+      },
     );
 
     // Cost forecast
@@ -93,12 +131,14 @@ export class AWSMCP extends BaseIntegrationMCP {
         'Get AWS cost forecast',
         'GET',
         [
-          createParameter('months', 'number', 'Number of months to forecast', { default: 3 }),
+          createParameter('months', 'number', 'Number of months to forecast', {
+            default: 3,
+          }),
         ],
-        { requiredScopes: ['costs:read'] }
+        { requiredScopes: ['costs:read'] },
       ),
       async (params, context) => {
-        const result = await awsChatHandlerService.processCommand({
+        const result = await getAwsChatHandlerService().processCommand({
           userId: context.userId,
           action: 'cost_forecast',
           params: {
@@ -111,7 +151,7 @@ export class AWSMCP extends BaseIntegrationMCP {
         }
 
         return result.data;
-      }
+      },
     );
 
     // Cost anomalies
@@ -122,12 +162,14 @@ export class AWSMCP extends BaseIntegrationMCP {
         'Detect AWS cost anomalies',
         'GET',
         [
-          createParameter('days', 'number', 'Number of days to analyze', { default: 30 }),
+          createParameter('days', 'number', 'Number of days to analyze', {
+            default: 30,
+          }),
         ],
-        { requiredScopes: ['costs:read'] }
+        { requiredScopes: ['costs:read'] },
       ),
       async (params, context) => {
-        const result = await awsChatHandlerService.processCommand({
+        const result = await getAwsChatHandlerService().processCommand({
           userId: context.userId,
           action: 'cost_anomalies',
           params: {
@@ -140,11 +182,11 @@ export class AWSMCP extends BaseIntegrationMCP {
         }
 
         return result.data;
-      }
+      },
     );
 
     // ===== EC2 OPERATIONS =====
-    
+
     // List EC2 instances
     this.registerTool(
       createToolSchema(
@@ -153,13 +195,20 @@ export class AWSMCP extends BaseIntegrationMCP {
         'List EC2 instances',
         'GET',
         [
-          createParameter('region', 'string', 'AWS region', { required: false }),
-          createParameter('status', 'string', 'Instance status filter (running, stopped, etc)', { required: false }),
+          createParameter('region', 'string', 'AWS region', {
+            required: false,
+          }),
+          createParameter(
+            'status',
+            'string',
+            'Instance status filter (running, stopped, etc)',
+            { required: false },
+          ),
         ],
-        { requiredScopes: ['ec2:read'] }
+        { requiredScopes: ['ec2:read'] },
       ),
       async (params, context) => {
-        const result = await awsChatHandlerService.processCommand({
+        const result = await getAwsChatHandlerService().processCommand({
           userId: context.userId,
           action: 'list_ec2',
           params: {
@@ -173,7 +222,7 @@ export class AWSMCP extends BaseIntegrationMCP {
         }
 
         return result.data;
-      }
+      },
     );
 
     // Stop EC2 instance
@@ -184,13 +233,17 @@ export class AWSMCP extends BaseIntegrationMCP {
         'Stop EC2 instances',
         'POST',
         [
-          createParameter('instanceIds', 'array', 'EC2 instance IDs to stop', { required: true }),
-          createParameter('region', 'string', 'AWS region', { required: false }),
+          createParameter('instanceIds', 'array', 'EC2 instance IDs to stop', {
+            required: true,
+          }),
+          createParameter('region', 'string', 'AWS region', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['ec2:write'], dangerous: true }
+        { requiredScopes: ['ec2:write'], dangerous: true },
       ),
       async (params, context) => {
-        const result = await awsChatHandlerService.processCommand({
+        const result = await getAwsChatHandlerService().processCommand({
           userId: context.userId,
           action: 'stop_ec2',
           params: {
@@ -204,7 +257,7 @@ export class AWSMCP extends BaseIntegrationMCP {
         }
 
         return result.data;
-      }
+      },
     );
 
     // Start EC2 instance
@@ -215,13 +268,17 @@ export class AWSMCP extends BaseIntegrationMCP {
         'Start EC2 instances',
         'POST',
         [
-          createParameter('instanceIds', 'array', 'EC2 instance IDs to start', { required: true }),
-          createParameter('region', 'string', 'AWS region', { required: false }),
+          createParameter('instanceIds', 'array', 'EC2 instance IDs to start', {
+            required: true,
+          }),
+          createParameter('region', 'string', 'AWS region', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['ec2:write'] }
+        { requiredScopes: ['ec2:write'] },
       ),
       async (params, context) => {
-        const result = await awsChatHandlerService.processCommand({
+        const result = await getAwsChatHandlerService().processCommand({
           userId: context.userId,
           action: 'start_ec2',
           params: {
@@ -235,7 +292,7 @@ export class AWSMCP extends BaseIntegrationMCP {
         }
 
         return result.data;
-      }
+      },
     );
 
     // Find idle instances
@@ -246,13 +303,20 @@ export class AWSMCP extends BaseIntegrationMCP {
         'Find idle or underutilized EC2 instances',
         'GET',
         [
-          createParameter('region', 'string', 'AWS region', { required: false }),
-          createParameter('threshold', 'number', 'CPU utilization threshold percentage', { default: 5, required: false }),
+          createParameter('region', 'string', 'AWS region', {
+            required: false,
+          }),
+          createParameter(
+            'threshold',
+            'number',
+            'CPU utilization threshold percentage',
+            { default: 5, required: false },
+          ),
         ],
-        { requiredScopes: ['ec2:read'] }
+        { requiredScopes: ['ec2:read'] },
       ),
       async (params, context) => {
-        const result = await awsChatHandlerService.processCommand({
+        const result = await getAwsChatHandlerService().processCommand({
           userId: context.userId,
           action: 'idle_instances',
           params: {
@@ -266,23 +330,18 @@ export class AWSMCP extends BaseIntegrationMCP {
         }
 
         return result.data;
-      }
+      },
     );
 
     // ===== S3 OPERATIONS =====
-    
+
     // List S3 buckets
     this.registerTool(
-      createToolSchema(
-        'aws_list_s3',
-        'aws',
-        'List S3 buckets',
-        'GET',
-        [],
-        { requiredScopes: ['s3:read'] }
-      ),
+      createToolSchema('aws_list_s3', 'aws', 'List S3 buckets', 'GET', [], {
+        requiredScopes: ['s3:read'],
+      }),
       async (_params, context) => {
-        const result = await awsChatHandlerService.processCommand({
+        const result = await getAwsChatHandlerService().processCommand({
           userId: context.userId,
           action: 'list_s3',
           params: {},
@@ -293,11 +352,11 @@ export class AWSMCP extends BaseIntegrationMCP {
         }
 
         return result.data;
-      }
+      },
     );
 
     // ===== RDS OPERATIONS =====
-    
+
     // List RDS instances
     this.registerTool(
       createToolSchema(
@@ -306,12 +365,14 @@ export class AWSMCP extends BaseIntegrationMCP {
         'List RDS database instances',
         'GET',
         [
-          createParameter('region', 'string', 'AWS region', { required: false }),
+          createParameter('region', 'string', 'AWS region', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['rds:read'] }
+        { requiredScopes: ['rds:read'] },
       ),
       async (params, context) => {
-        const result = await awsChatHandlerService.processCommand({
+        const result = await getAwsChatHandlerService().processCommand({
           userId: context.userId,
           action: 'list_rds',
           params: {
@@ -324,11 +385,11 @@ export class AWSMCP extends BaseIntegrationMCP {
         }
 
         return result.data;
-      }
+      },
     );
 
     // ===== LAMBDA OPERATIONS =====
-    
+
     // List Lambda functions
     this.registerTool(
       createToolSchema(
@@ -337,12 +398,14 @@ export class AWSMCP extends BaseIntegrationMCP {
         'List Lambda functions',
         'GET',
         [
-          createParameter('region', 'string', 'AWS region', { required: false }),
+          createParameter('region', 'string', 'AWS region', {
+            required: false,
+          }),
         ],
-        { requiredScopes: ['lambda:read'] }
+        { requiredScopes: ['lambda:read'] },
       ),
       async (params, context) => {
-        const result = await awsChatHandlerService.processCommand({
+        const result = await getAwsChatHandlerService().processCommand({
           userId: context.userId,
           action: 'list_lambda',
           params: {
@@ -355,11 +418,11 @@ export class AWSMCP extends BaseIntegrationMCP {
         }
 
         return result.data;
-      }
+      },
     );
 
     // ===== OPTIMIZATION OPERATIONS =====
-    
+
     // Get optimization recommendations
     this.registerTool(
       createToolSchema(
@@ -368,12 +431,17 @@ export class AWSMCP extends BaseIntegrationMCP {
         'Get AWS optimization recommendations',
         'GET',
         [
-          createParameter('category', 'string', 'Optimization category (cost, performance, security, all)', { default: 'all', required: false }),
+          createParameter(
+            'category',
+            'string',
+            'Optimization category (cost, performance, security, all)',
+            { default: 'all', required: false },
+          ),
         ],
-        { requiredScopes: ['trustedadvisor:read'] }
+        { requiredScopes: ['trustedadvisor:read'] },
       ),
       async (params, context) => {
-        const result = await awsChatHandlerService.processCommand({
+        const result = await getAwsChatHandlerService().processCommand({
           userId: context.userId,
           action: 'optimize',
           params: {
@@ -386,11 +454,11 @@ export class AWSMCP extends BaseIntegrationMCP {
         }
 
         return result.data;
-      }
+      },
     );
 
     // ===== CONNECTION STATUS =====
-    
+
     // Get connection status
     this.registerTool(
       createToolSchema(
@@ -399,10 +467,10 @@ export class AWSMCP extends BaseIntegrationMCP {
         'Get AWS connection status and account info',
         'GET',
         [],
-        { requiredScopes: [] }
+        { requiredScopes: [] },
       ),
       async (_params, context) => {
-        const result = await awsChatHandlerService.processCommand({
+        const result = await getAwsChatHandlerService().processCommand({
           userId: context.userId,
           action: 'status',
           params: {},
@@ -413,7 +481,7 @@ export class AWSMCP extends BaseIntegrationMCP {
         }
 
         return result.data;
-      }
+      },
     );
   }
 }

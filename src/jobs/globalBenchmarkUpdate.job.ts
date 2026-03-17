@@ -1,5 +1,5 @@
 import { GlobalBenchmarksService } from '../services/globalBenchmarks.service';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 
 /**
  * Global Benchmark Update Job
@@ -20,7 +20,7 @@ export class GlobalBenchmarkUpdateJob {
     }
 
     loggingService.info('🌍 Starting global benchmark update job', {
-      intervalHours
+      intervalHours,
     });
 
     // Run immediately on start (with delay to allow system to stabilize)
@@ -29,7 +29,7 @@ export class GlobalBenchmarkUpdateJob {
     // Schedule periodic runs
     this.intervalId = setInterval(
       () => this.run(),
-      intervalHours * 60 * 60 * 1000
+      intervalHours * 60 * 60 * 1000,
     );
   }
 
@@ -49,7 +49,9 @@ export class GlobalBenchmarkUpdateJob {
    */
   static async run(): Promise<void> {
     if (this.isRunning) {
-      loggingService.warn('Global benchmark update job already running, skipping this cycle');
+      loggingService.warn(
+        'Global benchmark update job already running, skipping this cycle',
+      );
       return;
     }
 
@@ -63,11 +65,11 @@ export class GlobalBenchmarkUpdateJob {
 
       const duration = Date.now() - startTime;
       loggingService.info('✅ Global benchmark update job completed', {
-        durationMs: duration
+        durationMs: duration,
       });
     } catch (error) {
       loggingService.error('❌ Global benchmark update job failed', {
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
     } finally {
       this.isRunning = false;
@@ -83,7 +85,9 @@ export class GlobalBenchmarkUpdateJob {
 }
 
 // Auto-start in production (can be controlled via env var)
-if (process.env.NODE_ENV === 'production' && process.env.ENABLE_GLOBAL_BENCHMARKS !== 'false') {
+if (
+  process.env.NODE_ENV === 'production' &&
+  process.env.ENABLE_GLOBAL_BENCHMARKS !== 'false'
+) {
   GlobalBenchmarkUpdateJob.start();
 }
-

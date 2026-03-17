@@ -7,6 +7,17 @@ import {
   IAgentIdentity,
 } from '../schemas/agent-identity.schema';
 
+let agentIdentityServiceInstance: AgentIdentityService | null = null;
+
+export function getAgentIdentityService(): AgentIdentityService {
+  if (!agentIdentityServiceInstance) {
+    throw new Error(
+      'AgentIdentityService not initialized. Ensure GovernanceModule is imported.',
+    );
+  }
+  return agentIdentityServiceInstance;
+}
+
 /**
  * Agent Token Payload
  */
@@ -38,7 +49,9 @@ export class AgentIdentityService {
   constructor(
     @InjectModel(AgentIdentity.name)
     private agentIdentityModel: Model<IAgentIdentity>,
-  ) {}
+  ) {
+    agentIdentityServiceInstance = this;
+  }
 
   /**
    * Create new agent identity with secure token generation

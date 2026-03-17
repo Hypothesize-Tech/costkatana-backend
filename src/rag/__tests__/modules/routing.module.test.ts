@@ -23,7 +23,10 @@ describe('RoutingModule', () => {
     });
 
     it('should handle semantic routing strategy', async () => {
-      const semanticModule = new RoutingModule({ enabled: true, strategy: 'semantic' });
+      const semanticModule = new RoutingModule({
+        enabled: true,
+        strategy: 'semantic',
+      });
       const input: RAGModuleInput = {
         query: 'How does machine learning work?',
         context: { userId: 'test-user' },
@@ -36,7 +39,10 @@ describe('RoutingModule', () => {
     });
 
     it('should handle keyword routing strategy', async () => {
-      const keywordModule = new RoutingModule({ enabled: true, strategy: 'keyword' });
+      const keywordModule = new RoutingModule({
+        enabled: true,
+        strategy: 'keyword',
+      });
       const input: RAGModuleInput = {
         query: 'cost optimization best practices',
         context: { userId: 'test-user' },
@@ -77,4 +83,3 @@ describe('RoutingModule', () => {
     });
   });
 });
-

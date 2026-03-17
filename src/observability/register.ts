@@ -8,29 +8,35 @@
 // Polyfill for Node.js v18 compatibility with undici
 if (typeof globalThis.File === 'undefined') {
   globalThis.File = class File {
-    constructor(public readonly name: string, public readonly lastModified: number = Date.now()) {}
+    constructor(
+      public readonly name: string,
+      public readonly lastModified: number = Date.now(),
+    ) {}
   } as any;
 }
 
 import { startTelemetry } from './otel';
 import { initializeSentry, isSentryEnabled } from '../config/sentry';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from '../common/services/logging.service';
 
 // Disable exporters in development mode to prevent connection errors
 if (process.env.NODE_ENV !== 'production' && !process.env.OTLP_URL) {
   process.env.OTEL_TRACES_EXPORTER = 'none';
   process.env.OTEL_METRICS_EXPORTER = 'none';
-  
-  loggingService.info('🔄 OpenTelemetry: Development mode - exporters disabled', {
-    component: 'OpenTelemetryRegistration',
-    operation: 'register',
-    type: 'telemetry_registration',
-    step: 'development_mode_detected',
-    environment: process.env.NODE_ENV,
-    hasOTLPUrl: !!process.env.OTLP_URL,
-    tracesExporter: process.env.OTEL_TRACES_EXPORTER,
-    metricsExporter: process.env.OTEL_METRICS_EXPORTER
-  });
+
+  loggingService.info(
+    '🔄 OpenTelemetry: Development mode - exporters disabled',
+    {
+      component: 'OpenTelemetryRegistration',
+      operation: 'register',
+      type: 'telemetry_registration',
+      step: 'development_mode_detected',
+      environment: process.env.NODE_ENV,
+      hasOTLPUrl: !!process.env.OTLP_URL,
+      tracesExporter: process.env.OTEL_TRACES_EXPORTER,
+      metricsExporter: process.env.OTEL_METRICS_EXPORTER,
+    },
+  );
 }
 
 // Start telemetry and Sentry as early as possible
@@ -41,7 +47,7 @@ if (process.env.NODE_ENV !== 'production' && !process.env.OTLP_URL) {
     component: 'ObservabilityRegistration',
     operation: 'register',
     type: 'observability_registration',
-    step: 'started'
+    step: 'started',
   });
 
   try {
@@ -50,7 +56,7 @@ if (process.env.NODE_ENV !== 'production' && !process.env.OTLP_URL) {
       component: 'ObservabilityRegistration',
       operation: 'register',
       type: 'observability_registration',
-      step: 'sentry_initialization'
+      step: 'sentry_initialization',
     });
 
     initializeSentry();
@@ -60,14 +66,14 @@ if (process.env.NODE_ENV !== 'production' && !process.env.OTLP_URL) {
         component: 'ObservabilityRegistration',
         operation: 'register',
         type: 'observability_registration',
-        step: 'sentry_completed'
+        step: 'sentry_completed',
       });
     } else {
       loggingService.info('ℹ️ Sentry not enabled (no DSN provided)', {
         component: 'ObservabilityRegistration',
         operation: 'register',
         type: 'observability_registration',
-        step: 'sentry_disabled'
+        step: 'sentry_disabled',
       });
     }
 
@@ -76,7 +82,7 @@ if (process.env.NODE_ENV !== 'production' && !process.env.OTLP_URL) {
       component: 'ObservabilityRegistration',
       operation: 'register',
       type: 'observability_registration',
-      step: 'otel_initialization'
+      step: 'otel_initialization',
     });
 
     await startTelemetry();
@@ -86,17 +92,19 @@ if (process.env.NODE_ENV !== 'production' && !process.env.OTLP_URL) {
       operation: 'register',
       type: 'observability_registration',
       step: 'otel_completed',
-      totalTime: `${Date.now() - startTime}ms`
+      totalTime: `${Date.now() - startTime}ms`,
     });
 
-    loggingService.info('=== OPENTELEMETRY & SENTRY REGISTRATION COMPLETED ===', {
-      component: 'ObservabilityRegistration',
-      operation: 'register',
-      type: 'observability_registration',
-      step: 'completed',
-      totalTime: `${Date.now() - startTime}ms`
-    });
-
+    loggingService.info(
+      '=== OPENTELEMETRY & SENTRY REGISTRATION COMPLETED ===',
+      {
+        component: 'ObservabilityRegistration',
+        operation: 'register',
+        type: 'observability_registration',
+        step: 'completed',
+        totalTime: `${Date.now() - startTime}ms`,
+      },
+    );
   } catch (error) {
     loggingService.error('Observability initialization failed', {
       component: 'ObservabilityRegistration',
@@ -105,7 +113,7 @@ if (process.env.NODE_ENV !== 'production' && !process.env.OTLP_URL) {
       step: 'error',
       error: error instanceof Error ? error.message : 'Unknown error',
       stack: error instanceof Error ? error.stack : undefined,
-      totalTime: `${Date.now() - startTime}ms`
+      totalTime: `${Date.now() - startTime}ms`,
     });
   }
 })();

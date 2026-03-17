@@ -9,7 +9,7 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 
 /**
  * Search Strategy Types
@@ -134,23 +134,20 @@ Provide your analysis in JSON format.`;
 
       const fullPrompt = `${systemPrompt}\n\n---\n\n${userPrompt}`;
       // Call Bedrock AI model
-      const response = await this.bedrockService.invokeModel(
+      const response = await BedrockService.invokeModel(
         fullPrompt,
         IntelligentSearchStrategyService.FAST_MODEL_ID,
-        { maxTokens: 1000, temperature: 0.3 },
+        { useSystemPrompt: false },
       );
 
-      let aiResponseText = '';
-      if (response.response && response.response.trim()) {
-        aiResponseText = response.response.trim();
-      } else {
+      const aiResponseText =
+        typeof response === 'string' ? response.trim() : '';
+      if (!aiResponseText) {
         throw new Error('Invalid response format from Bedrock');
       }
 
       this.logger.log('🧠 AI response received', {
         responseLength: aiResponseText.length,
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
       });
 
       // Parse AI response (handle potential markdown code blocks)

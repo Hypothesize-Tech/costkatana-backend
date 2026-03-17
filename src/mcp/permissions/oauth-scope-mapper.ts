@@ -3,7 +3,11 @@
  * Maps OAuth scopes from integrations to MCP tool permissions
  */
 
-import { IntegrationType, HttpMethod, OAuthScopeMapping } from '../types/permission.types';
+import {
+  IntegrationType,
+  HttpMethod,
+  OAuthScopeMapping,
+} from '../types/permission.types';
 
 export class OAuthScopeMapper {
   // Scope mappings for each integration
@@ -77,7 +81,12 @@ export class OAuthScopeMapper {
     {
       integration: 'github',
       scope: 'repo',
-      tools: ['github_list_repos', 'github_create_repo', 'github_list_branches', 'github_create_branch'],
+      tools: [
+        'github_list_repos',
+        'github_create_repo',
+        'github_list_branches',
+        'github_create_branch',
+      ],
       httpMethods: ['GET', 'POST'],
       description: 'Read and write repository data',
     },
@@ -91,14 +100,25 @@ export class OAuthScopeMapper {
     {
       integration: 'github',
       scope: 'issues',
-      tools: ['github_list_issues', 'github_get_issue', 'github_create_issue', 'github_update_issue', 'github_close_issue'],
+      tools: [
+        'github_list_issues',
+        'github_get_issue',
+        'github_create_issue',
+        'github_update_issue',
+        'github_close_issue',
+      ],
       httpMethods: ['GET', 'POST', 'PATCH'],
       description: 'Manage GitHub issues',
     },
     {
       integration: 'github',
       scope: 'pull_requests',
-      tools: ['github_list_prs', 'github_create_pr', 'github_update_pr', 'github_merge_pr'],
+      tools: [
+        'github_list_prs',
+        'github_create_pr',
+        'github_update_pr',
+        'github_merge_pr',
+      ],
       httpMethods: ['GET', 'POST', 'PATCH', 'PUT'],
       description: 'Manage pull requests',
     },
@@ -114,7 +134,12 @@ export class OAuthScopeMapper {
     {
       integration: 'google',
       scope: 'https://www.googleapis.com/auth/drive.file',
-      tools: ['drive_upload_file', 'drive_update_file', 'drive_create_folder', 'drive_share_file'],
+      tools: [
+        'drive_upload_file',
+        'drive_update_file',
+        'drive_create_folder',
+        'drive_share_file',
+      ],
       httpMethods: ['POST', 'PATCH'],
       description: 'Create and update Google Drive files',
     },
@@ -172,7 +197,11 @@ export class OAuthScopeMapper {
     {
       integration: 'slack',
       scope: 'chat:write',
-      tools: ['slack_send_message', 'slack_update_message', 'slack_delete_message'],
+      tools: [
+        'slack_send_message',
+        'slack_update_message',
+        'slack_delete_message',
+      ],
       httpMethods: ['POST', 'PUT', 'DELETE'],
       description: 'Send and manage messages',
     },
@@ -202,7 +231,11 @@ export class OAuthScopeMapper {
     {
       integration: 'discord',
       scope: 'messages:write',
-      tools: ['discord_send_message', 'discord_edit_message', 'discord_delete_message'],
+      tools: [
+        'discord_send_message',
+        'discord_edit_message',
+        'discord_delete_message',
+      ],
       httpMethods: ['POST', 'PATCH', 'DELETE'],
       description: 'Send and manage messages',
     },
@@ -232,7 +265,12 @@ export class OAuthScopeMapper {
     {
       integration: 'jira',
       scope: 'write:jira-work',
-      tools: ['jira_create_issue', 'jira_update_issue', 'jira_add_comment', 'jira_transition_issue'],
+      tools: [
+        'jira_create_issue',
+        'jira_update_issue',
+        'jira_add_comment',
+        'jira_transition_issue',
+      ],
       httpMethods: ['POST', 'PUT'],
       description: 'Create and update Jira issues',
     },
@@ -248,7 +286,12 @@ export class OAuthScopeMapper {
     {
       integration: 'linear',
       scope: 'read',
-      tools: ['linear_list_teams', 'linear_list_projects', 'linear_list_issues', 'linear_get_issue'],
+      tools: [
+        'linear_list_teams',
+        'linear_list_projects',
+        'linear_list_issues',
+        'linear_get_issue',
+      ],
       httpMethods: ['GET'],
       description: 'Read Linear data',
     },
@@ -294,16 +337,19 @@ export class OAuthScopeMapper {
   /**
    * Get all tools allowed by given scopes
    */
-  static getToolsForScopes(integration: IntegrationType, scopes: string[]): string[] {
+  static getToolsForScopes(
+    integration: IntegrationType,
+    scopes: string[],
+  ): string[] {
     const allowedTools = new Set<string>();
 
     for (const scope of scopes) {
       const mapping = this.SCOPE_MAPPINGS.find(
-        m => m.integration === integration && m.scope === scope
+        (m) => m.integration === integration && m.scope === scope,
       );
 
       if (mapping) {
-        mapping.tools.forEach(tool => allowedTools.add(tool));
+        mapping.tools.forEach((tool) => allowedTools.add(tool));
       }
     }
 
@@ -313,16 +359,19 @@ export class OAuthScopeMapper {
   /**
    * Get all HTTP methods allowed by given scopes
    */
-  static getHttpMethodsForScopes(integration: IntegrationType, scopes: string[]): HttpMethod[] {
+  static getHttpMethodsForScopes(
+    integration: IntegrationType,
+    scopes: string[],
+  ): HttpMethod[] {
     const allowedMethods = new Set<HttpMethod>();
 
     for (const scope of scopes) {
       const mapping = this.SCOPE_MAPPINGS.find(
-        m => m.integration === integration && m.scope === scope
+        (m) => m.integration === integration && m.scope === scope,
       );
 
       if (mapping) {
-        mapping.httpMethods.forEach(method => allowedMethods.add(method));
+        mapping.httpMethods.forEach((method) => allowedMethods.add(method));
       }
     }
 
@@ -335,7 +384,7 @@ export class OAuthScopeMapper {
   static doesScopeAllowTool(
     integration: IntegrationType,
     scopes: string[],
-    toolName: string
+    toolName: string,
   ): boolean {
     const allowedTools = this.getToolsForScopes(integration, scopes);
     return allowedTools.includes(toolName);
@@ -346,10 +395,10 @@ export class OAuthScopeMapper {
    */
   static getRequiredScopeForTool(
     integration: IntegrationType,
-    toolName: string
+    toolName: string,
   ): string | null {
     const mapping = this.SCOPE_MAPPINGS.find(
-      m => m.integration === integration && m.tools.includes(toolName)
+      (m) => m.integration === integration && m.tools.includes(toolName),
     );
 
     return mapping?.scope || null;
@@ -359,7 +408,7 @@ export class OAuthScopeMapper {
    * Get all available scopes for integration
    */
   static getAvailableScopes(integration: IntegrationType): OAuthScopeMapping[] {
-    return this.SCOPE_MAPPINGS.filter(m => m.integration === integration);
+    return this.SCOPE_MAPPINGS.filter((m) => m.integration === integration);
   }
 
   /**
@@ -370,7 +419,7 @@ export class OAuthScopeMapper {
     description: string;
     tools: string[];
   }> {
-    return this.getAvailableScopes(integration).map(m => ({
+    return this.getAvailableScopes(integration).map((m) => ({
       scope: m.scope,
       description: m.description,
       tools: m.tools,
@@ -381,6 +430,6 @@ export class OAuthScopeMapper {
    * Get default scopes for an integration (all available scopes)
    */
   static getDefaultScopes(integration: IntegrationType): string[] {
-    return this.getAvailableScopes(integration).map(m => m.scope);
+    return this.getAvailableScopes(integration).map((m) => m.scope);
   }
 }

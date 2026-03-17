@@ -33,7 +33,8 @@ export class UserService {
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(Alert.name) private alertModel: Model<Alert>,
     @InjectModel(Usage.name) private usageModel: Model<Usage>,
-    @InjectModel(Optimization.name) private optimizationModel: Model<Optimization>,
+    @InjectModel(Optimization.name)
+    private optimizationModel: Model<Optimization>,
     private subscriptionService: SubscriptionService,
     private activityService: ActivityService,
     private emailService: EmailService,
@@ -57,7 +58,9 @@ export class UserService {
    * Sanitize profile object for API response - strips sensitive fields.
    * Never expose: encryptedKey, TOTP secret, backup codes, reset tokens.
    */
-  sanitizeProfileForResponse(profileObj: Record<string, unknown>): Record<string, unknown> {
+  sanitizeProfileForResponse(
+    profileObj: Record<string, unknown>,
+  ): Record<string, unknown> {
     const sanitized = { ...profileObj };
 
     // Top-level sensitive fields
@@ -79,7 +82,10 @@ export class UserService {
     }
 
     // Account closure - strip deletion token
-    if (sanitized.accountClosure && typeof sanitized.accountClosure === 'object') {
+    if (
+      sanitized.accountClosure &&
+      typeof sanitized.accountClosure === 'object'
+    ) {
       const ac = { ...(sanitized.accountClosure as Record<string, unknown>) };
       delete ac.deletionToken;
       sanitized.accountClosure = ac;
@@ -98,11 +104,13 @@ export class UserService {
 
     // Legacy apiKeys - strip key value
     if (Array.isArray(sanitized.apiKeys)) {
-      sanitized.apiKeys = sanitized.apiKeys.map((key: Record<string, unknown>) => {
-        const k = { ...key };
-        delete k.key;
-        return k;
-      });
+      sanitized.apiKeys = sanitized.apiKeys.map(
+        (key: Record<string, unknown>) => {
+          const k = { ...key };
+          delete k.key;
+          return k;
+        },
+      );
     }
 
     return sanitized;
@@ -190,19 +198,33 @@ export class UserService {
                 },
               ],
               serviceStats: [
-                { $group: { _id: '$service', count: { $sum: 1 }, cost: { $sum: '$cost' } } },
+                {
+                  $group: {
+                    _id: '$service',
+                    count: { $sum: 1 },
+                    cost: { $sum: '$cost' },
+                  },
+                },
                 { $sort: { count: -1 } },
                 { $limit: 1 },
               ],
               modelStats: [
-                { $group: { _id: '$model', count: { $sum: 1 }, cost: { $sum: '$cost' } } },
+                {
+                  $group: {
+                    _id: '$model',
+                    count: { $sum: 1 },
+                    cost: { $sum: '$cost' },
+                  },
+                },
                 { $sort: { count: -1 } },
                 { $limit: 1 },
               ],
               dailyStats: [
                 {
                   $group: {
-                    _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                    _id: {
+                      $dateToString: { format: '%Y-%m-%d', date: '$createdAt' },
+                    },
                     dailyCost: { $sum: '$cost' },
                   },
                 },
@@ -376,7 +398,11 @@ export class UserService {
       throw new NotFoundException('User not found');
     }
 
-    const userDoc = user as { emailVerified?: boolean; createdAt?: Date; otherEmails?: IOtherEmail[] };
+    const userDoc = user as {
+      emailVerified?: boolean;
+      createdAt?: Date;
+      otherEmails?: IOtherEmail[];
+    };
     const primary = {
       email: user.email,
       isPrimary: true,
@@ -389,10 +415,12 @@ export class UserService {
       verified: e.verified ?? false,
       addedAt: (e.addedAt ?? new Date()) as Date | string,
     }));
-    const emails: Array<{ email: string; isPrimary: boolean; verified: boolean; addedAt: Date | string }> = [
-      primary,
-      ...secondary,
-    ];
+    const emails: Array<{
+      email: string;
+      isPrimary: boolean;
+      verified: boolean;
+      addedAt: Date | string;
+    }> = [primary, ...secondary];
 
     return {
       success: true,
@@ -1012,7 +1040,8 @@ export class UserService {
     if (!apiKey) {
       apiKey = keys.find(
         (k: any) =>
-          String(k?.maskedKey ?? '') === normalizedKeyId || k?.maskedKey === keyId,
+          String(k?.maskedKey ?? '') === normalizedKeyId ||
+          k?.maskedKey === keyId,
       );
     }
     if (!apiKey) {
@@ -1085,8 +1114,7 @@ export class UserService {
 
     let keyIndex = keys.findIndex(
       (k: any) =>
-        String(k?.keyId ?? '').trim() === normalizedKeyId ||
-        k?.keyId === keyId,
+        String(k?.keyId ?? '').trim() === normalizedKeyId || k?.keyId === keyId,
     );
 
     if (keyIndex === -1) {

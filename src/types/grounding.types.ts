@@ -1,13 +1,22 @@
 /**
  * Grounding Confidence Layer (GCL) Type Definitions
- * 
+ *
  * Defines types for pre-generation grounding evaluation.
  * GCL measures input sufficiency, NOT answer correctness.
  */
 
 export type QueryType = 'FACTUAL' | 'OPINION' | 'ACTION' | 'MIXED';
-export type DecisionType = 'GENERATE' | 'ASK_CLARIFY' | 'SEARCH_MORE' | 'REFUSE';
-export type AgentType = 'MASTER' | 'OPTIMIZER' | 'QA' | 'MEMORY' | 'WEB_SCRAPER';
+export type DecisionType =
+  | 'GENERATE'
+  | 'ASK_CLARIFY'
+  | 'SEARCH_MORE'
+  | 'REFUSE';
+export type AgentType =
+  | 'MASTER'
+  | 'OPTIMIZER'
+  | 'QA'
+  | 'MEMORY'
+  | 'WEB_SCRAPER';
 export type SourceType = 'doc' | 'memory' | 'web' | 'integration';
 
 /**
@@ -59,12 +68,12 @@ export interface GroundingContext {
   intent: IntentInfo;
   agentType: AgentType;
   timeSensitive: boolean;
-  
+
   // Optional context
   userId?: string;
   conversationId?: string;
   documentIds?: string[]; // For user-uploaded document queries
-  
+
   // Critical safeguards
   contextDriftHigh?: boolean; // From cortexContextManager
   clarificationAttempts?: number;
@@ -91,7 +100,7 @@ export interface GroundingDecision {
   reasons: string[];
   metrics: GroundingMetrics;
   timestamp: number;
-  
+
   // Additional metadata for debugging
   prohibitMemoryWrite?: boolean;
 }
@@ -142,4 +151,9 @@ export interface GroundingExplanation {
 /**
  * Domain risk levels for stricter thresholds
  */
-export type DomainRisk = 'FINANCE' | 'SECURITY' | 'LEGAL' | 'HEALTHCARE' | 'GENERAL';
+export type DomainRisk =
+  | 'FINANCE'
+  | 'SECURITY'
+  | 'LEGAL'
+  | 'HEALTHCARE'
+  | 'GENERAL';

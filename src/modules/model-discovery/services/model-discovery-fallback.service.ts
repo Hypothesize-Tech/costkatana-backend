@@ -6,7 +6,7 @@ import {
   AIModelPricingDocument,
 } from '../../../schemas/ai/ai-model-pricing.schema';
 import { WebScraperService } from '../../../modules/pricing/services/web-scraper.service';
-import { BedrockService } from '../../../services/bedrock.service';
+import { BedrockService } from '../../bedrock/bedrock.service';
 import { BusinessEventLoggingService } from '../../../common/services/business-event-logging.service';
 import { RawPricingData } from '../types/model-discovery.types';
 
@@ -69,24 +69,23 @@ export class ModelDiscoveryFallbackService {
         try {
           const pricingResult = await BedrockService.extractPricingFromText(
             provider,
-            `Target Model: ${modelName}\n\n${scrapedData.content}`,
+            modelName,
+            scrapedData.content ?? '',
           );
 
-          // Find pricing data that matches the model name
-          const matchingPricing = pricingResult.find(
-            (pricing) =>
-              pricing.modelName
-                .toLowerCase()
-                .includes(modelName.toLowerCase()) ||
-              pricing.modelId.toLowerCase().includes(modelName.toLowerCase()) ||
-              modelName
-                .toLowerCase()
-                .includes(pricing.modelName.toLowerCase()) ||
-              modelName.toLowerCase().includes(pricing.modelId.toLowerCase()),
-          );
-
-          if (matchingPricing) {
-            pricingResults.push(matchingPricing);
+          // extractPricingFromText returns single RawPricingData when successful
+          if (
+            pricingResult.success &&
+            pricingResult.data &&
+            !Array.isArray(pricingResult.data)
+          ) {
+            const data = pricingResult.data as RawPricingData;
+            if (
+              data.modelName?.toLowerCase().includes(modelName.toLowerCase()) ||
+              data.modelId?.toLowerCase().includes(modelName.toLowerCase())
+            ) {
+              pricingResults.push(data);
+            }
           }
         } catch (error) {
           this.logger.error(`Error extracting pricing for ${modelName}`, {

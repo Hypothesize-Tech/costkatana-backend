@@ -7,11 +7,11 @@
   "license": "UNLICENSED",
   "scripts": {
     "prebuild": "rm -rf dist",
-    "build": "NODE_OPTIONS='--max-old-space-size=6144' nest build -c nest-cli.docker.json",
-    "build:check": "NODE_OPTIONS='--max-old-space-size=6144' nest build",
-    "build:docker": "NODE_OPTIONS='--max-old-space-size=6144' nest build -c nest-cli.docker.json",
-    "typecheck": "tsc --noEmit -p tsconfig.build.json",
-    "build:high-memory": "NODE_OPTIONS='--max-old-space-size=8192' nest build",
+    "build": "NODE_OPTIONS='--max-old-space-size=8192' nest build -c nest-cli.docker.json",
+    "build:check": "NODE_OPTIONS='--max-old-space-size=4096' nest build",
+    "build:docker": "NODE_OPTIONS='--max-old-space-size=8192' nest build -c nest-cli.docker.json",
+    "typecheck": "NODE_OPTIONS='--max-old-space-size=8192' tsc --noEmit -p tsconfig.build.json",
+    "build:high-memory": "NODE_OPTIONS='--max-old-space-size=12288' nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
@@ -180,6 +180,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/cheerio": "^0.22.35",
     "@types/compression": "^1.7.2",
+    "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.17",
     "@types/crypto-js": "^4.2.2",
     "@types/express": "^4.17.23",
@@ -218,6 +219,9 @@
     "npm": ">=8.0.0"
   },
   "overrides": {
+    "bullmq": {
+      "ioredis": "$ioredis"
+    },
     "@browserbasehq/stagehand": {
       "openai": "$openai"
     },

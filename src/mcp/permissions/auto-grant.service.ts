@@ -4,9 +4,9 @@
  */
 
 import mongoose from 'mongoose';
-import { McpPermission } from '../../models/McpPermission';
+import { McpPermission } from '../../schemas/security/mcp-permission.schema';
 import { IntegrationType } from '../types/permission.types';
-import { loggingService } from '../../services/logging.service';
+import { loggingService } from '../../common/services/logging.service';
 import { OAuthScopeMapper } from './oauth-scope-mapper';
 
 export class AutoGrantMCPPermissions {
@@ -16,7 +16,7 @@ export class AutoGrantMCPPermissions {
   static async grantPermissionsForNewConnection(
     userId: string,
     integration: IntegrationType,
-    connectionId: string
+    connectionId: string,
   ): Promise<void> {
     try {
       loggingService.info('🔐 Auto-granting MCP permissions', {
@@ -43,7 +43,7 @@ export class AutoGrantMCPPermissions {
 
       // Get all available tools for this integration
       const tools = this.getToolsForIntegration(integration);
-      
+
       // Get OAuth scopes for this integration
       const scopes = OAuthScopeMapper.getDefaultScopes(integration);
 
@@ -88,7 +88,9 @@ export class AutoGrantMCPPermissions {
   /**
    * Get all available tools for an integration
    */
-  private static getToolsForIntegration(integration: IntegrationType): string[] {
+  private static getToolsForIntegration(
+    integration: IntegrationType,
+  ): string[] {
     const toolMap: Record<IntegrationType, string[]> = {
       vercel: [
         'vercel_list_projects',
@@ -127,12 +129,12 @@ export class AutoGrantMCPPermissions {
         'drive_delete_file',
         'drive_create_folder',
         'drive_share_file',
-        
+
         // Sheets tools (3)
         'sheets_get_values',
         'sheets_update_values',
         'sheets_append_values',
-        
+
         // Docs tools (2)
         'docs_get_document',
         'docs_create_document',

@@ -36,7 +36,11 @@ export class ProxyKey {
   @Prop({ trim: true, maxlength: 500 })
   description?: string;
 
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'ProviderKey', required: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'ProviderKey',
+    required: true,
+  })
   providerKeyId: Types.ObjectId;
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })

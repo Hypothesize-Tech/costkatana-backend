@@ -36,6 +36,16 @@ export interface EnrichmentResult {
   priceUsd?: number;
 }
 
+let otelEnricherServiceInstance: OTelEnricherService | null = null;
+
+/** Get singleton for use outside DI (e.g. observability). */
+export function getOtelEnricherService(): OTelEnricherService {
+  if (!otelEnricherServiceInstance) {
+    throw new Error('OTelEnricherService not initialized. Ensure CommonModule is imported.');
+  }
+  return otelEnricherServiceInstance;
+}
+
 @Injectable()
 export class OTelEnricherService {
   private readonly logger = new Logger(OTelEnricherService.name);
@@ -48,6 +58,7 @@ export class OTelEnricherService {
     @Inject(CacheService)
     private readonly cacheService: CacheService | null,
   ) {
+    otelEnricherServiceInstance = this;
     const region =
       this.configService.get<string>('AWS_BEDROCK_REGION') ||
       process.env.AWS_BEDROCK_REGION ||
