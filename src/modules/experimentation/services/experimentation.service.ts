@@ -5,7 +5,11 @@
  * Handles model comparisons, what-if scenarios, fine-tuning analysis, and real-time experiments.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
 import { Model } from 'mongoose';
@@ -1094,12 +1098,15 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
     prompt: string,
   ): Promise<string | null> {
     try {
-      // Check if real API calls are enabled
+      // Check if real API calls are enabled - fail loudly instead of returning null
       const realCallsEnabled =
         this.configService.get('ENABLE_REAL_MODEL_COMPARISON', 'false') ===
         'true';
       if (!realCallsEnabled) {
-        return null;
+        throw new BadRequestException(
+          'ENABLE_REAL_MODEL_COMPARISON must be set to "true" for model experimentation. ' +
+            'Experiments require real API execution; simulated responses are not supported.',
+        );
       }
 
       this.logger.log('Performing real model API call', {

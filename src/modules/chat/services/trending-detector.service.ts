@@ -1,6 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
-import { firstValueFrom, catchError, of, timeout } from 'rxjs';
+import { BedrockService } from '../../bedrock/bedrock.service';
+import { firstValueFrom, catchError, timeout } from 'rxjs';
 
 /**
  * TrendingDetectorService - Advanced trend detection with external API integration
@@ -312,10 +317,9 @@ export class TrendingDetectorService {
       // Use SerpApi or similar service for Google Trends data
       const serpApiKey = process.env.SERP_API_KEY;
       if (!serpApiKey) {
-        this.logger.warn(
-          'SERP_API_KEY not configured, falling back to mock data',
+        throw new InternalServerErrorException(
+          'SERP_API_KEY not configured. Trending data requires SerpApi; set SERP_API_KEY in environment.',
         );
-        return this.getFallbackTrends(options);
       }
 
       // Google Trends doesn't have an official API, so we use SerpApi
@@ -333,18 +337,17 @@ export class TrendingDetectorService {
         this.httpService.get(`${serpApiUrl}?${params}`).pipe(
           timeout(this.API_TIMEOUT),
           catchError((error) => {
-            this.logger.warn(
-              'SerpApi request failed, falling back to mock data',
-              {
-                error: error instanceof Error ? error.message : String(error),
-              },
+            this.logger.warn('SerpApi request failed', {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            throw new InternalServerErrorException(
+              `SerpApi request failed: ${error instanceof Error ? error.message : String(error)}. Trending data unavailable.`,
             );
-            return of({ data: null });
           }),
         ),
       );
 
-      if (response.data && response.data.trending_searches) {
+      if (response?.data?.trending_searches) {
         // Parse SerpApi Google Trends response
         const trendingSearches = response.data.trending_searches;
 
@@ -362,18 +365,24 @@ export class TrendingDetectorService {
         }
       }
 
-      // If no trends found from API, use fallback
+      // If no trends found from API, fail rather than returning mock data
       if (trends.length === 0) {
-        this.logger.warn('No trends found from SerpApi, using fallback data');
-        return this.getFallbackTrends(options);
+        throw new InternalServerErrorException(
+          'No trending data returned from SerpApi. Trending data unavailable.',
+        );
       }
 
       return trends;
     } catch (error) {
-      this.logger.warn('Google Trends API failed, using fallback data', {
+      if (error instanceof InternalServerErrorException) {
+        throw error;
+      }
+      this.logger.warn('Google Trends API failed', {
         error: error instanceof Error ? error.message : String(error),
       });
-      return this.getFallbackTrends(options);
+      throw new InternalServerErrorException(
+        `Google Trends API failed: ${error instanceof Error ? error.message : String(error)}. Set SERP_API_KEY for trending data.`,
+      );
     }
   }
 
@@ -1092,7 +1101,7 @@ export class TrendingDetectorService {
   }
 
   /**
-   * AI-powered query classification using Bedrock (Express parity)
+   * AI-powered query classification using Bedrock
    */
   private async classifyWithAI(query: string): Promise<{
     intent: string;
@@ -1100,10 +1109,40 @@ export class TrendingDetectorService {
     requiresWebSearch: boolean;
     searchReason?: string;
   }> {
-    // This would use BedrockService to classify the query
-    // For now, return a basic classification
-    const lowerQuery = query.toLowerCase();
+    const systemPrompt = `You are a query classifier for an AI cost optimization platform. Classify the user query into one of: cost_analysis, model_comparison, api_configuration, web_search, conversational.
+Return only valid JSON with keys: intent (string), confidence (0-1), requiresWebSearch (boolean), searchReason (string, optional).
+Example: {"intent":"cost_analysis","confidence":0.9,"requiresWebSearch":false}`;
 
+    const userPrompt = `Classify this query: "${query}"`;
+
+    try {
+      const response = await BedrockService.invokeModel(
+        `${systemPrompt}\n\n${userPrompt}`,
+        process.env.CORTEX_CORE_MODEL || 'us.amazon.nova-lite-v1:0',
+      );
+
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]) as {
+          intent?: string;
+          confidence?: number;
+          requiresWebSearch?: boolean;
+          searchReason?: string;
+        };
+        return {
+          intent: parsed.intent ?? 'conversational',
+          confidence: Math.min(1, Math.max(0, parsed.confidence ?? 0.6)),
+          requiresWebSearch: Boolean(parsed.requiresWebSearch),
+          searchReason: parsed.searchReason,
+        };
+      }
+    } catch (error) {
+      this.logger.warn('Bedrock classification failed, using heuristic fallback', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // Fallback to heuristic when Bedrock fails or returns unparseable JSON
     if (this.isCostKatanaQuery(query)) {
       return {
         intent: 'cost_analysis',
@@ -1111,10 +1150,8 @@ export class TrendingDetectorService {
         requiresWebSearch: false,
       };
     }
-
     const queryType = this.determineQueryType(query);
     const requiresWebSearch = this.shouldUseWebSearch(query);
-
     return {
       intent: queryType.intent,
       confidence: queryType.confidence,

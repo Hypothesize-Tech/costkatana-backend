@@ -637,6 +637,10 @@ class MCPConnectionMonitor {
     >
   > {
     const startTime = Date.now();
+    const result = new Map<
+      string,
+      { lastActivity: number; errorCount: number; requestCount: number }
+    >();
 
     loggingService.debug('=== MCP ACTIVE CONNECTIONS RETRIEVAL STARTED ===', {
       component: 'MCPConnectionMonitor',
@@ -645,23 +649,52 @@ class MCPConnectionMonitor {
       step: 'started',
     });
 
-    // Note: This is a simplified approach - in production you might want to use Redis SCAN
-    // For now, we'll return an empty map since we're not maintaining a local connections list
-    // In a real implementation, you'd want to scan Redis keys or maintain a separate index
+    try {
+      const cache = getCacheService();
+      const keys = await cache.keys('mcp_connection:*');
 
-    loggingService.debug(
-      'Active MCP connections retrieval completed (simplified implementation)',
-      {
-        component: 'MCPConnectionMonitor',
-        operation: 'getActiveConnections',
-        type: 'mcp_connections_retrieval',
-        step: 'retrieval_completed',
-        note: 'Simplified implementation - no local connections list maintained',
-        totalTime: `${Date.now() - startTime}ms`,
-      },
-    );
+      for (const key of keys) {
+        const clientId = key.replace(/^mcp_connection:/, '');
+        const raw = await cache.get<{
+          lastActivity?: number;
+          errorCount?: number;
+          requestCount?: number;
+        }>(key);
 
-    return new Map(); // Return empty map for now
+        if (raw && typeof raw === 'object') {
+          result.set(clientId, {
+            lastActivity: raw.lastActivity ?? Date.now(),
+            errorCount: raw.errorCount ?? 0,
+            requestCount: raw.requestCount ?? 0,
+          });
+        }
+      }
+
+      loggingService.debug(
+        'Active MCP connections retrieved from Redis',
+        {
+          component: 'MCPConnectionMonitor',
+          operation: 'getActiveConnections',
+          type: 'mcp_connections_retrieval',
+          step: 'retrieval_completed',
+          count: result.size,
+          totalTime: `${Date.now() - startTime}ms`,
+        },
+      );
+    } catch (error) {
+      loggingService.warn(
+        'Failed to get active MCP connections from cache',
+        {
+          component: 'MCPConnectionMonitor',
+          operation: 'getActiveConnections',
+          type: 'mcp_connections_retrieval',
+          step: 'error',
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+
+    return result;
   }
 }
 

@@ -98,6 +98,13 @@ import { AutoSimulationModule } from './modules/auto-simulation/auto-simulation.
 // Agent trace module
 import { AgentTraceModule } from './modules/agent-trace/agent-trace.module';
 
+// Unregistered modules (BedrockModule must precede IngestionModule)
+import { BedrockModule } from './modules/bedrock/bedrock.module';
+import { IngestionModule } from './modules/ingestion/ingestion.module';
+import { AgentIdentityModule } from './modules/agent-identity/agent-identity.module';
+import { AlertModule } from './modules/alert/alert.module';
+import { SharedPreferencesModule } from './modules/shared-preferences/shared-preferences.module';
+
 // Agent and RAG modules
 import { AgentModule } from './modules/agent/agent.module';
 import { RagModule } from './modules/rag/rag.module';
@@ -243,6 +250,17 @@ import { ComprehensiveTrackingMiddleware } from './modules/usage/middleware/comp
     AwsModule,
     AutoSimulationModule,
     AgentTraceModule,
+
+    // Bedrock (required by IngestionModule and others)
+    BedrockModule,
+
+    // Ingestion (document ingestion, vector storage - was dead route)
+    IngestionModule,
+
+    // Agent identity, alert, shared preferences
+    AgentIdentityModule,
+    AlertModule,
+    SharedPreferencesModule,
 
     // AI Agent and RAG modules
     AgentModule,

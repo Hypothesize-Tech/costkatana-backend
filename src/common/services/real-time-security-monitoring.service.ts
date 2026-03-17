@@ -17,6 +17,8 @@ import {
   SecurityAlert as SecurityAlertSchema,
   SecurityAlertDocument,
 } from '../../schemas/security/security-alert.schema';
+import { ThreatLog } from '../../schemas/security/threat-log.schema';
+import { AIProviderAudit } from '../../schemas/security/ai-provider-audit.schema';
 import * as crypto from 'crypto';
 
 export interface SecurityMetrics {
@@ -334,6 +336,10 @@ export class RealTimeSecurityMonitoringService
     private readonly eventEmitter: EventEmitter2,
     @InjectModel(SecurityAlertSchema.name)
     private readonly securityAlertModel: Model<SecurityAlertDocument>,
+    @InjectModel(ThreatLog.name)
+    private readonly threatLogModel: Model<ThreatLog>,
+    @InjectModel(AIProviderAudit.name)
+    private readonly aiProviderAuditModel: Model<AIProviderAudit>,
   ) {
     this.initializeConfig();
     this.currentMetrics = this.initializeMetrics();
@@ -1040,29 +1046,30 @@ export class RealTimeSecurityMonitoringService
     return stats.costAtRisk || 0;
   }
 
-  // Placeholder implementations: deterministic values derived from actual state until real integrations exist
-  private calculateSuspiciousActivities(): Promise<number> {
-    return Promise.resolve(
-      Math.min(this.activeAlerts.size * 2 + this.stats.blockedRequests, 100),
-    );
+  private async calculateSuspiciousActivities(): Promise<number> {
+    const windowStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const count = await this.threatLogModel.countDocuments({
+      timestamp: { $gte: windowStart },
+    });
+    return Math.min(count, 100);
   }
 
-  private calculatePIIDetections(): Promise<number> {
-    const flowsWithPii = Array.from(this.dataFlows.values()).filter(
-      (f) => f.flow.data.contains_pii,
-    ).length;
-    return Promise.resolve(
-      flowsWithPii +
-        Math.floor(this.currentMetrics.compliance.audit_events / 5),
-    );
+  private async calculatePIIDetections(): Promise<number> {
+    const windowStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const count = await this.aiProviderAuditModel.countDocuments({
+      createdAt: { $gte: windowStart },
+      'security.piiDetected.0': { $exists: true },
+    });
+    return count;
   }
 
-  private calculateRedactedContent(): Promise<number> {
-    return Promise.resolve(
-      Array.from(this.dataFlows.values()).filter(
-        (f) => f.flow.data.encryption_status === 'redacted',
-      ).length,
-    );
+  private async calculateRedactedContent(): Promise<number> {
+    const windowStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const count = await this.aiProviderAuditModel.countDocuments({
+      createdAt: { $gte: windowStart },
+      'security.redactionApplied': true,
+    });
+    return count;
   }
 
   private calculateClassificationEvents(): Promise<number> {

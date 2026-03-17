@@ -27,6 +27,7 @@ export class PromptCompilerService {
   /**
    * Compile prompt with full optimization pipeline
    */
+  /** Optional summarizer for context compression. When provided, uses AI summarization instead of stub. */
   static async compile(
     prompt: string,
     options: {
@@ -34,6 +35,7 @@ export class PromptCompilerService {
       targetTokens?: number;
       preserveQuality?: boolean;
       enableParallelization?: boolean;
+      summarizer?: (text: string, maxOutputTokens?: number) => Promise<string>;
     } = {},
   ): Promise<CompilationResult> {
     const startTime = Date.now();
@@ -42,6 +44,7 @@ export class PromptCompilerService {
       targetTokens,
       preserveQuality = true,
       enableParallelization = true,
+      summarizer,
     } = options;
 
     try {
@@ -78,6 +81,7 @@ export class PromptCompilerService {
           const compressionResult = await this.compressContext(
             optimizedAST,
             targetTokens,
+            summarizer,
           );
           optimizedAST = compressionResult.ast;
           optimizationResults.push(compressionResult.result);
@@ -1290,11 +1294,13 @@ export class PromptCompilerService {
   }
 
   /**
-   * Context compression pass
+   * Context compression pass.
+   * When summarizer is provided, uses AI summarization. Otherwise skips compression to avoid stub quality loss.
    */
   private static async compressContext(
     ast: ProgramNode,
     targetTokens?: number,
+    summarizer?: (text: string, maxOutputTokens?: number) => Promise<string>,
   ): Promise<{
     ast: ProgramNode;
     result: OptimizationPassResult;
@@ -1333,75 +1339,80 @@ export class PromptCompilerService {
       };
     }
 
-    // Simulated summarization/compression:
-    // - For each Context node, if it's verbose (length > 40 or tokens > 15) compress ("summarize") it
-    // - Recalculate token estimates, stop when under targetToken budget
+    // Real summarization when summarizer provided; skip compression otherwise to avoid stub quality loss
     let newTotalTokens = 0;
     let compressed = false;
-    const newBody = ast.body.map((node) => {
+    const newBody: typeof ast.body = [];
+
+    for (const node of ast.body) {
       if (
         node.type === 'Context' &&
         typeof (node as any).content.value === 'string' &&
         ((node as any).content.value.length > 40 ||
-          (node.metadata?.tokens && node.metadata.tokens > 15))
+          (node.metadata?.tokens && node.metadata.tokens > 15)) &&
+        summarizer
       ) {
-        // Simulate summarization by taking the first 12 words and adding " (summary)"
         const originalValue = (node as any).content.value;
         const originalTokens =
           node.metadata?.tokens ?? originalValue.length / 4;
+        const maxOutputTokens = Math.max(15, Math.ceil(originalTokens * 0.4));
 
-        const summaryWords = originalValue.split(/\s+/).slice(0, 12).join(' ');
-        const summarized =
-          summaryWords +
-          (summaryWords.length < originalValue.length
-            ? ' ... (summary)'
-            : ' (summary)');
-        const compressedTokens = Math.round(summarized.length / 4);
+        try {
+          const summarized = await summarizer(originalValue, maxOutputTokens);
+          const compressedTokens = Math.round(summarized.length / 4);
 
-        // Record transformation if token count is reduced
-        if (compressedTokens < originalTokens) {
-          transformations.push({
-            type: 'context_compression',
-            description: `Compressed context node '${node.id}' from ${originalTokens} to ${compressedTokens} tokens`,
-            tokensSaved: originalTokens - compressedTokens,
-            costSaved: (originalTokens - compressedTokens) * 0.00001,
-          });
-          compressed = true;
-        }
+          if (compressedTokens < originalTokens) {
+            transformations.push({
+              type: 'context_compression',
+              description: `Compressed context node '${node.id}' from ${originalTokens} to ${compressedTokens} tokens`,
+              tokensSaved: originalTokens - compressedTokens,
+              costSaved: (originalTokens - compressedTokens) * 0.00001,
+            });
+            compressed = true;
+          }
 
-        // Provide a new context node object (immutably)
-        const newNode = {
-          ...node,
-          content: {
-            ...(node as any).content,
-            value: summarized,
-            compressible: true,
-            metadata: {
-              ...(node as any).content.metadata,
-              originalValue,
-              wasCompressed: true,
+          const newNode = {
+            ...node,
+            content: {
+              ...(node as any).content,
+              value: summarized,
+              compressible: true,
+              metadata: {
+                ...(node as any).content.metadata,
+                originalValue,
+                wasCompressed: true,
+              },
             },
-          },
-          metadata: {
-            ...node.metadata,
-            tokens: compressedTokens,
-            originalTokens,
-            compressionSummary: true,
-          },
-        };
-        newTotalTokens += compressedTokens;
-        return newNode;
+            metadata: {
+              ...node.metadata,
+              tokens: compressedTokens,
+              originalTokens,
+              compressionSummary: true,
+            },
+          };
+          newTotalTokens += compressedTokens;
+          newBody.push(newNode);
+        } catch (err) {
+          loggingService.warn(
+            'Context summarization failed, keeping original',
+            {
+              nodeId: node.id,
+              error: err instanceof Error ? err.message : String(err),
+            },
+          );
+          newTotalTokens += originalTokens;
+          newBody.push(node);
+        }
       } else {
-        // Not a context node or already short enough; copy as is
         const nodeTokens =
           node.metadata?.tokens ??
           (typeof (node as any).content?.value === 'string'
             ? (node as any).content.value.length / 4
             : 0);
         newTotalTokens += nodeTokens;
-        return node;
+        newBody.push(node);
       }
-    });
+    }
 
     // If after compression still over budget, warn
     const warnings: string[] = [];

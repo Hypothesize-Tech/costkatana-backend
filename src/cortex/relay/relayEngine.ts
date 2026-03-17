@@ -27,6 +27,7 @@ import {
   decodeFromTOON,
   extractStructuredData,
 } from '../../utils/toon.utils';
+import { getCacheService } from '../../common/cache/cache.service';
 
 export class CortexRelayEngine {
   private bedrockClient: BedrockRuntimeClient;
@@ -155,26 +156,65 @@ export class CortexRelayEngine {
         this.addTrace('quality_prediction', qualityPrediction);
       }
 
-      // Step 4: Check for parallel execution opportunities
+      // Step 4: Check cache before processing (when semantic caching enabled)
       let cortexResponse: CortexResponse;
+      let cacheHit = false;
 
-      if (
-        process.env.CORTEX_DISTRIBUTED_EXECUTION === 'true' &&
-        this.canExecuteInParallel(cortexQuery)
-      ) {
-        this.addTrace('parallel_execution_start');
-        cortexResponse = await this.executeInParallel(
-          cortexQuery,
-          modelSelection,
-        );
-        this.addTrace('parallel_execution_complete');
-      } else {
-        // Process with selected Bedrock model
-        this.addTrace('processing_start');
-        cortexResponse = await this.processWithBedrock(
-          cortexQuery,
-          modelSelection,
-        );
+      if (process.env.CORTEX_SEMANTIC_CACHING !== 'false') {
+        try {
+          const cache = getCacheService();
+          const cacheKey = `cortex:relay:${JSON.stringify(
+            encodeToTOON(cortexQuery),
+          )}`;
+          const cached = await cache.get<{ cortexResponse: CortexResponse }>(
+            cacheKey,
+          );
+          if (cached?.cortexResponse) {
+            cortexResponse = cached.cortexResponse;
+            cacheHit = true;
+            this.addTrace('cache_hit');
+          }
+        } catch {
+          // Cache unavailable, proceed to Bedrock
+        }
+      }
+
+      if (!cacheHit) {
+        if (
+          process.env.CORTEX_DISTRIBUTED_EXECUTION === 'true' &&
+          this.canExecuteInParallel(cortexQuery)
+        ) {
+          this.addTrace('parallel_execution_start');
+          cortexResponse = await this.executeInParallel(
+            cortexQuery,
+            modelSelection,
+          );
+          this.addTrace('parallel_execution_complete');
+        } else {
+          // Process with selected Bedrock model
+          this.addTrace('processing_start');
+          cortexResponse = await this.processWithBedrock(
+            cortexQuery,
+            modelSelection,
+          );
+        }
+
+        // Store in cache for future requests
+        if (process.env.CORTEX_SEMANTIC_CACHING !== 'false') {
+          try {
+            const cache = getCacheService();
+            const cacheKey = `cortex:relay:${JSON.stringify(
+              encodeToTOON(cortexQuery),
+            )}`;
+            await cache.set(
+              cacheKey,
+              { cortexResponse },
+              parseInt(process.env.CORTEX_CACHE_TTL || '3600', 10),
+            );
+          } catch {
+            // Ignore cache store failures
+          }
+        }
       }
 
       // Apply self-critique loop if enabled
@@ -208,6 +248,7 @@ export class CortexRelayEngine {
         cortexResponse,
         modelSelection,
         startTime,
+        cacheHit,
       );
 
       // Learn new primitives if enabled
@@ -1003,6 +1044,7 @@ Generate an improved Cortex response that addresses these issues:`;
     cortexResponse: CortexResponse,
     modelSelection: ModelSelection,
     startTime: number,
+    cacheHit = false,
   ): Promise<ResponseMetrics> {
     const originalTokens = this.estimateTokens(originalInput);
     const cortexEncoded = encodeToTOON(cortexQuery);
@@ -1044,7 +1086,7 @@ Generate an improved Cortex response that addresses these issues:`;
       processingTime,
       costSavings,
       modelUsed: modelSelection.modelId,
-      cacheHit: false, // Will be implemented with caching system
+      cacheHit,
     };
   }
 
