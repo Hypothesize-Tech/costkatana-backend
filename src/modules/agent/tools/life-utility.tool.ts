@@ -240,7 +240,6 @@ Price Tracking:
         result,
         description,
         category,
-        note: 'This is a text-based identification. Image upload feature coming soon!',
       });
     } catch (error: any) {
       return this.createErrorResponse(

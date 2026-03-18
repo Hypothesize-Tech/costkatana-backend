@@ -54,6 +54,10 @@ import {
   TeamMemberSchema,
 } from './team-project/team-member.schema';
 import { Project, ProjectSchema } from './team-project/project.schema';
+import {
+  Organization,
+  OrganizationSchema,
+} from './team-project/organization.schema';
 import { Activity, ActivitySchema } from './team-project/activity.schema';
 
 // Integration schemas
@@ -369,6 +373,12 @@ import {
   DocsPageViewSchema,
 } from './docs-analytics/docs-page-view.schema';
 
+// Gateway schemas
+import {
+  GatewayProviderMetrics,
+  GatewayProviderMetricsSchema,
+} from './gateway/gateway-provider-metrics.schema';
+
 // Auto-simulation schemas
 import {
   AutoSimulationSettings,
@@ -409,6 +419,7 @@ import {
       },
 
       // Team & Project schemas
+      { name: Organization.name, schema: OrganizationSchema },
       { name: Team.name, schema: TeamSchema },
       { name: TeamMember.name, schema: TeamMemberSchema },
       { name: Project.name, schema: ProjectSchema },
@@ -541,6 +552,12 @@ import {
       { name: DocsPageRating.name, schema: DocsPageRatingSchema },
       { name: DocsUserPreference.name, schema: DocsUserPreferenceSchema },
       { name: DocsPageView.name, schema: DocsPageViewSchema },
+
+      // Gateway schemas
+      {
+        name: GatewayProviderMetrics.name,
+        schema: GatewayProviderMetricsSchema,
+      },
 
       // Auto-simulation schemas
       {

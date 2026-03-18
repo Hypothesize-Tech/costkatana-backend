@@ -3,6 +3,7 @@ import {
   BedrockRuntimeClient,
   InvokeModelCommand,
 } from '@aws-sdk/client-bedrock-runtime';
+import * as crypto from 'crypto';
 import { CacheService } from '../../../common/cache/cache.service';
 import { LRUCache } from 'lru-cache';
 
@@ -143,33 +144,17 @@ export class VectorMemoryService {
   }
 
   /**
-   * Generate hash-based embedding as fallback
+   * Hash-based embedding fallback when Bedrock is unavailable.
+   * Returns 1024 dimensions (matches Titan v2) for dimension-compatible similarity.
+   * Not semantically meaningful - configure AWS Bedrock for production.
    */
   private generateHashBasedEmbedding(text: string): number[] {
+    const normalized = text.trim() || 'empty';
+    const hash = crypto.createHash('sha256').update(normalized).digest();
     const embedding: number[] = [];
-    const words = text.toLowerCase().split(/\s+/);
-
-    // Create a 384-dimensional embedding based on text characteristics
-    for (let i = 0; i < 384; i++) {
-      let value = 0;
-
-      // Use various text features
-      if (i < words.length) {
-        value += this.hashString(words[i]) / 1000000;
-      }
-
-      // Add character-based features
-      if (i < text.length) {
-        value += text.charCodeAt(i % text.length) / 1000;
-      }
-
-      // Add position-based features
-      value += Math.sin(i * 0.1) * 0.1;
-      value += Math.cos(i * 0.05) * 0.1;
-
-      embedding.push(value);
+    for (let i = 0; i < this.EMBEDDING_DIMENSIONS; i++) {
+      embedding.push(hash[i % hash.length] / 255);
     }
-
     return this.normalizeVector(embedding);
   }
 
@@ -818,8 +803,7 @@ export class VectorMemoryService {
         vectorsByType[dataType] = vectorSet.size;
       }
 
-      // Calculate cache hit rate (approximate)
-      const cacheHitRate = this.embeddingCache.size > 0 ? 0.85 : 0; // Estimated based on usage
+      const cacheHitRate = this.embeddingCache.size > 0 ? 0.85 : 0;
 
       return {
         totalVectors,
@@ -827,6 +811,10 @@ export class VectorMemoryService {
         vectorsByUser,
         cacheHitRate,
         avgEmbeddingDimensions: this.EMBEDDING_DIMENSIONS,
+        _meta: {
+          cacheHitRateEstimated: this.embeddingCache.size > 0,
+          note: 'cacheHitRate is estimated; implement hit/miss tracking for real values',
+        },
       };
     } catch (error) {
       this.logger.error('Failed to get cross-model stats:', {

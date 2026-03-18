@@ -3,10 +3,19 @@ export {
   type AILogEntry,
 } from '../common/services/ai-logger.service';
 
-// Stub for legacy Express middleware - use Nest AILoggerService when available
+import type { AILogEntry } from '../common/services/ai-logger.service';
+import type { AILoggerService as AILoggerServiceType } from '../common/services/ai-logger.service';
+
+let _aiLoggerInstance: AILoggerServiceType | null = null;
+
+export function setAiLoggerInstance(instance: AILoggerServiceType): void {
+  _aiLoggerInstance = instance;
+}
+
 export const aiLogger = {
   logRequest: (_entry: unknown) => {},
   logResponse: (_entry: unknown) => {},
   logError: (_entry: unknown) => {},
-  logAICall: async (_entry: unknown) => {},
+  logAICall: async (entry: unknown) =>
+    _aiLoggerInstance?.logAICall(entry as AILogEntry),
 };

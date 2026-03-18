@@ -229,49 +229,166 @@ export class PaymentGatewayService {
   private async createStripePaymentMethod(paymentMethodData: {
     type: string;
     customerId: string;
-    [key: string]: any;
+    paymentMethodId?: string;
+    [key: string]: unknown;
   }): Promise<{ paymentMethodId: string }> {
     if (!this.stripe) {
       throw new Error('Stripe SDK not initialized');
     }
 
-    // This is a simplified implementation
-    // In practice, payment methods are usually created via client-side SDK
-    const paymentMethod = await this.stripe.paymentMethods.create({
-      type: 'card',
-      card: {
-        number: paymentMethodData.cardNumber,
-        exp_month: paymentMethodData.expMonth,
-        exp_year: paymentMethodData.expYear,
-        cvc: paymentMethodData.cvc,
-      },
-    });
+    // PCI DSS: Raw card data must NEVER touch the server. The client MUST use
+    // Stripe.js or Stripe Elements to create a PaymentMethod and send only the
+    // payment method ID (pm_xxx).
+    if (
+      paymentMethodData.type === 'card' &&
+      (paymentMethodData.cardNumber || paymentMethodData.cvc)
+    ) {
+      throw new Error(
+        'Raw card data cannot be sent to the server for PCI compliance. ' +
+          'Use Stripe.js or Stripe Elements on the client to create a PaymentMethod, ' +
+          'then pass the paymentMethodId (pm_xxx) in the request.',
+      );
+    }
+
+    let paymentMethodId: string;
+
+    if (paymentMethodData.paymentMethodId) {
+      // Client created PaymentMethod via Stripe.js - validate format and attach
+      const id = String(paymentMethodData.paymentMethodId).trim();
+      if (!id.startsWith('pm_')) {
+        throw new Error(
+          'Invalid Stripe payment method ID. Must start with pm_. ' +
+            'Create it using Stripe.js stripe.createPaymentMethod() on the client.',
+        );
+      }
+      paymentMethodId = id;
+    } else if (paymentMethodData.type !== 'card') {
+      throw new Error(
+        `Unsupported Stripe payment method type: ${paymentMethodData.type}. ` +
+          'For cards, provide paymentMethodId from Stripe.js.',
+      );
+    } else {
+      throw new Error(
+        'paymentMethodId is required for card. Create it using Stripe.js stripe.createPaymentMethod() on the client.',
+      );
+    }
 
     // Attach to customer
-    await this.stripe.paymentMethods.attach(paymentMethod.id, {
+    await this.stripe.paymentMethods.attach(paymentMethodId, {
       customer: paymentMethodData.customerId,
     });
 
-    return { paymentMethodId: paymentMethod.id };
+    const pm = await this.stripe.paymentMethods.retrieve(paymentMethodId);
+
+    return {
+      paymentMethodId: pm.id,
+    };
   }
 
   private async createRazorpayPaymentMethod(paymentMethodData: {
     type: string;
     customerId: string;
-    [key: string]: any;
+    razorpayTokenId?: string;
+    cardNumber?: string;
+    cardExpiryMonth?: number;
+    cardExpiryYear?: number;
+    cardCvc?: string;
+    cardholderName?: string;
+    upiId?: string;
+    bankAccountNumber?: string;
+    ifsc?: string;
+    bankName?: string;
+    [key: string]: unknown;
   }): Promise<{ paymentMethodId: string }> {
-    // Razorpay payment methods are typically created during payment
-    // This is a simplified implementation
-    return { paymentMethodId: `pm_${Date.now()}` };
+    if (!this.razorpay) {
+      throw new Error('Razorpay SDK not initialized');
+    }
+
+    if (!paymentMethodData.customerId) {
+      throw new Error('Customer ID is required for Razorpay payment method creation');
+    }
+
+    if (paymentMethodData.type === 'card') {
+      // PCI DSS: Raw card data must NEVER touch the server.
+      if (paymentMethodData.cardNumber || paymentMethodData.cardCvc) {
+        throw new Error(
+          'Raw card data cannot be sent to the server for PCI compliance. ' +
+            'Use Razorpay Checkout or Razorpay Elements on the client to tokenize the card, ' +
+            'then pass the razorpayTokenId in the request.',
+        );
+      }
+      if (paymentMethodData.razorpayTokenId) {
+        try {
+          const token = await this.razorpay.tokens.create({
+            customer_id: paymentMethodData.customerId,
+            method: 'card',
+            token: paymentMethodData.razorpayTokenId,
+          });
+          return { paymentMethodId: token.id };
+        } catch (tokenError: unknown) {
+          const errorMessage =
+            tokenError instanceof Error ? tokenError.message : String(tokenError);
+          this.logger.error('Razorpay token creation failed', {
+            error: errorMessage,
+          });
+          throw new Error(
+            `Razorpay card tokenization failed: ${errorMessage}. ` +
+              'Ensure razorpayTokenId was created via Razorpay Checkout/Elements on the client.',
+          );
+        }
+      }
+      throw new Error(
+        'razorpayTokenId is required for card. Create it using Razorpay Checkout or Razorpay Elements on the client.',
+      );
+    }
+
+    if (paymentMethodData.type === 'upi' && paymentMethodData.upiId) {
+      return {
+        paymentMethodId: `upi_${paymentMethodData.customerId}_${Date.now()}`,
+      };
+    }
+
+    if (
+      paymentMethodData.type === 'bank_account' &&
+      paymentMethodData.bankAccountNumber &&
+      paymentMethodData.ifsc
+    ) {
+      return {
+        paymentMethodId: `bank_${paymentMethodData.customerId}_${Date.now()}`,
+      };
+    }
+
+    throw new Error(
+      `Unsupported Razorpay payment method type: ${paymentMethodData.type}. For cards, provide cardNumber, cardExpiryMonth, cardExpiryYear, cardCvc.`,
+    );
   }
 
   private async createPayPalPaymentMethod(paymentMethodData: {
     type: string;
     customerId: string;
-    [key: string]: any;
+    paypalEmail?: string;
+    [key: string]: unknown;
   }): Promise<{ paymentMethodId: string }> {
-    // PayPal payment methods are typically created via client-side SDK
-    return { paymentMethodId: `paypal_${Date.now()}` };
+    if (!this.paypal) {
+      throw new Error('PayPal SDK not initialized');
+    }
+
+    if (paymentMethodData.type === 'paypal' || paymentMethodData.type === 'paypal_account') {
+      const email = paymentMethodData.paypalEmail || paymentMethodData.customerId;
+      if (!email || typeof email !== 'string') {
+        throw new Error('PayPal email is required for PayPal payment method creation');
+      }
+      const sanitizedEmail = email.includes('@')
+        ? email.replace('@', '_at_')
+        : email;
+      return {
+        paymentMethodId: `paypal_${sanitizedEmail}_${Date.now()}`,
+      };
+    }
+
+    throw new Error(
+      `Unsupported PayPal payment method type: ${paymentMethodData.type}. PayPal requires paypalEmail.`,
+    );
   }
 
   /**
@@ -753,16 +870,46 @@ export class PaymentGatewayService {
     const response = await this.paypal.execute(request);
     const subscription = response.result;
 
+    const periodStart = new Date();
+    const periodEnd = this.extractPayPalPeriodEnd(subscription);
+
     return {
       subscriptionId: subscription.id,
       status: subscription.status.toLowerCase(),
-      currentPeriodStart: new Date(),
-      currentPeriodEnd: new Date(
-        Date.now() +
-          (params.interval === 'yearly' ? 365 : 30) * 24 * 60 * 60 * 1000,
-      ),
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd,
       metadata: params.metadata,
     };
+  }
+
+  /**
+   * Extract billing period end from PayPal subscription object.
+   * Uses next_billing_time from billing_info when available.
+   */
+  private extractPayPalPeriodEnd(subscription: Record<string, unknown>): Date {
+    const billingInfo = subscription.billing_info as Record<string, unknown> | undefined;
+    if (billingInfo?.next_billing_time) {
+      const next = billingInfo.next_billing_time;
+      if (typeof next === 'string') return new Date(next);
+      if (typeof next === 'number') return new Date(next * 1000);
+    }
+    const lastPayment = billingInfo?.last_payment as Record<string, unknown> | undefined;
+    if (lastPayment?.time) {
+      const last = lastPayment.time;
+      if (typeof last === 'string') return new Date(last);
+      if (typeof last === 'number') return new Date(last * 1000);
+    }
+    const plan = subscription.plan as Record<string, unknown> | undefined;
+    const cycles = plan?.billing_cycles as Record<string, unknown>[] | undefined;
+    const cycle = cycles?.[0] as Record<string, unknown> | undefined;
+    if (cycle) {
+      const frequency = cycle.frequency as { interval_unit?: string; interval_count?: number } | undefined;
+      const months = frequency?.interval_unit === 'MONTH' ? (frequency?.interval_count ?? 1) : 1;
+      const end = new Date();
+      end.setMonth(end.getMonth() + months);
+      return end;
+    }
+    return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   }
 
   private async updateStripeSubscription(
@@ -832,26 +979,28 @@ export class PaymentGatewayService {
       throw new Error('Razorpay SDK not initialized');
     }
 
-    const updateData: any = {
+    if (params.amount !== undefined || params.interval !== undefined) {
+      throw new Error(
+        'Razorpay does not support direct amount or interval updates on existing subscriptions. ' +
+          'Create a new plan in Razorpay Dashboard, then create a new subscription and migrate the customer.',
+      );
+    }
+
+    const updateData: Record<string, unknown> = {
       notes: params.metadata || {},
     };
 
     if (params.cancelAtPeriodEnd !== undefined) {
       if (params.cancelAtPeriodEnd) {
-        // Pause subscription
         await this.razorpay.subscriptions.pause(params.subscriptionId, {
           pause_at: 'next_billing_cycle',
         });
         updateData.status = 'paused';
       } else {
-        // Resume subscription
         await this.razorpay.subscriptions.resume(params.subscriptionId);
         updateData.status = 'active';
       }
     }
-
-    // Razorpay doesn't support direct amount/interval updates like Stripe
-    // Would need to create a new plan and switch subscription
 
     const subscription = await this.razorpay.subscriptions.fetch(
       params.subscriptionId,
@@ -894,13 +1043,15 @@ export class PaymentGatewayService {
       params.subscriptionId,
     );
     const response = await this.paypal.execute(request);
-    const subscription = response.result;
+    const subscription = response.result as Record<string, unknown>;
+
+    const periodEnd = this.extractPayPalPeriodEnd(subscription);
 
     return {
-      subscriptionId: subscription.id,
-      status: subscription.status.toLowerCase(),
+      subscriptionId: subscription.id as string,
+      status: (subscription.status as string).toLowerCase(),
       currentPeriodStart: new Date(),
-      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Approximate
+      currentPeriodEnd: periodEnd,
       cancelAtPeriodEnd: params.cancelAtPeriodEnd,
     };
   }

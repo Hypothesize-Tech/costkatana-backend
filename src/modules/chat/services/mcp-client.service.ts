@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { McpAuthService } from '../../mcp/services/mcp-auth.service';
 import { ToolRegistryService } from '../../mcp/services/tool-registry.service';
 import { McpPermissionService } from '../../mcp/services/mcp-permission.service';
+import { OAuthScopeMapperService } from '../../mcp/services/oauth-scope-mapper.service';
 import type {
   MCPAuthContext,
   MCPToolDefinition,
@@ -33,6 +34,7 @@ export class MCPClientService {
     private readonly mcpAuthService: McpAuthService,
     private readonly toolRegistryService: ToolRegistryService,
     private readonly mcpPermissionService: McpPermissionService,
+    private readonly oauthScopeMapper: OAuthScopeMapperService,
   ) {}
 
   /**
@@ -253,6 +255,20 @@ export class MCPClientService {
         selectedModel,
       );
 
+      const [userPermissions, oauthScopes] = await Promise.all([
+        this.mcpPermissionService.getUserPermissions(authContext.userId),
+        this.oauthScopeMapper.getScopesForIntegration(
+          tool.schema.integration,
+          authContext.userId,
+        ),
+      ]);
+      const integrationPermissions = userPermissions.filter(
+        (p) => p.integration === tool.schema.integration,
+      );
+      const permissionTools = integrationPermissions.flatMap(
+        (p) => p.permissions?.tools || [],
+      );
+
       const startTime = Date.now();
       const result = await this.toolRegistryService.executeTool(
         toolName,
@@ -261,8 +277,8 @@ export class MCPClientService {
           userId: authContext.userId,
           connectionId,
           integration: tool.schema.integration,
-          permissions: [],
-          scopes: [],
+          permissions: permissionTools,
+          scopes: oauthScopes,
           isAdmin: authContext.isAdmin,
         },
       );

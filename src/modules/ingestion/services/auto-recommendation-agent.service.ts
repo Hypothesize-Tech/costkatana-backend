@@ -19,6 +19,7 @@ import { ConfigService } from '@nestjs/config';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { BedrockService } from '../../bedrock/bedrock.service';
+import { UsageService } from '../../usage/services/usage.service';
 import {
   UserBehaviorPattern,
   UserBehaviorPatternDocument,
@@ -73,6 +74,7 @@ export class AutoRecommendationAgentService {
     private aiRecommendationModel: Model<AIRecommendationDocument>,
     @InjectModel(Usage.name)
     private usageModel: Model<Usage>,
+    private readonly usageService: UsageService,
     private readonly configService: ConfigService,
     private readonly bedrockService: BedrockService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
@@ -326,119 +328,46 @@ export class AutoRecommendationAgentService {
   }
 
   /**
-   * Get recent usage data for analysis (placeholder - would integrate with actual usage service)
+   * Get recent usage data for analysis via UsageService
    */
   private async getRecentUsageData(userId: string): Promise<any> {
     try {
-      const now = new Date();
-      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-      // Query last 7 days
-      const last7DaysUsage = await this.usageModel.aggregate([
-        {
-          $match: {
-            userId,
-            createdAt: { $gte: sevenDaysAgo, $lte: now },
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            totalRequests: { $sum: 1 },
-            totalCost: { $sum: '$cost' },
-            modelsUsed: { $addToSet: '$model' },
-            requestsByHour: { $push: { $hour: '$createdAt' } },
-          },
-        },
+      const [weeklyStats, monthlyStats] = await Promise.all([
+        this.usageService.getUsageStats(userId, 'weekly'),
+        this.usageService.getUsageStats(userId, 'monthly'),
       ]);
 
-      // Query last 30 days
-      const last30DaysUsage = await this.usageModel.aggregate([
-        {
-          $match: {
-            userId,
-            createdAt: { $gte: thirtyDaysAgo, $lte: now },
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            totalRequests: { $sum: 1 },
-            totalCost: { $sum: '$cost' },
-            modelsUsed: { $addToSet: '$model' },
-            costsByDay: {
-              $push: {
-                date: {
-                  $dateToString: { format: '%Y-%m-%d', date: '$createdAt' },
-                },
-                cost: '$cost',
-              },
-            },
-          },
-        },
-      ]);
-
-      // Calculate peak hours from 7-day data
-      const peakHours = last7DaysUsage[0]?.requestsByHour || [];
-      const hourCounts = peakHours.reduce(
-        (acc: Record<number, number>, hour: number) => {
-          acc[hour] = (acc[hour] || 0) + 1;
-          return acc;
-        },
-        {} as Record<number, number>,
-      );
-      const sortedHours = Object.entries(hourCounts)
-        .sort(([, a], [, b]) => (b as number) - (a as number))
-        .slice(0, 4)
-        .map(([hour]) => parseInt(hour));
-
-      // Calculate cost trend from 30-day data
+      const costsByDay =
+        (monthlyStats.usageOverTime as Array<{ date: string; cost: number; requests: number }>) || [];
       const costTrend = this.calculateCostTrend(
-        last30DaysUsage[0]?.costsByDay || [],
+        costsByDay.map((d) => ({ date: d.date, cost: d.cost })),
       );
+
+      // UsageService returns daily buckets; peak hours would need hourly aggregation
+      const peakHours: number[] = [];
 
       return {
         last7Days: {
-          totalRequests: last7DaysUsage[0]?.totalRequests || 0,
-          totalCost: last7DaysUsage[0]?.totalCost || 0,
-          avgCostPerRequest: last7DaysUsage[0]?.totalRequests
-            ? last7DaysUsage[0].totalCost / last7DaysUsage[0].totalRequests
-            : 0,
-          modelsUsed: last7DaysUsage[0]?.modelsUsed || [],
-          peakHours: sortedHours,
+          totalRequests: weeklyStats.totalRequests,
+          totalCost: weeklyStats.totalCost,
+          modelsUsed: Object.keys(weeklyStats.costByModel || {}),
+          peakHours,
         },
         last30Days: {
-          totalRequests: last30DaysUsage[0]?.totalRequests || 0,
-          totalCost: last30DaysUsage[0]?.totalCost || 0,
-          avgCostPerRequest: last30DaysUsage[0]?.totalRequests
-            ? last30DaysUsage[0].totalCost / last30DaysUsage[0].totalRequests
-            : 0,
-          modelsUsed: last30DaysUsage[0]?.modelsUsed || [],
-          costTrend,
+          totalRequests: monthlyStats.totalRequests,
+          totalCost: monthlyStats.totalCost,
+          modelsUsed: Object.keys(monthlyStats.costByModel || {}),
         },
+        costTrend,
       };
     } catch (error) {
-      this.logger.error('Failed to get recent usage data', {
-        userId,
+      this.logger.warn('Failed to get usage data for recommendations', {
         error: error instanceof Error ? error.message : String(error),
       });
-      // Return empty data structure instead of mock data
       return {
-        last7Days: {
-          totalRequests: 0,
-          totalCost: 0,
-          avgCostPerRequest: 0,
-          modelsUsed: [],
-          peakHours: [],
-        },
-        last30Days: {
-          totalRequests: 0,
-          totalCost: 0,
-          avgCostPerRequest: 0,
-          modelsUsed: [],
-          costTrend: 'unknown',
-        },
+        last7Days: { totalRequests: 0, totalCost: 0, modelsUsed: [], peakHours: [] },
+        last30Days: { totalRequests: 0, totalCost: 0, modelsUsed: [] },
+        costTrend: 'stable',
       };
     }
   }

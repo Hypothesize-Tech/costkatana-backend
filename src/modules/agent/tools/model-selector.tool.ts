@@ -605,8 +605,9 @@ Input should be a JSON string with:
     return {
       averageLatency: providerData.baseLatency * latencyMultiplier,
       successRate: providerData.reliability,
-      totalRequests: 100, // Estimated based on provider data
+      totalRequests: 0,
       hasRealData: false,
+      _meta: { note: 'totalRequests requires usage analytics integration; 0 indicates no real data' },
     };
   }
 
@@ -621,10 +622,8 @@ Input should be a JSON string with:
     const baseLatency = latencyData.averageLatency || 1000; // ms
     const successRate = latencyData.successRate || 0.95;
 
-    // Calculate response time with realistic variability
-    const latencyVariability = baseLatency * 0.2; // 20% variability
-    const responseTime =
-      (baseLatency + (Math.random() - 0.5) * latencyVariability) / 1000; // Convert to seconds
+    // Use base latency directly - deterministic (no synthetic randomness)
+    const responseTime = baseLatency / 1000; // Convert to seconds
 
     // Calculate cost based on actual pricing and estimated token usage
     const estimatedTokensPerRequest = this.estimateTokensForUseCase(useCase);
@@ -637,11 +636,8 @@ Input should be a JSON string with:
     // Calculate token efficiency (how well the model uses tokens)
     const tokenEfficiency = this.calculateTokenEfficiency(modelInfo, useCase);
 
-    // Calculate error rate inversely related to success rate
-    const errorRate = Math.max(
-      0,
-      Math.min(0.1, 1 - successRate + Math.random() * 0.02),
-    );
+    // Error rate inversely related to success rate (deterministic)
+    const errorRate = Math.max(0, Math.min(0.1, 1 - successRate));
 
     // Calculate throughput based on latency and provider capabilities
     const throughput = this.calculateThroughput(
@@ -1008,10 +1004,7 @@ Input should be a JSON string with:
     if (modelInfo.contextWindow > 100000) baseScore += 0.1;
     else if (modelInfo.contextWindow > 50000) baseScore += 0.05;
 
-    return Math.min(
-      1.0,
-      Math.max(0.1, baseScore + (Math.random() - 0.5) * 0.1),
-    ); // Small random variation
+    return Math.min(1.0, Math.max(0.1, baseScore));
   }
 
   /**
@@ -1028,10 +1021,7 @@ Input should be a JSON string with:
     if (useCase === 'code') baseEfficiency += 0.05; // Code generation is often more token-efficient
     if (useCase === 'summarization') baseEfficiency -= 0.05; // Summarization can be less efficient
 
-    return Math.min(
-      1.0,
-      Math.max(0.5, baseEfficiency + (Math.random() - 0.5) * 0.1),
-    );
+    return Math.min(1.0, Math.max(0.5, baseEfficiency));
   }
 
   /**
@@ -1051,10 +1041,7 @@ Input should be a JSON string with:
     };
 
     const cap = providerCaps[provider.toLowerCase()] || 200;
-    return Math.min(
-      cap,
-      Math.max(10, baseThroughput + Math.floor((Math.random() - 0.5) * 20)),
-    );
+    return Math.min(cap, Math.max(10, baseThroughput));
   }
 
   private async performActualModelTesting(

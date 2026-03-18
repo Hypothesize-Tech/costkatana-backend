@@ -394,8 +394,8 @@ export class EnterpriseSecurityGuard implements CanActivate {
               ipAddress: request.ip || '',
               userAgent: request.headers?.['user-agent'] ?? '',
               contentLength: content.length,
-              estimatedTokens: Math.ceil(content.length / 4), // Rough estimate
-              estimatedCost: 0.001, // Placeholder cost
+              estimatedTokens: Math.ceil(content.length / 4),
+              estimatedCost: Math.ceil(content.length / 4) * 0.000002,
             },
             security: {
               piiDetected:

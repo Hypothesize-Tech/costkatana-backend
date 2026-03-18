@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { LoggerService } from '../../../common/logger/logger.service';
 import { IntegrationService } from '../../integration/integration.service';
 import { JiraService } from '../../integration/services/jira.service';
@@ -119,6 +120,7 @@ interface ChannelInfo {
 export class IntegrationChatService {
   constructor(
     private readonly logger: LoggerService,
+    private readonly configService: ConfigService,
     private readonly integrationService: IntegrationService,
     private readonly jiraService: JiraService,
     private readonly linearService: LinearService,
@@ -3192,27 +3194,32 @@ export class IntegrationChatService {
           break;
       }
 
+      const gmailCalendarEnabled = this.configService.get<string>(
+        'ENABLE_GOOGLE_GMAIL_CALENDAR',
+        'false',
+      ) === 'true';
+
       if (command.entity === 'email') {
         return {
           success: false,
-          message:
-            'Send email via Gmail is not yet supported. Use the Gmail app or web interface.',
-          error: 'Not yet supported',
+          message: gmailCalendarEnabled
+            ? 'Gmail send is not available. Use the Gmail app or mail.google.com for now.'
+            : 'Gmail send is not enabled for this workspace. Use the Gmail app or mail.google.com.',
+          error: 'Feature not available',
           metadata: {
             service: 'google',
-            plannedFeatures: ['send email'],
           },
         };
       }
       if (command.entity === 'calendar' || command.entity === 'event') {
         return {
           success: false,
-          message:
-            'List calendar / events is not yet supported. Use Google Calendar directly.',
-          error: 'Not yet supported',
+          message: gmailCalendarEnabled
+            ? 'Google Calendar list is not available. Use calendar.google.com for now.'
+            : 'Google Calendar list is not enabled for this workspace. Use calendar.google.com.',
+          error: 'Feature not available',
           metadata: {
             service: 'google',
-            plannedFeatures: ['list calendar', 'list events'],
           },
         };
       }

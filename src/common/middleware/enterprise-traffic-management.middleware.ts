@@ -1,6 +1,7 @@
 import { Injectable, NestMiddleware, Logger } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { ConfigService } from '@nestjs/config';
+import type { TrafficPredictionService } from '../../modules/analytics/services/traffic-prediction.service';
 
 /**
  * Enterprise Traffic Management Middleware
@@ -23,7 +24,10 @@ export class EnterpriseTrafficManagementMiddleware implements NestMiddleware {
   private maxConcurrentRequests: number;
   private activeRequests = 0;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private trafficPredictionService?: TrafficPredictionService,
+  ) {
     this.maxConcurrentRequests = parseInt(
       this.configService.get('ENTERPRISE_MAX_CONCURRENT_REQUESTS', '10'),
     );
@@ -64,7 +68,7 @@ export class EnterpriseTrafficManagementMiddleware implements NestMiddleware {
 
     // Process request immediately
     this.activeRequests++;
-    this.attachCleanupHandler(res);
+    this.attachCleanupHandler(res, req);
     next();
   }
 
@@ -102,7 +106,7 @@ export class EnterpriseTrafficManagementMiddleware implements NestMiddleware {
       }
 
       this.activeRequests++;
-      this.attachCleanupHandler(queuedRequest.res);
+      this.attachCleanupHandler(queuedRequest.res, queuedRequest.req);
 
       this.logger.log('Processing queued enterprise request', {
         userId: (queuedRequest.req as any).user?.id,
@@ -154,16 +158,46 @@ export class EnterpriseTrafficManagementMiddleware implements NestMiddleware {
   /**
    * Attach cleanup handler to track when request completes
    */
-  private attachCleanupHandler(res: Response) {
+  private attachCleanupHandler(res: Response, req?: Request) {
+    const startTime = Date.now();
     res.on('finish', () => {
       this.activeRequests = Math.max(0, this.activeRequests - 1);
-      // Process any queued requests now that capacity is available
+      if (this.trafficPredictionService && req) {
+        this.recordTrafficData(req, startTime, res.statusCode).catch(() => {});
+      }
       setImmediate(() => this.processQueuedRequests());
     });
 
     res.on('close', () => {
       this.activeRequests = Math.max(0, this.activeRequests - 1);
+      if (this.trafficPredictionService && req) {
+        this.recordTrafficData(req, startTime, res.statusCode).catch(() => {});
+      }
       setImmediate(() => this.processQueuedRequests());
+    });
+  }
+
+  private async recordTrafficData(
+    req: Request,
+    startTime: number,
+    statusCode: number,
+  ): Promise<void> {
+    if (!this.trafficPredictionService) return;
+    const responseTime = Date.now() - startTime;
+    await this.trafficPredictionService.recordTrafficData({
+      requestsPerSecond: 1,
+      uniqueUsers: 1,
+      responseTime,
+      errorRate: statusCode >= 400 ? 1 : 0,
+      cpuUsage: 0,
+      memoryUsage: 0,
+      endpointDistribution: { [req.path]: 1 },
+      userTierDistribution: {
+        [(req as any).user?.subscription?.plan || 'free']: 1,
+      },
+      geographicDistribution: {
+        [(req.headers['x-forwarded-for'] as string) || 'unknown']: 1,
+      },
     });
   }
 }

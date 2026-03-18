@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Usage } from '../../../schemas/core/usage.schema';
+import { TrafficPredictionService } from '../../analytics/services/traffic-prediction.service';
 
 /**
  * Traffic Management Service
@@ -41,7 +42,10 @@ export class TrafficManagementService {
     }
   >();
 
-  constructor(@InjectModel(Usage.name) private usageModel: Model<any>) {
+  constructor(
+    @InjectModel(Usage.name) private usageModel: Model<any>,
+    private readonly trafficPredictionService: TrafficPredictionService,
+  ) {
     // Start background traffic monitoring
     this.startTrafficMonitoring();
   }
@@ -486,30 +490,46 @@ export class TrafficManagementService {
     maxRPM: number;
     maxLoadFactor: number;
   }> {
-    // Base thresholds
+    // Try to get dynamic thresholds from historical traffic data
+    const historical = this.trafficPredictionService.getHistoricalAverages(
+      3600000,
+    ); // last hour
     const baseThresholds = {
-      maxResponseTime: 5000, // 5 seconds
-      maxErrorRate: 0.1, // 10% error rate
-      maxRPM: 100, // 100 requests per minute
+      maxResponseTime: 5000, // 5 seconds default
+      maxErrorRate: 0.1, // 10% default
+      maxRPM: 100, // 100 RPM default
       maxLoadFactor: 2.0, // 2x normal load
     };
 
-    // In a real implementation, these would be calculated from historical data
-    // For now, use configurable values with environment variable overrides
+    let maxResponseTime = parseInt(String(baseThresholds.maxResponseTime),
+      10,
+    );
+    let maxErrorRate = parseFloat(String(baseThresholds.maxErrorRate),
+    );
+    let maxRPM = parseInt( String(baseThresholds.maxRPM),
+      10,
+    );
+
+    if (historical && historical.dataPoints >= 5) {
+      // Use historical averages as baseline, with 2x headroom for spikes
+      maxResponseTime = Math.max(
+        baseThresholds.maxResponseTime,
+        Math.ceil(historical.avgResponseTimeMs * 2) || baseThresholds.maxResponseTime,
+      );
+      maxErrorRate = Math.max(
+        baseThresholds.maxErrorRate,
+        Math.min(0.5, historical.avgErrorRate * 2) || baseThresholds.maxErrorRate,
+      );
+      maxRPM = Math.max(
+        baseThresholds.maxRPM,
+        Math.ceil(historical.avgRpm * 2) || baseThresholds.maxRPM,
+      );
+    }
 
     return {
-      maxResponseTime: parseInt(
-        process.env.MAX_RESPONSE_TIME_MS ||
-          String(baseThresholds.maxResponseTime),
-        10,
-      ),
-      maxErrorRate: parseFloat(
-        process.env.MAX_ERROR_RATE || String(baseThresholds.maxErrorRate),
-      ),
-      maxRPM: parseInt(
-        process.env.MAX_REQUESTS_PER_MINUTE || String(baseThresholds.maxRPM),
-        10,
-      ),
+      maxResponseTime,
+      maxErrorRate,
+      maxRPM,
       maxLoadFactor: parseFloat(
         process.env.MAX_LOAD_FACTOR || String(baseThresholds.maxLoadFactor),
       ),

@@ -164,7 +164,7 @@ export class AuditAnchorService implements OnModuleInit, OnModuleDestroy {
       });
     }
 
-    // Publish to S3 (in production)
+    // Publish anchor to S3 for external verification
     try {
       const s3Location = await this.publishToS3(record);
       record.publishedAt = new Date();

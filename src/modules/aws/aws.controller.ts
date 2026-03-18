@@ -44,6 +44,12 @@ import { CostExplorerService } from './services/cost-explorer.service';
 import { CloudWatchService } from './services/cloudwatch.service';
 import { DynamoDbService } from './services/dynamodb.service';
 import { EcsService } from './services/ecs.service';
+/**
+ * AwsChatHandlerService: Used internally by intent/plan flow for chat-based AWS
+ * operations. Not exposed as a public HTTP endpoint - both Express and NestJS
+ * backends keep this internal. Chat flows use POST /api/aws/intent and
+ * POST /api/aws/plan instead.
+ */
 import { AwsChatHandlerService } from './services/aws-chat-handler.service';
 
 // Import DTOs

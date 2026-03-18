@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { StateGraph, Annotation, START, END } from '@langchain/langgraph';
 import { BaseMessage, HumanMessage, AIMessage } from '@langchain/core/messages';
 import { BedrockService } from '../../bedrock/bedrock.service';
+import { TaskClassifierService } from '../../governed-agent/services/task-classifier.service';
 
 // Multi-Agent State using LangGraph Annotation
 const MultiAgentStateAnnotation = Annotation.Root({
@@ -127,6 +128,7 @@ export class MultiAgentFlowService {
   constructor(
     private readonly configService: ConfigService,
     private readonly bedrockService: BedrockService,
+    private readonly taskClassifier: TaskClassifierService,
   ) {
     this.initializeWorkflow();
   }
@@ -417,25 +419,53 @@ export class MultiAgentFlowService {
   private async analyzeTask(
     content: string,
     state: MultiAgentState,
-  ): Promise<any> {
-    // Analyze task type and requirements
-    const isResearch = /\b(research|find|search|analyze|study)\b/i.test(
-      content,
-    );
-    const isWebSearch = /\b(web|internet|online|browse)\b/i.test(content);
-    const isSimple = content.length < 100;
-
-    return {
-      taskType: isResearch
-        ? 'research'
-        : isWebSearch
-          ? 'web_search'
-          : isSimple
-            ? 'simple'
-            : 'general',
-      complexity: isSimple ? 'low' : 'medium',
-      needsWebData: isWebSearch || /\b(current|latest|recent)\b/i.test(content),
-    };
+  ): Promise<{
+    taskType: string;
+    complexity: string;
+    needsWebData: boolean;
+  }> {
+    try {
+      const classification = await this.taskClassifier.classifyTask(
+        content,
+        state.userId || 'anonymous',
+      );
+      const taskTypeMap: Record<string, string> = {
+        research: 'research',
+        simple_query: 'simple',
+        complex_query: 'general',
+        cross_integration: 'general',
+        coding: 'general',
+        data_transformation: 'general',
+      };
+      const taskType =
+        taskTypeMap[classification.type] || 'general';
+      const needsWebData =
+        classification.type === 'research' ||
+        /\b(current|latest|recent|web|internet|online|browse)\b/i.test(content);
+      return {
+        taskType,
+        complexity: classification.complexity,
+        needsWebData,
+      };
+    } catch (error) {
+      this.logger.warn('TaskClassifier failed, using regex fallback', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      const isResearch = /\b(research|find|search|analyze|study)\b/i.test(content);
+      const isWebSearch = /\b(web|internet|online|browse)\b/i.test(content);
+      const isSimple = content.length < 100;
+      return {
+        taskType: isResearch
+          ? 'research'
+          : isWebSearch
+            ? 'web_search'
+            : isSimple
+              ? 'simple'
+              : 'general',
+        complexity: isSimple ? 'low' : 'medium',
+        needsWebData: isWebSearch || /\b(current|latest|recent)\b/i.test(content),
+      };
+    }
   }
 
   private async generateSpecialistResponse(

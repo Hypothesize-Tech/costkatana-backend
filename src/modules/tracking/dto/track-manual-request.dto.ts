@@ -18,6 +18,20 @@ export class TrackManualRequestDto {
   @Transform(({ value }) => parseFloat(value))
   tokens: number;
 
+  /** When provided with outputTokens, enables accurate billing. Omit to use 70/30 input/output estimate. */
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  @Transform(({ value }) => (value != null ? parseFloat(value) : undefined))
+  inputTokens?: number;
+
+  /** When provided with inputTokens, enables accurate billing. Omit to use 70/30 input/output estimate. */
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  @Transform(({ value }) => (value != null ? parseFloat(value) : undefined))
+  outputTokens?: number;
+
   @IsOptional()
   @IsString()
   @IsNotEmpty()

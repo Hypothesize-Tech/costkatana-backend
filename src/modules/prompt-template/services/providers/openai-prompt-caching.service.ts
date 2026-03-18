@@ -39,38 +39,36 @@ export class OpenAIPromptCachingService {
 
   /**
    * Analyze prompt for OpenAI automatic caching
-   * OpenAI automatically caches the initial static portion of prompts
+   * OpenAI automatically caches the initial static portion of prompts.
+   * Cache hit status is unknown at analysis time - use recordResponseUsage()
+   * when the actual OpenAI API response is received to track real cache hits.
    */
   analyzeCaching(messages: any[]): OpenAICacheAnalysis {
-    // OpenAI uses automatic caching - analyze the static prefix
     const cacheableContent = this.extractCacheablePrefix(messages);
     const cacheableTokens = this.estimateTokens(cacheableContent);
-
-    // Generate a deterministic cache key for this content
     const cacheKey = this.generateCacheKey(cacheableContent);
 
-    // Track total requests
-    this.totalRequests++;
-
-    // Check if this cache key exists (simulating cache hit)
-    const cacheHit = this.cacheKeys.has(cacheKey);
-
-    if (cacheHit) {
-      // Track cache hit
-      this.cacheHits++;
-
-      // Update usage statistics
-      const cacheEntry = this.cacheKeys.get(cacheKey)!;
-      cacheEntry.lastUsed = new Date();
-      cacheEntry.usageCount++;
-    }
-
+    // Cache hit is determined from actual API response usage.prompt_tokens_details.cached_tokens
     return {
       cacheablePrefix: cacheableContent,
       cacheableTokens,
-      cacheHit,
+      cacheHit: false, // Unknown until response received - call recordResponseUsage() with actual usage
       cacheKey,
     };
+  }
+
+  /**
+   * Record actual cache usage from an OpenAI API response.
+   * Call this when the response is received to track real cache hit rates.
+   */
+  recordResponseUsage(usage: {
+    prompt_tokens_details?: { cached_tokens?: number };
+  }): void {
+    this.totalRequests++;
+    const cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? 0;
+    if (cachedTokens > 0) {
+      this.cacheHits++;
+    }
   }
 
   /**

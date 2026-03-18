@@ -98,6 +98,7 @@ import { AiQueryRouterService } from './services/ai-query-router.service';
     GovernedAgentSseService,
     AiQueryRouterService,
     AiIntentRouterService,
+    TaskClassifierService,
   ],
 })
 export class GovernedAgentModule {}

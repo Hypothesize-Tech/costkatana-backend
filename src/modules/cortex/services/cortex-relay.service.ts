@@ -5,6 +5,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { estimateTokenCount } from '../../../utils/token-count.utils';
 import { BedrockService } from '../../bedrock/bedrock.service';
 import { CortexModelRouterService } from './cortex-model-router.service';
 import { CortexEncoderService } from './cortex-encoder.service';
@@ -371,12 +372,10 @@ export class CortexRelayService {
   }
 
   /**
-   * Estimate tokens used (simplified calculation)
+   * Estimate tokens used via tiktoken when available, else 4-char heuristic.
    */
   private estimateTokens(input: string, output: string): number {
-    // Rough estimation: ~4 characters per token for English text
-    const totalChars = input.length + output.length;
-    return Math.ceil(totalChars / 4);
+    return estimateTokenCount(input || '') + estimateTokenCount(output || '');
   }
 
   /**

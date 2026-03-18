@@ -463,8 +463,7 @@ export class VectorMaintenanceJob {
         const indexName = index.name;
         if (!indexName || keepIndexNames.includes(indexName)) continue;
         try {
-          // Check if index is being used (simplified check)
-          // In production, you'd use $indexStats or monitoring tools
+          // Check if index is being used via $indexStats and multi-level analysis
           const isUsed = await this.isIndexUsed(indexName);
 
           if (!isUsed) {

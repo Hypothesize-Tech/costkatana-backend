@@ -239,6 +239,8 @@ export class BillingService {
     dto: {
       gateway: 'stripe' | 'razorpay' | 'paypal';
       type: 'card' | 'upi' | 'bank_account' | 'paypal_account';
+      paymentMethodId?: string;
+      razorpayTokenId?: string;
       cardDetails?: {
         number: string;
         expiryMonth: number;
@@ -281,18 +283,32 @@ export class BillingService {
       gatewayCustomerId = customerResult.customerId;
     }
 
-    // Create payment method in gateway
-    const paymentMethodParams: any = {
+    const gatewayType =
+      dto.type === 'paypal_account' ? 'paypal' : dto.type;
+
+    const paymentMethodParams: Record<string, unknown> = {
       customerId: gatewayCustomerId,
-      type: dto.type,
+      type: gatewayType,
     };
 
-    if (dto.type === 'card' && dto.cardDetails) {
-      paymentMethodParams.cardNumber = dto.cardDetails.number;
-      paymentMethodParams.cardExpiryMonth = dto.cardDetails.expiryMonth;
-      paymentMethodParams.cardExpiryYear = dto.cardDetails.expiryYear;
-      paymentMethodParams.cardCvc = dto.cardDetails.cvc;
-      paymentMethodParams.cardholderName = dto.cardDetails.name;
+    if (dto.type === 'card') {
+      if (dto.gateway === 'stripe' && dto.paymentMethodId) {
+        paymentMethodParams.paymentMethodId = dto.paymentMethodId;
+      } else if (dto.gateway === 'razorpay' && dto.razorpayTokenId) {
+        paymentMethodParams.razorpayTokenId = dto.razorpayTokenId;
+      } else if (dto.cardDetails) {
+        throw new BadRequestException(
+          'Raw card data cannot be sent to the server for PCI compliance. ' +
+            'For Stripe: use Stripe.js to create a PaymentMethod and pass paymentMethodId. ' +
+            'For Razorpay: use Razorpay Checkout/Elements to tokenize and pass razorpayTokenId.',
+        );
+      } else {
+        throw new BadRequestException(
+          dto.gateway === 'stripe'
+            ? 'paymentMethodId is required for Stripe cards. Create it using Stripe.js on the client.'
+            : 'razorpayTokenId is required for Razorpay cards. Create it using Razorpay Checkout/Elements on the client.',
+        );
+      }
     } else if (dto.type === 'upi' && dto.upiDetails) {
       paymentMethodParams.upiId = dto.upiDetails.upiId;
     } else if (dto.type === 'bank_account' && dto.bankAccountDetails) {
@@ -307,7 +323,13 @@ export class BillingService {
     const gatewayPaymentMethod =
       await this.paymentGatewayService.createPaymentMethod(
         dto.gateway,
-        paymentMethodParams,
+        paymentMethodParams as {
+          customerId: string;
+          type: 'card' | 'upi' | 'bank_account' | 'paypal';
+          paymentMethodId?: string;
+          razorpayTokenId?: string;
+          [key: string]: unknown;
+        },
       );
 
     const gw = gatewayPaymentMethod as {

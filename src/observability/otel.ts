@@ -23,7 +23,7 @@ import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { MongoDBInstrumentation } from '@opentelemetry/instrumentation-mongodb';
 import { AwsInstrumentation } from '@opentelemetry/instrumentation-aws-sdk';
 import { loggingService } from '../common/services/logging.service';
-// import { SelfHealingSpanProcessor } from './selfHealingSpanProcessor'; // Temporarily disabled due to compilation issues
+import { SelfHealingSpanProcessor } from './selfHealingSpanProcessor';
 
 // Enable OpenTelemetry diagnostic logging in development
 if (process.env.NODE_ENV !== 'production') {
@@ -341,10 +341,11 @@ export async function startTelemetry(): Promise<void> {
       step: 'create_sdk',
     });
 
-    // Create and configure SDK
+    // Create and configure SDK with self-healing span processor for resilient export
+    const spanProcessor = new SelfHealingSpanProcessor(traceExporter as any);
     sdk = new NodeSDK({
       resource,
-      traceExporter: traceExporter as any,
+      spanProcessors: [spanProcessor],
       instrumentations,
     });
 

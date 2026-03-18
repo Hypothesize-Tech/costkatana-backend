@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
+import * as fs from 'fs';
 import * as os from 'os';
 import * as process from 'process';
 
@@ -100,6 +101,7 @@ export class ServicePrioritizationService implements OnModuleDestroy {
   private requestCounter = 0;
   private errorCounter = 0;
   private lastHealthCheck = Date.now();
+  private lastNetworkSample: { bytes: number; time: number } | null = null;
   private circuitBreakers = new Map<
     string,
     {
@@ -863,23 +865,31 @@ export class ServicePrioritizationService implements OnModuleDestroy {
     const usedMemory = totalMemory - freeMemory;
     const memoryUsage = (usedMemory / totalMemory) * 100;
 
-    // Network interfaces for basic network monitoring
-    const networkInterfaces = os.networkInterfaces();
-    const networkRxBytes = 0;
-    const networkTxBytes = 0;
-
-    Object.values(networkInterfaces).forEach((interfaces) => {
-      interfaces?.forEach((iface) => {
-        if (!iface.internal && iface.family === 'IPv4') {
-          // In production, you'd track actual network I/O
-          // For now, use system load as proxy
-        }
-      });
-    });
-
-    // Use load average for network usage approximation
-    const loadAverage = os.loadavg()[0];
-    const networkUsage = Math.min(loadAverage * 15, 100); // More conservative estimate
+    // Network usage: on Linux use /proc/net/dev delta for bytes/sec; else load as proxy
+    let networkUsage: number;
+    const now = Date.now();
+    const totalBytes = this.readNetworkTotalBytes();
+    if (
+      totalBytes !== null &&
+      this.lastNetworkSample &&
+      now > this.lastNetworkSample.time
+    ) {
+      const deltaBytes = totalBytes - this.lastNetworkSample.bytes;
+      const deltaSec = (now - this.lastNetworkSample.time) / 1000;
+      const bytesPerSec = deltaSec > 0 ? deltaBytes / deltaSec : 0;
+      // 50 MB/s ≈ 100% (typical saturated link)
+      networkUsage = Math.min(
+        100,
+        Math.round((bytesPerSec / (50 * 1024 * 1024)) * 100),
+      );
+      this.lastNetworkSample = { bytes: totalBytes, time: now };
+    } else {
+      if (totalBytes !== null) {
+        this.lastNetworkSample = { bytes: totalBytes, time: now };
+      }
+      const loadAverage = os.loadavg()[0];
+      networkUsage = Math.min(loadAverage * 15, 100);
+    }
 
     return {
       cpuUsage: Math.max(0, Math.min(100, cpuUsage)),
@@ -930,9 +940,29 @@ export class ServicePrioritizationService implements OnModuleDestroy {
   }
 
   private getCompletedRequests(): number {
-    // Estimate completed requests based on history
-    // In production, you'd track this more accurately
     return Math.max(0, this.requestCounter - this.systemLoad.activeRequests);
+  }
+
+  /** Read total rx+tx bytes from /proc/net/dev on Linux; returns null on other platforms */
+  private readNetworkTotalBytes(): number | null {
+    try {
+      if (process.platform !== 'linux') return null;
+      const data = fs.readFileSync('/proc/net/dev', 'utf8');
+      let total = 0;
+      const lines = data.split('\n').slice(2);
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        // Format: "iface: rx_bytes rx_packets ... tx_bytes tx_packets ..."
+        if (parts.length >= 10 && parts[0].endsWith(':')) {
+          const rx = parseInt(parts[1] as string, 10) || 0;
+          const tx = parseInt(parts[9] as string, 10) || 0;
+          total += rx + tx;
+        }
+      }
+      return total;
+    } catch {
+      return null;
+    }
   }
 
   private performHealthChecks(): void {

@@ -76,6 +76,7 @@ import { AwsMcpService } from './services/integrations/aws-mcp.service';
   ],
   exports: [
     McpPermissionService,
+    OAuthScopeMapperService,
     ConfirmationService,
     McpAuditService,
     McpAuthService,

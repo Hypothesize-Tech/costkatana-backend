@@ -9,6 +9,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { StorageModule } from '../storage/storage.module';
 import { BedrockModule } from '../bedrock/bedrock.module';
 import { AuthModule } from '../auth/auth.module';
+import { UsageModule } from '../usage/usage.module';
 
 // Schemas
 import {
@@ -74,6 +75,7 @@ import { IntelligentRouterService } from './services/intelligent-router.service'
     StorageModule,
     BedrockModule,
     AuthModule,
+    UsageModule,
 
     // Mongoose schemas for database operations
     MongooseModule.forFeature([

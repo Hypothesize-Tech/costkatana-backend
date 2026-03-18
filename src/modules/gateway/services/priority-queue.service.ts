@@ -319,6 +319,156 @@ export class PriorityQueueService {
   }
 
   /**
+   * Acquire a processing slot - blocks until a slot is available (concurrency limit).
+   * When GATEWAY_QUEUE_MODE=true, uses Redis sorted set for priority-ordered slot acquisition.
+   */
+  async acquireSlot(
+    req: { headers?: Record<string, string | string[] | undefined> },
+    res: { on: (event: string, fn: () => void) => void },
+    priority: number,
+  ): Promise<void> {
+    const queueMode = process.env.GATEWAY_QUEUE_MODE === 'true';
+    if (queueMode) {
+      await this.acquireSlotWithQueue(req, res, priority);
+    } else {
+      await this.acquireSlotPassthrough(req, res, priority);
+    }
+  }
+
+  /**
+   * Queue mode: Enqueue request to Redis sorted set, wait until at front and slot available.
+   */
+  private async acquireSlotWithQueue(
+    req: { headers?: Record<string, string | string[] | undefined> },
+    res: { on: (event: string, fn: () => void) => void },
+    priority: number,
+  ): Promise<void> {
+    const queueKey = 'gateway:priority_queue';
+    const slotKey = 'gateway:active_slots';
+    const maxConcurrent = parseInt('100',
+      10,
+    );
+    const requestId =
+      (Array.isArray(req.headers?.['x-request-id'])
+        ? req.headers['x-request-id'][0]
+        : req.headers?.['x-request-id']) || `pq-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const slotId = `${requestId}:${Date.now()}`;
+    const pollInterval = 50;
+    const maxWaitMs = parseInt(
+      process.env.GATEWAY_SLOT_ACQUIRE_TIMEOUT_MS || '30000',
+      10,
+    );
+
+    const priorityRequest: PriorityRequest = {
+      id: requestId,
+      priority,
+      userTier: 'free',
+      createdAt: new Date(),
+      estimatedProcessingTime: 0,
+    };
+    await this.enqueueRequest(priorityRequest);
+
+    const startWait = Date.now();
+    const requestData = JSON.stringify({
+      id: priorityRequest.id,
+      priority: priorityRequest.priority,
+      userTier: priorityRequest.userTier,
+      createdAt: priorityRequest.createdAt.toISOString(),
+      estimatedProcessingTime: priorityRequest.estimatedProcessingTime,
+    });
+
+    try {
+      while (true) {
+        const [frontItem] = await this.cacheService.zrange(queueKey, 0, 0);
+        const slotCount = await this.cacheService.scard(slotKey);
+        const isAtFront = frontItem === requestData;
+        const hasSlot = slotCount < maxConcurrent;
+
+        if (isAtFront && hasSlot) {
+          await this.cacheService.zrem(queueKey, requestData);
+          await this.cacheService.sadd(slotKey, slotId);
+          await this.cacheService.expire(slotKey, 3600);
+
+          res.on('finish', () => {
+            this.releaseSlot(slotKey, slotId).catch((err) => {
+              this.logger.warn('Failed to release slot', { slotId, error: err instanceof Error ? err.message : String(err) });
+            });
+          });
+          return;
+        }
+
+        if (Date.now() - startWait > maxWaitMs) {
+          await this.cacheService.zrem(queueKey, requestData);
+          this.logger.warn('Queue mode slot acquire timeout', { requestId, priority });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, pollInterval));
+      }
+    } catch (error) {
+      await this.cacheService.zrem(queueKey, requestData).catch(() => {});
+      throw error;
+    }
+  }
+
+  /**
+   * Passthrough mode: Simple concurrency limit without priority ordering.
+   */
+  private async acquireSlotPassthrough(
+    req: { headers?: Record<string, string | string[] | undefined> },
+    res: { on: (event: string, fn: () => void) => void },
+    priority: number,
+  ): Promise<void> {
+    const maxConcurrent = parseInt(
+      process.env.GATEWAY_MAX_CONCURRENT_REQUESTS || '100',
+      10,
+    );
+    const slotKey = 'gateway:active_slots';
+    const requestId =
+      (Array.isArray(req.headers?.['x-request-id'])
+        ? req.headers['x-request-id'][0]
+        : req.headers?.['x-request-id']) || `slot-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const slotId = `${requestId}:${Date.now()}`;
+    const pollInterval = 50;
+    const maxWaitMs = parseInt(
+      process.env.GATEWAY_SLOT_ACQUIRE_TIMEOUT_MS || '30000',
+      10,
+    );
+    const startWait = Date.now();
+
+    while (true) {
+      const current = await this.cacheService.scard(slotKey);
+      if (current < maxConcurrent) {
+        await this.cacheService.sadd(slotKey, slotId);
+        await this.cacheService.expire(slotKey, 3600);
+
+        res.on('finish', () => {
+          this.releaseSlot(slotKey, slotId).catch((err) => {
+            this.logger.warn('Failed to release slot', {
+              slotId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        });
+        return;
+      }
+
+      if (Date.now() - startWait > maxWaitMs) {
+        this.logger.warn('Slot acquire timeout', {
+          requestId,
+          priority,
+          maxConcurrent,
+        });
+        return;
+      }
+      await new Promise((r) => setTimeout(r, pollInterval));
+    }
+  }
+
+  private async releaseSlot(slotKey: string, slotId: string): Promise<void> {
+    await this.cacheService.srem(slotKey, slotId);
+  }
+
+  /**
    * Get queue status for endpoint
    */
   async getQueueStatus(): Promise<{

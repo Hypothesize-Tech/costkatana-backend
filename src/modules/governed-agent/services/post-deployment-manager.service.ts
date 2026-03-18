@@ -947,13 +947,15 @@ Output only the JSON array, no markdown or explanation.`;
           originalRequest,
           analysis,
         );
+        const isFallback =
+          inferredFile ===
+          PostDeploymentManagerService.INFERRED_PATH_FALLBACK;
         changes.push({
           file: inferredFile,
           changeType: 'modify',
-          description:
-            inferredFile === 'TBD'
-              ? `Implement: ${originalRequest}. No specific file could be inferred from the request.`
-              : `Implement: ${originalRequest}. Inferred file path: ${inferredFile}`,
+          description: isFallback
+            ? `Implement: ${originalRequest}. No specific file could be inferred; suggested path: ${inferredFile}`
+            : `Implement: ${originalRequest}. Inferred file path: ${inferredFile}`,
         });
       }
 
@@ -1050,6 +1052,9 @@ Output only the JSON array, no markdown or explanation.`;
       ],
     };
   }
+
+  private static readonly INFERRED_PATH_FALLBACK =
+    'src/modules/general/implementation.ts';
 
   /**
    * Infer file path from request text using pattern matching
@@ -1167,7 +1172,24 @@ Output only the JSON array, no markdown or explanation.`;
       return `src/modules/${moduleName}/${moduleName}.service.ts`;
     }
 
-    // Default fallback
-    return 'TBD';
+    // Entry point / bootstrap patterns
+    if (
+      /\b(main|entry|bootstrap|startup|init)\b/i.test(lowerRequest) ||
+      /\b(app|application)\s+(entry|start)\b/i.test(lowerRequest)
+    ) {
+      return 'src/main.ts';
+    }
+
+    // Application/module root
+    if (/\b(app|application)\s+(module|config)\b/i.test(lowerRequest)) {
+      return 'src/app.module.ts';
+    }
+
+    // Middleware / guard patterns
+    if (/\b(middleware|guard)\b/i.test(lowerRequest)) {
+      return 'src/common/middleware/global.middleware.ts';
+    }
+
+    return PostDeploymentManagerService.INFERRED_PATH_FALLBACK;
   }
 }

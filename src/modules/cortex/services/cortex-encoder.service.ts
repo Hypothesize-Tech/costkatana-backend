@@ -638,4 +638,30 @@ Frame: {"frameType": "event", "action": "action_create", "object": "project", "n
     if (roleCount <= 5) return 'medium';
     return 'complex';
   }
+
+  /**
+   * Get cache statistics for encoding entries
+   */
+  getCacheInfo(): {
+    totalEncodings: number;
+    averageConfidence: number;
+    averageProcessingTime: number;
+    errorRate: number;
+  } {
+    const stats = this.cache.getStats();
+    return {
+      totalEncodings: stats.totalEntries,
+      averageConfidence: 1 - stats.missRate,
+      averageProcessingTime: stats.averageAccessTime,
+      errorRate: stats.missRate,
+    };
+  }
+
+  /**
+   * Clear the Cortex cache (including encoding entries)
+   */
+  clearCache(): void {
+    this.cache.clear();
+    this.logger.log('Encoder cache cleared');
+  }
 }

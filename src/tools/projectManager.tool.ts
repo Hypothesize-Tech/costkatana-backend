@@ -1,6 +1,7 @@
 import { Tool } from '@langchain/core/tools';
 import { Project } from '../schemas/team-project/project.schema';
 import { User } from '../schemas/user/user.schema';
+import { Activity } from '../schemas/team-project/activity.schema';
 import { loggingService } from '../common/services/logging.service';
 
 interface ProjectOperation {
@@ -221,9 +222,9 @@ export class ProjectManagerTool extends Tool {
       }
 
       // Check if user has permission to update (owner or workspace admin)
-      const { PermissionService } =
+      const { permissionService } =
         await import('../services/permission.service');
-      const canManage = await PermissionService.hasPermission(
+      const canManage = await permissionService.hasPermission(
         operation.userId,
         project.workspaceId.toString(),
         'canManageProjects',
@@ -300,9 +301,9 @@ export class ProjectManagerTool extends Tool {
 
       // Check if user has access via workspace
       if (operation.userId) {
-        const { PermissionService } =
+        const { permissionService } =
           await import('../services/permission.service');
-        const canAccess = await PermissionService.canAccessProject(
+        const canAccess = await permissionService.canAccessProject(
           operation.userId,
           operation.projectId,
         );
@@ -591,21 +592,29 @@ export class ProjectManagerTool extends Tool {
     details: any,
   ) {
     try {
-      // This would create an activity record - simplified for now
-      loggingService.info('Project activity created', {
+      const activity = new Activity({
+        userId,
+        type: 'api_call',
+        title: `Project ${action.replace(/_/g, ' ')}`,
+        description: `Project operation: ${action}`,
+        metadata: {
+          projectId,
+          action,
+          ...details,
+        },
+      });
+      await activity.save();
+      loggingService.info('Project activity persisted', {
         component: 'projectManagerTool',
         operation: 'createProjectActivity',
-        step: 'success',
         projectId,
         userId,
         action,
-        details: JSON.stringify(details),
       });
     } catch (error) {
-      loggingService.error('Failed to create project activity', {
+      loggingService.error('Failed to persist project activity', {
         component: 'projectManagerTool',
         operation: 'createProjectActivity',
-        step: 'error',
         projectId,
         userId,
         action,

@@ -55,12 +55,16 @@ export {
   requireAgentAction,
 } from '../middleware/agentSandbox.middleware';
 
+import { Logger } from '@nestjs/common';
+
+const governanceLogger = new Logger('Governance');
+
 /**
  * Initialize governance system (sandbox and audit services).
  * Agent Governance feature has been removed; this initializes remaining infrastructure.
  */
 export async function initializeGovernance(): Promise<void> {
-  console.log('✅ Governance infrastructure (sandbox, audit) ready');
+  governanceLogger.log('Governance infrastructure (sandbox, audit) ready');
 }
 
 /**
@@ -68,5 +72,5 @@ export async function initializeGovernance(): Promise<void> {
  */
 export async function shutdownGovernance(): Promise<void> {
   // Legacy shutdown - agent sandbox/audit services use Nest DI
-  console.log('✅ Governance infrastructure shutdown complete');
+  governanceLogger.log('Governance infrastructure shutdown complete');
 }

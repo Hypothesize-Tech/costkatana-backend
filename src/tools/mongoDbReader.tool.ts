@@ -181,12 +181,11 @@ export class MongoDbReaderTool extends Tool {
               } else {
                 // For grouped results, clean any ObjectIds in the _id field
                 Object.keys(cleanDoc._id).forEach((key) => {
-                  if (
-                    cleanDoc._id[key] &&
-                    cleanDoc._id[key].constructor &&
-                    cleanDoc._id[key].constructor.name === 'ObjectId'
-                  ) {
-                    cleanDoc._id[key] = `[ID-${key}]`; // Generic placeholder
+                  const val = cleanDoc._id[key];
+                  if (val?.constructor?.name === 'ObjectId') {
+                    cleanDoc._id[key] = val.toString();
+                  } else if (val && typeof val === 'object' && val.constructor?.name === 'ObjectId') {
+                    cleanDoc._id[key] = (val as { toString: () => string }).toString();
                   }
                 });
               }

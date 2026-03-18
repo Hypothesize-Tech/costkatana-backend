@@ -8,6 +8,8 @@ import { calculateCost } from '@/utils/pricing';
 interface TrackingRequest {
   model: string;
   tokens: number;
+  inputTokens?: number;
+  outputTokens?: number;
   project?: string;
   user?: string;
   feedback?: 'positive' | 'negative' | 'neutral';
@@ -71,14 +73,22 @@ export class TrackingService {
         projectId = await this.getOrCreateProject(userId, request.project);
       }
 
-      // Create usage record
+      const inputTokens =
+        request.inputTokens != null && request.outputTokens != null
+          ? request.inputTokens
+          : Math.floor(request.tokens * 0.7);
+      const outputTokens =
+        request.inputTokens != null && request.outputTokens != null
+          ? request.outputTokens
+          : Math.floor(request.tokens * 0.3);
+
       const usageData = {
         userId,
         model: request.model,
         provider: request.provider || 'openai',
         totalTokens: request.tokens,
-        inputTokens: Math.floor(request.tokens * 0.7), // Estimate 70% input, 30% output
-        outputTokens: Math.floor(request.tokens * 0.3),
+        inputTokens,
+        outputTokens,
         cost: calculatedCost,
         projectId: projectId,
         user: request.user,

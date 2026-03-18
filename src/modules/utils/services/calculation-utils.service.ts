@@ -851,7 +851,7 @@ export class CalculationUtilsService {
               ),
         );
 
-      forecast.push(predicted + (Math.random() - 0.5) * uncertainty * 0.1);
+      forecast.push(predicted);
     }
 
     return forecast;

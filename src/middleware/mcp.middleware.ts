@@ -651,7 +651,7 @@ class MCPConnectionMonitor {
 
     try {
       const cache = getCacheService();
-      const keys = await cache.keys('mcp_connection:*');
+      const keys = await cache.scanKeys('mcp_connection:*');
 
       for (const key of keys) {
         const clientId = key.replace(/^mcp_connection:/, '');
@@ -715,12 +715,9 @@ export async function getMCPConnectionStats(): Promise<{
   try {
     const activeConnections = await mcpConnectionMonitor.getActiveConnections();
 
-    // Get error rates from cache
+    // Get error rates from connection data (keys retrieved via Redis SCAN)
     const errorRates: { [clientId: string]: number } = {};
     let totalConnections = 0;
-
-    // This is a simplified implementation - in production you'd want to scan Redis keys
-    // For now, we'll return basic stats
     for (const [clientId, connection] of activeConnections.entries()) {
       if (connection.errorCount > 0) {
         errorRates[clientId] = connection.errorCount / connection.requestCount;

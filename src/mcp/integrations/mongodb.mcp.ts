@@ -1,6 +1,7 @@
 /**
  * MongoDB MCP Server
  * Operations for MongoDB with security controls
+ * Uses connection pooling to reuse Mongoose connections per connectionId
  */
 
 import { BaseIntegrationMCP } from './base-integration.mcp';
@@ -17,6 +18,18 @@ interface MongoConnectionResult {
   connection: Connection;
   databaseName: string;
 }
+
+/** Cached connection entry with TTL for pool eviction */
+interface PoolEntry {
+  connection: Connection;
+  databaseName: string;
+  lastUsed: number;
+}
+
+const CONNECTION_POOL_MAX_AGE_MS = 30 * 60 * 1000; // 30 min idle before eligible for eviction
+const CONNECTION_POOL_MAX_SIZE = 50;
+
+const connectionPool = new Map<string, PoolEntry>();
 
 interface FindParams {
   collection: string;
@@ -60,44 +73,91 @@ export class MongoDBMCP extends BaseIntegrationMCP {
   }
 
   /**
-   * Get MongoDB connection
+   * Evict stale or excess entries from the connection pool
+   */
+  private evictStaleConnections(): void {
+    const now = Date.now();
+    const keysToRemove: string[] = [];
+    const entriesByAge: [string, number][] = [];
+
+    for (const [key, entry] of connectionPool) {
+      if (now - entry.lastUsed > CONNECTION_POOL_MAX_AGE_MS) {
+        keysToRemove.push(key);
+      } else {
+        entriesByAge.push([key, entry.lastUsed]);
+      }
+    }
+
+    // If still over limit after removing stale, evict oldest
+    entriesByAge.sort((a, b) => a[1] - b[1]);
+    let remaining = connectionPool.size - keysToRemove.length;
+    for (const [key] of entriesByAge) {
+      if (remaining <= CONNECTION_POOL_MAX_SIZE) break;
+      keysToRemove.push(key);
+      remaining--;
+    }
+
+    for (const key of keysToRemove) {
+      const entry = connectionPool.get(key);
+      if (entry?.connection.readyState === 1) {
+        entry.connection.close().catch(() => {});
+      }
+      connectionPool.delete(key);
+    }
+  }
+
+  /**
+   * Get MongoDB connection with pooling.
+   * Reuses connections per connectionId to avoid creating a new connection per operation.
    */
   private async getMongoConnection(
     connectionId: string,
   ): Promise<MongoConnectionResult> {
+    const poolKey = String(connectionId);
+
+    // Return cached connection if healthy
+    const cached = connectionPool.get(poolKey);
+    if (cached && cached.connection.readyState === 1) {
+      cached.lastUsed = Date.now();
+      return { connection: cached.connection, databaseName: cached.databaseName };
+    }
+
+    if (cached) {
+      connectionPool.delete(poolKey);
+      cached.connection.close().catch(() => {});
+    }
+
     const { MongoDBConnection } =
       await import('../../schemas/integration/mongodb-connection.schema');
-    const conn = await MongoDBConnection.findById(connectionId);
+    const { EncryptionService } = await import('../../utils/encryption');
+
+    const conn = await MongoDBConnection.findById(connectionId).select(
+      '+encryptedConnectionString',
+    );
 
     if (!conn) {
       throw new Error('MongoDB connection not found');
     }
 
-    if (!conn.database) {
+    const connectionString = conn.encryptedConnectionString
+      ? EncryptionService.decryptFromCombinedFormat(
+          conn.encryptedConnectionString,
+        )
+      : (conn as any).connectionString;
+
+    const databaseName =
+      (conn as any).database ??
+      conn.databaseAccess?.[0]?.name;
+
+    if (!databaseName) {
       throw new Error('Database name is not configured for this connection');
     }
 
-    // Check if already connected with this connection string
-    // In production, you'd want connection pooling with proper connection management
-    const connectionString = conn.connectionString;
-    const databaseName = conn.database;
-    const existingConnection = mongoose.connections.find(
-      (c: Connection) => c.readyState === 1 && c.name === databaseName,
-    );
-
-    if (existingConnection) {
-      return {
-        connection: existingConnection,
-        databaseName,
-      };
-    }
-
-    // Create new connection if none exists
     const connectOptions: ConnectOptions = {
-      maxPoolSize: 10, // Maintain up to 10 socket connections
-      serverSelectionTimeoutMS: 5000, // Keep trying to send operations for 5 seconds
-      socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
-      bufferCommands: false, // Disable mongoose buffering
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+      bufferCommands: false,
     };
 
     const newConnection = mongoose.createConnection(
@@ -105,10 +165,14 @@ export class MongoDBMCP extends BaseIntegrationMCP {
       connectOptions,
     );
 
-    return {
+    this.evictStaleConnections();
+    connectionPool.set(poolKey, {
       connection: newConnection,
       databaseName,
-    };
+      lastUsed: Date.now(),
+    });
+
+    return { connection: newConnection, databaseName };
   }
 
   /**

@@ -15,6 +15,16 @@ export interface CreateCustomerResult {
 export interface CreatePaymentMethodParams {
   customerId: string;
   type: 'card' | 'upi' | 'bank_account' | 'paypal';
+  /**
+   * PCI DSS: For Stripe cards, the client MUST use Stripe.js/Elements to create
+   * a PaymentMethod and pass only this token. Raw card data must never touch the server.
+   */
+  paymentMethodId?: string;
+  /**
+   * Razorpay: Token from Razorpay Checkout/Elements (client-side tokenization).
+   * Do not pass raw card data - use Razorpay.js to obtain a token.
+   */
+  razorpayTokenId?: string;
   cardNumber?: string;
   cardExpiryMonth?: number;
   cardExpiryYear?: number;

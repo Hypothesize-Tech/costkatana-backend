@@ -47,6 +47,7 @@ import { ReferenceImageModule } from './modules/reference-image/reference-image.
 import { RagEvalModule } from './modules/rag-eval/rag-eval.module';
 import { PromptTemplateModule } from './modules/prompt-template/prompt-template.module';
 import { ProjectModule } from './modules/project/project.module';
+import { OrganizationModule } from './modules/organization/organization.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { OAuthModule } from './modules/oauth/oauth.module';
 import { NotebookModule } from './modules/notebook/notebook.module';
@@ -208,6 +209,7 @@ import { ComprehensiveTrackingMiddleware } from './modules/usage/middleware/comp
     RagEvalModule,
     PromptTemplateModule,
     ProjectModule,
+    OrganizationModule,
     OnboardingModule,
     OAuthModule,
     NotebookModule,

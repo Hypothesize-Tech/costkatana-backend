@@ -379,9 +379,6 @@ export class ReindexQueue implements OnModuleInit {
         );
       }
 
-      // Note: createIndexes() requires index specifications.
-      // For now, we'll rely on the model's built-in indexes
-
       // Reindex documents in batches
       let offset = 0;
 
@@ -414,6 +411,23 @@ export class ReindexQueue implements OnModuleInit {
 
         offset += batch.length;
         stats.itemsProcessed += batch.length;
+      }
+
+      // Rebuild indexes from schema definitions (required when autoIndex is disabled)
+      try {
+        await mongooseModel.createIndexes();
+        this.logger.log(`Rebuilt indexes for ${collectionName}`);
+      } catch (indexError) {
+        this.logger.warn(
+          `Failed to rebuild indexes for ${collectionName} (schema indexes will apply on next sync)`,
+          {
+            collectionName,
+            error:
+              indexError instanceof Error
+                ? indexError.message
+                : String(indexError),
+          },
+        );
       }
     } catch (error) {
       this.logger.error(

@@ -8,6 +8,7 @@
  * 4. Generate: IR → Optimized prompt
  */
 
+import { estimateTokenCount } from '../utils/token-count.utils';
 import { loggingService } from '../common/services/logging.service';
 import {
   ProgramNode,
@@ -21,6 +22,8 @@ import {
   OutputFormatNode,
   ConstraintNode,
   InstructionNode,
+  LiteralNode,
+  ExpressionNode,
 } from './promptAST.types';
 
 export class PromptCompilerService {
@@ -1271,22 +1274,108 @@ export class PromptCompilerService {
   }
 
   /**
-   * Constant folding pass
+   * Constant folding pass - merges consecutive literals and folds constant expressions
    */
   private static async foldConstants(ast: ProgramNode): Promise<{
     ast: ProgramNode;
     result: OptimizationPassResult;
   }> {
     const transformations: OptimizationPassResult['transformations'] = [];
+    let applied = false;
 
-    // Merge consecutive literals
-    // (Implementation simplified for demonstration)
+    const mergeLiteral = (a: LiteralNode, b: LiteralNode): LiteralNode => {
+      const aVal = typeof a.value === 'string' ? a.value : String(a.value);
+      const bVal = typeof b.value === 'string' ? b.value : String(b.value);
+      return {
+        ...a,
+        value: aVal + bVal,
+        compressible: a.compressible && b.compressible,
+        metadata: {
+          ...a.metadata,
+          endPos: b.metadata.endPos,
+        },
+      };
+    };
+
+    const foldExpression = (node: ExpressionNode): ExpressionNode => {
+      const n = node as { type?: string; operator?: string; left?: ExpressionNode; right?: ExpressionNode };
+      if (n.type === 'BinaryOp' && n.operator === '+' && n.left && n.right) {
+        const left = foldExpression(n.left);
+        const right = foldExpression(n.right);
+        if (left.type === 'Literal' && right.type === 'Literal') {
+          applied = true;
+          const leftStr = String((left as LiteralNode).value);
+          const rightStr = String((right as LiteralNode).value);
+          const mergedStr = leftStr + rightStr;
+          const tokensSaved = Math.max(
+            1,
+            estimateTokenCount(leftStr) + estimateTokenCount(rightStr) - estimateTokenCount(mergedStr),
+          );
+          transformations.push({
+            type: 'constant_fold',
+            description: `Merged literal "${String((left as LiteralNode).value).slice(0, 20)}..." with "${String((right as LiteralNode).value).slice(0, 20)}..."`,
+            tokensSaved,
+            costSaved: tokensSaved * 0.00001,
+          });
+          return mergeLiteral(left as LiteralNode, right as LiteralNode);
+        }
+        return { ...n, left, right } as ExpressionNode;
+      }
+      return node;
+    };
+
+    const newBody = ast.body.map((stmt) => {
+      const s = stmt as any;
+      if (s.type === 'Context' && s.content) {
+        return { ...s, content: foldExpression(s.content) };
+      }
+      if (s.type === 'Instruction' && s.subject) {
+        return { ...s, subject: foldExpression(s.subject) };
+      }
+      if (s.type === 'Constraint' && s.value) {
+        return { ...s, value: foldExpression(s.value) };
+      }
+      return stmt;
+    });
+
+    // Merge consecutive Context nodes with Literal content
+    const mergedBody: StatementNode[] = [];
+    for (let i = 0; i < newBody.length; i++) {
+      const curr = newBody[i] as any;
+      const next = newBody[i + 1] as any;
+      if (
+        curr?.type === 'Context' &&
+        next?.type === 'Context' &&
+        curr.content?.type === 'Literal' &&
+        next.content?.type === 'Literal'
+      ) {
+        const leftStr = String(curr.content.value ?? '');
+        const rightStr = String(next.content.value ?? '');
+        const mergedStr = leftStr + rightStr;
+        const tokensSaved = Math.max(
+          1,
+          estimateTokenCount(leftStr) + estimateTokenCount(rightStr) - estimateTokenCount(mergedStr),
+        );
+        const mergedContent = mergeLiteral(curr.content, next.content);
+        mergedBody.push({ ...curr, content: mergedContent });
+        i++;
+        applied = true;
+        transformations.push({
+          type: 'constant_fold',
+          description: 'Merged consecutive context literals',
+          tokensSaved,
+          costSaved: tokensSaved * 0.00001,
+        });
+      } else {
+        mergedBody.push(newBody[i]);
+      }
+    }
 
     return {
-      ast,
+      ast: { ...ast, body: mergedBody },
       result: {
         passName: 'Constant Folding',
-        applied: false,
+        applied,
         transformations,
         warnings: [],
       },
@@ -1316,13 +1405,13 @@ export class PromptCompilerService {
         typeof node.metadata?.tokens === 'number'
           ? node.metadata.tokens
           : typeof (node as any)?.content?.value === 'string'
-            ? (node as any).content.value.length / 4
+            ? estimateTokenCount((node as any).content.value)
             : 0;
       if (
         node.type === 'Instruction' &&
         typeof (node as any)?.subject?.value === 'string'
       ) {
-        estimatedTokens += (node as any).subject.value.length / 4;
+        estimatedTokens += estimateTokenCount((node as any).subject.value);
       }
     }
 
@@ -1354,12 +1443,12 @@ export class PromptCompilerService {
       ) {
         const originalValue = (node as any).content.value;
         const originalTokens =
-          node.metadata?.tokens ?? originalValue.length / 4;
+          node.metadata?.tokens ?? estimateTokenCount(originalValue);
         const maxOutputTokens = Math.max(15, Math.ceil(originalTokens * 0.4));
 
         try {
           const summarized = await summarizer(originalValue, maxOutputTokens);
-          const compressedTokens = Math.round(summarized.length / 4);
+          const compressedTokens = estimateTokenCount(summarized);
 
           if (compressedTokens < originalTokens) {
             transformations.push({
@@ -1407,8 +1496,11 @@ export class PromptCompilerService {
         const nodeTokens =
           node.metadata?.tokens ??
           (typeof (node as any).content?.value === 'string'
-            ? (node as any).content.value.length / 4
-            : 0);
+            ? estimateTokenCount((node as any).content.value)
+            : node.type === 'Instruction' &&
+                typeof (node as any).subject?.value === 'string'
+              ? estimateTokenCount((node as any).subject.value)
+              : 0);
         newTotalTokens += nodeTokens;
         newBody.push(node);
       }
@@ -1513,7 +1605,7 @@ export class PromptCompilerService {
           if (!value) continue;
           let strVal = value;
           let originalTokens =
-            node.metadata?.tokens ?? Math.ceil((strVal?.length ?? 0) / 4);
+            node.metadata?.tokens ?? estimateTokenCount(strVal ?? '');
           let compressedTokens = originalTokens;
           let newValue = strVal;
 
@@ -1531,7 +1623,7 @@ export class PromptCompilerService {
             );
             newValue =
               strVal.substring(0, maxLen) + ' [...] (aggressively truncated)';
-            compressedTokens = Math.ceil(newValue.length / 4);
+            compressedTokens = estimateTokenCount(newValue);
 
             if (node.type === 'Context') {
               compressedBody.push({
@@ -1693,9 +1785,9 @@ export class PromptCompilerService {
   }
 
   /**
-   * Estimate token count (simplified)
+   * Estimate token count via tiktoken when available, else 4-char heuristic.
    */
   private static estimateTokens(text: string): number {
-    return Math.ceil(text.length / 4);
+    return estimateTokenCount(text);
   }
 }

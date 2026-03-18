@@ -299,9 +299,34 @@ export class CacheService implements OnModuleDestroy {
   }
 
   /**
-   * List keys matching a pattern (alias for keys for API compatibility).
+   * List keys matching a pattern using Redis SCAN cursor (non-blocking).
+   * Prefer this over keys() in production to avoid blocking Redis.
+   * Falls back to keys() for in-memory cache.
    */
   async scanKeys(pattern: string): Promise<string[]> {
+    if (this.redis) {
+      try {
+        const keys: string[] = [];
+        let cursor = '0';
+        do {
+          const [nextCursor, foundKeys] = await this.redis.scan(
+            cursor,
+            'MATCH',
+            pattern,
+            'COUNT',
+            100,
+          );
+          cursor = nextCursor;
+          keys.push(...(foundKeys as string[]));
+        } while (cursor !== '0');
+        return keys;
+      } catch (error) {
+        this.logger.debug('Redis scan failed, falling back to keys', {
+          pattern,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     return this.keys(pattern);
   }
 
@@ -492,6 +517,24 @@ export class CacheService implements OnModuleDestroy {
       return await this.redis.sadd(key, ...members);
     } catch {
       return 0;
+    }
+  }
+
+  async srem(key: string, ...members: string[]): Promise<number> {
+    if (!this.redis) return 0;
+    try {
+      return await this.redis.srem(key, ...members);
+    } catch {
+      return 0;
+    }
+  }
+
+  async smembers(key: string): Promise<string[]> {
+    if (!this.redis) return [];
+    try {
+      return (await this.redis.smembers(key)) as string[];
+    } catch {
+      return [];
     }
   }
 

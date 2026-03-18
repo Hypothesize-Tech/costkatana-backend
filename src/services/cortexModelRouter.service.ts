@@ -1,6 +1,7 @@
 /**
- * Bridge: Re-exports CortexModelRouterService for legacy Express middleware.
- * For NestJS usage, inject CortexModelRouterService from CortexModule.
+ * @deprecated Use CortexModelRouterService from CortexModule via DI.
+ * This stub is only for legacy code that cannot use DI.
+ * RequestInterceptorMiddleware now uses the real CortexModelRouterService.
  */
 import {
   type PromptComplexityAnalysis,

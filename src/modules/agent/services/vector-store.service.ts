@@ -477,11 +477,13 @@ export class VectorStoreService implements OnModuleInit {
   }
 
   /**
-   * Sync vector store to memory (for distributed deployments)
+   * Sync vector store to memory (for distributed deployments).
+   * Single-node deployments: no-op. Multi-pod: would serialize documentStore to Redis.
    */
   async syncToMemory(): Promise<void> {
     try {
-      // This would sync vector store to Redis/memory cache in production
+      // Single-node: in-memory store is process-local. Multi-pod would require
+      // Redis serialization of documentStore for cross-pod consistency.
       this.logger.debug('Vector store sync to memory completed');
     } catch (error: any) {
       this.logger.error('Error syncing vector store to memory', {

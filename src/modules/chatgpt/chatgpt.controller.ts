@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Body,
+  Query,
   HttpStatus,
   HttpException,
 } from '@nestjs/common';
@@ -84,6 +85,144 @@ export class ChatGPTController {
       ],
       timestamp: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Track ChatGPT conversation usage (explicit route)
+   */
+  @Post('track')
+  @ApiOperation({
+    summary: 'Track ChatGPT usage',
+    description: 'Track conversation usage from ChatGPT Custom GPT',
+  })
+  @ApiResponse({ status: 200, description: 'Usage tracked successfully' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  async trackUsage(@Body() body: ChatGPTRequestBody) {
+    const connectionStatus =
+      await this.chatGPTService.checkConnectionStatus(body);
+    if (!connectionStatus.connected || !connectionStatus.userId) {
+      throw new HttpException(
+        {
+          success: false,
+          error: 'authentication_required',
+          message: connectionStatus.message,
+        },
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+    const result = await this.chatGPTService.trackUsage(
+      connectionStatus.userId,
+      body.conversation_data,
+    );
+    return { success: true, message: 'Usage tracked successfully', data: result };
+  }
+
+  /**
+   * Create project from ChatGPT (explicit route)
+   */
+  @Post('projects')
+  @ApiOperation({
+    summary: 'Create project via ChatGPT',
+    description: 'Create a new project from ChatGPT Custom GPT',
+  })
+  @ApiResponse({ status: 200, description: 'Project created successfully' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  async createProject(@Body() body: ChatGPTRequestBody) {
+    const connectionStatus =
+      await this.chatGPTService.checkConnectionStatus(body);
+    if (!connectionStatus.connected || !connectionStatus.userId) {
+      throw new HttpException(
+        {
+          success: false,
+          error: 'authentication_required',
+          message: connectionStatus.message,
+        },
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+    const result = await this.chatGPTService.createProject(
+      connectionStatus.userId,
+      body.project,
+    );
+    return {
+      success: true,
+      message: 'Project created successfully',
+      data: result,
+    };
+  }
+
+  /**
+   * Get user projects (explicit route)
+   */
+  @Get('projects')
+  @ApiOperation({
+    summary: 'Get user projects',
+    description: 'Get projects for the authenticated user',
+  })
+  @ApiResponse({ status: 200, description: 'Projects retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  async getProjects(
+    @Query('user_id') userId?: string,
+    @Query('api_key') apiKey?: string,
+  ) {
+    const body: ChatGPTRequestBody = {
+      user_id: userId,
+      api_key: apiKey,
+      action: 'get_projects',
+    };
+    const connectionStatus =
+      await this.chatGPTService.checkConnectionStatus(body);
+    if (!connectionStatus.connected || !connectionStatus.userId) {
+      throw new HttpException(
+        {
+          success: false,
+          error: 'authentication_required',
+          message: connectionStatus.message,
+        },
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+    const result = await this.chatGPTService.getProjects(
+      connectionStatus.userId,
+    );
+    return { success: true, data: result };
+  }
+
+  /**
+   * Get analytics (explicit route)
+   */
+  @Get('analytics')
+  @ApiOperation({
+    summary: 'Get user analytics',
+    description: 'Get analytics summary for the authenticated user',
+  })
+  @ApiResponse({ status: 200, description: 'Analytics retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  async getAnalytics(
+    @Query('user_id') userId?: string,
+    @Query('api_key') apiKey?: string,
+  ) {
+    const body: ChatGPTRequestBody = {
+      user_id: userId,
+      api_key: apiKey,
+      action: 'get_analytics',
+    };
+    const connectionStatus =
+      await this.chatGPTService.checkConnectionStatus(body);
+    if (!connectionStatus.connected || !connectionStatus.userId) {
+      throw new HttpException(
+        {
+          success: false,
+          error: 'authentication_required',
+          message: connectionStatus.message,
+        },
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+    const result = await this.chatGPTService.getAnalytics(
+      connectionStatus.userId,
+    );
+    return { success: true, data: result };
   }
 
   /**

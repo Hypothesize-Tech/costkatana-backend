@@ -774,7 +774,8 @@ export class BedrockService {
       }
     }
 
-    // Fallback: use invokeModel and simulate streaming
+    // Degraded mode: ConverseStream unavailable - use blocking invokeModel and deliver full response once.
+    // Do NOT simulate streaming by chunking - callers receive the complete response in a single onChunk.
     const result = await this.invokeModel(
       prompt,
       modelId,
@@ -788,12 +789,7 @@ export class BedrockService {
         : undefined,
     );
     fullResponse = result;
-    // Simulate chunk delivery
-    const chunkSize = 50;
-    for (let i = 0; i < result.length; i += chunkSize) {
-      await options.onChunk(result.slice(i, i + chunkSize), false);
-    }
-    await options.onChunk('', true);
+    await options.onChunk(result, true);
 
     const inputTokens = Math.ceil(prompt.length / 4);
     const outputTokens = Math.ceil(result.length / 4);

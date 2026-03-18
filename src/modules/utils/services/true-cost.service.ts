@@ -383,29 +383,40 @@ export class TrueCostService {
   }
 
   /**
-   * Calculate hardcoded pricing (fallback)
+   * Calculate hardcoded pricing (last-resort fallback).
+   * Logs a warning so operators know pricing registry/DB lookup failed.
+   * Values updated to approximate 2024-2025 rates - verify against provider docs.
    */
   private calculateHardcodedPricing(metrics: RequestMetrics): {
     cost: number;
     details: string;
   } {
-    let inputCostPer1K = 0.0015; // Default input cost
-    let outputCostPer1K = 0.002; // Default output cost
+    this.logger.warn(
+      `Using hardcoded pricing fallback for ${metrics.provider}/${metrics.model} - pricing registry/DB lookup unavailable. Consider syncing model_pricing collection.`,
+      { provider: metrics.provider, model: metrics.model },
+    );
 
-    // Provider-specific pricing
+    let inputCostPer1K = 0.0015; // Default fallback
+    let outputCostPer1K = 0.002;
+
+    // Provider-specific pricing (approximate 2024-2025 rates)
     if (metrics.provider === 'openai') {
-      if (
+      if (metrics.model.includes('gpt-4o-mini')) {
+        inputCostPer1K = 0.00015; // $0.15/1M
+        outputCostPer1K = 0.0006; // $0.60/1M
+      } else if (
+        metrics.model.includes('gpt-4o') ||
         metrics.model.includes('gpt-4-turbo') ||
         metrics.model.includes('gpt-4-1106')
       ) {
-        inputCostPer1K = 0.01;
-        outputCostPer1K = 0.03;
+        inputCostPer1K = 0.0025; // $2.50/1M
+        outputCostPer1K = 0.01; // $10/1M
       } else if (metrics.model.includes('gpt-4')) {
-        inputCostPer1K = 0.03;
-        outputCostPer1K = 0.06;
+        inputCostPer1K = 0.003; // Legacy GPT-4 approx
+        outputCostPer1K = 0.006;
       } else if (metrics.model.includes('gpt-3.5-turbo')) {
-        inputCostPer1K = 0.0015;
-        outputCostPer1K = 0.002;
+        inputCostPer1K = 0.0005;
+        outputCostPer1K = 0.0015;
       }
     } else if (metrics.provider === 'anthropic') {
       if (metrics.model.includes('claude-3-opus')) {
@@ -436,7 +447,7 @@ export class TrueCostService {
     return {
       cost: totalCost,
       details:
-        `${metrics.provider}/${metrics.model}: ` +
+        `${metrics.provider}/${metrics.model} (hardcoded fallback): ` +
         `Input: ${(metrics.inputTokens / 1000).toFixed(2)}K @ $${inputCostPer1K.toFixed(4)}/1K = $${inputCost.toFixed(6)}, ` +
         `Output: ${(metrics.outputTokens / 1000).toFixed(2)}K @ $${outputCostPer1K.toFixed(4)}/1K = $${outputCost.toFixed(6)}, ` +
         `Total: $${totalCost.toFixed(6)}`,

@@ -737,8 +737,10 @@ export class TrendingDetectorService {
     }
 
     if (process.env.USE_MOCK_TWITTER === 'true') {
-      this.logger.debug('USE_MOCK_TWITTER=true, returning mock Twitter trends');
-      return this.getMockTwitterTrends(options);
+      this.logger.warn(
+        'USE_MOCK_TWITTER=true is deprecated; returning empty trends. Configure TWITTER_BEARER_TOKEN for real data.',
+      );
+      return [];
     }
 
     try {
@@ -792,53 +794,6 @@ export class TrendingDetectorService {
         { cause: error instanceof Error ? error : undefined },
       );
     }
-  }
-
-  /**
-   * Get mock Twitter trends (replace with real API calls in production)
-   */
-  private getMockTwitterTrends(options: {
-    region?: string;
-    category?: string;
-  }): TrendData[] {
-    const regionTrends: Record<
-      string,
-      Array<{ topic: string; score: number }>
-    > = {
-      us: [
-        { topic: '#BreakingNews', score: 92 },
-        { topic: '#NFL', score: 78 },
-        { topic: '#Election2024', score: 85 },
-        { topic: '#TaylorSwift', score: 76 },
-        { topic: '#Crypto', score: 71 },
-      ],
-      uk: [
-        { topic: '#Brexit', score: 68 },
-        { topic: '#PremierLeague', score: 82 },
-        { topic: '#RoyalFamily', score: 65 },
-        { topic: '#ClimateAction', score: 59 },
-        { topic: '#TechNews', score: 63 },
-      ],
-      global: [
-        { topic: '#WorldCup', score: 88 },
-        { topic: '#ClimateChange', score: 79 },
-        { topic: '#AI', score: 84 },
-        { topic: '#COVID19', score: 67 },
-        { topic: '#SpaceX', score: 72 },
-      ],
-    };
-
-    const trends =
-      regionTrends[options.region || 'global'] || regionTrends['global'];
-
-    return trends.map((trend) => ({
-      topic: trend.topic,
-      score: trend.score,
-      timestamp: new Date(),
-      source: 'twitter' as const,
-      region: options.region,
-      category: options.category,
-    }));
   }
 
   /**

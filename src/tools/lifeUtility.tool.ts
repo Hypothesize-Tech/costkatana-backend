@@ -359,7 +359,6 @@ Be specific and helpful in your identification.`;
         category,
         searchSources: searchSources.slice(0, 2),
         timestamp: new Date().toISOString(),
-        note: 'This is a text-based identification. Image upload feature coming soon!',
       });
     } catch (error) {
       return JSON.stringify({

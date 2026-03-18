@@ -3,11 +3,15 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { CacheService } from '../../../common/cache/cache.service';
 import { Usage } from '../../../schemas/core/usage.schema';
+import {
+  GatewayProviderMetrics,
+  GatewayProviderMetricsDocument,
+} from '../../../schemas/gateway/gateway-provider-metrics.schema';
 import { CostSimulatorService } from '../../cost-simulator/cost-simulator.service';
 
 /**
- * Gateway Analytics Service - Handles usage tracking and analytics for gateway operations
- * Provides comprehensive analytics for gateway requests, latency, model performance, etc.
+ * Gateway Analytics Service - Handles usage tracking and analytics for gateway operations.
+ * Uses Redis (CacheService) for hot path and MongoDB for durable persistence (production scalability).
  */
 @Injectable()
 export class GatewayAnalyticsService {
@@ -15,6 +19,8 @@ export class GatewayAnalyticsService {
 
   constructor(
     @InjectModel(Usage.name) private usageModel: Model<Usage>,
+    @InjectModel(GatewayProviderMetrics.name)
+    private gatewayProviderMetricsModel: Model<GatewayProviderMetricsDocument>,
     private cacheService: CacheService,
     private readonly costSimulatorService: CostSimulatorService,
   ) {}
@@ -252,21 +258,10 @@ export class GatewayAnalyticsService {
         timestamp: new Date().toISOString(),
       });
 
-      // Store latency metrics for provider routing decisions
+        // Store latency metrics for provider routing decisions
       try {
-        // Update provider performance metrics in database
-        const latencyRecord = {
-          provider,
-          model,
-          latency,
-          success,
-          timestamp: new Date(),
-        };
-
-        // Store in a provider performance collection or update existing records
-        // For now, we'll use a simple approach - could be extended to use Redis or a dedicated collection
         const cacheKey = `provider_latency:${provider}:${model}`;
-        const existingMetrics = await this.getCachedProviderMetrics(cacheKey);
+        const existingMetrics = await this.getProviderMetrics(provider, model);
 
         const updatedMetrics = {
           provider,
@@ -275,19 +270,19 @@ export class GatewayAnalyticsService {
           successfulRequests:
             (existingMetrics?.successfulRequests || 0) + (success ? 1 : 0),
           totalLatency: (existingMetrics?.totalLatency || 0) + latency,
-          averageLatency: 0, // Will be calculated
+          averageLatency: 0,
           lastUpdated: new Date(),
           recentLatencies: [
             ...(existingMetrics?.recentLatencies || []).slice(-9),
             latency,
-          ], // Keep last 10
+          ],
         };
 
         updatedMetrics.averageLatency =
           updatedMetrics.totalLatency / updatedMetrics.totalRequests;
 
-        // Cache the updated metrics (TTL: 1 hour)
         await this.cacheProviderMetrics(cacheKey, updatedMetrics, 3600);
+        await this.persistProviderMetricsToMongo(updatedMetrics);
 
         this.logger.debug('Latency metrics updated for provider routing', {
           component: 'GatewayAnalyticsService',
@@ -733,17 +728,80 @@ export class GatewayAnalyticsService {
   }
 
   /**
-   * Get cached provider metrics
+   * Get provider metrics from Redis cache, fallback to MongoDB for durability.
    */
-  private async getCachedProviderMetrics(cacheKey: string): Promise<any> {
+  private async getProviderMetrics(
+    provider: string,
+    model: string,
+  ): Promise<{
+    totalRequests?: number;
+    successfulRequests?: number;
+    totalLatency?: number;
+    recentLatencies?: number[];
+  } | null> {
+    const cacheKey = `provider_latency:${provider}:${model}`;
     try {
-      return await this.cacheService.get(cacheKey);
+      const cached = await this.cacheService.get(cacheKey);
+      if (cached) return cached;
     } catch (error) {
-      this.logger.debug('Failed to get cached provider metrics', {
-        cacheKey,
+      this.logger.debug(
+        'Cache miss for provider metrics, falling back to MongoDB',
+        { provider, model },
+      );
+    }
+
+    try {
+      const doc = await this.gatewayProviderMetricsModel
+        .findOne({ provider, model })
+        .lean()
+        .exec();
+      return doc;
+    } catch (error) {
+      this.logger.debug('Failed to get provider metrics from MongoDB', {
+        provider,
+        model,
         error: error instanceof Error ? error.message : 'Unknown error',
       });
       return null;
+    }
+  }
+
+  /**
+   * Persist provider metrics to MongoDB for production durability.
+   */
+  private async persistProviderMetricsToMongo(metrics: {
+    provider: string;
+    model: string;
+    totalRequests: number;
+    successfulRequests: number;
+    totalLatency: number;
+    averageLatency: number;
+    lastUpdated: Date;
+    recentLatencies: number[];
+  }): Promise<void> {
+    try {
+      await this.gatewayProviderMetricsModel
+        .findOneAndUpdate(
+          { provider: metrics.provider, model: metrics.model },
+          {
+            $set: {
+              totalRequests: metrics.totalRequests,
+              successfulRequests: metrics.successfulRequests,
+              totalLatency: metrics.totalLatency,
+              averageLatency: metrics.averageLatency,
+              lastUpdated: metrics.lastUpdated,
+              recentLatencies: metrics.recentLatencies,
+            },
+          },
+          { upsert: true, new: true },
+        )
+        .exec();
+    } catch (error) {
+      this.logger.warn('Failed to persist provider metrics to MongoDB', {
+        provider: metrics.provider,
+        model: metrics.model,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
     }
   }
 
