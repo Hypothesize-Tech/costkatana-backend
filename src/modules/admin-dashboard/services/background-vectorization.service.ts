@@ -793,7 +793,13 @@ export class BackgroundVectorizationService {
     const eigenvectors: number[][] = [];
     const size = covariance.length;
     for (let k = 0; k < numComponents; k++) {
-      let vector = Array.from({ length: size }, () => Math.random() - 0.5);
+      // Use standard basis vector e_k for deterministic, reproducible PCA.
+      // Power iteration converges to dominant eigenvector; deterministic init avoids
+      // non-deterministic embeddings that would pollute the vector store.
+      let vector = Array.from(
+        { length: size },
+        (_, i) => (i === k % size ? 1 : 0),
+      );
       for (let iter = 0; iter < 15; iter++) {
         const newVector = new Array(size).fill(0);
         for (let i = 0; i < size; i++) {

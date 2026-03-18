@@ -285,6 +285,24 @@ export class EnterpriseSecurityGuard implements CanActivate {
           }
 
           const context = this.extractContextFromRequest(request);
+
+          // For AI processing, check actual user consent records from DB
+          let consentObtained = true;
+          if (
+            isAIProcessing &&
+            this.aiProviderAuditService &&
+            content
+          ) {
+            const aiCompliance =
+              await this.aiProviderAuditService.checkCompliance(content, {
+                userId: context.userId,
+                provider: aiProvider || 'custom',
+                model: aiModel || 'unknown',
+              });
+            consentObtained = aiCompliance.consentObtained;
+            (request as any).aiProviderCompliance = aiCompliance;
+          }
+
           const complianceCheck =
             await this.complianceCheckService.checkCompliance({
               userId: context.userId,
@@ -296,7 +314,7 @@ export class EnterpriseSecurityGuard implements CanActivate {
               purpose: 'data_processing',
               riskLevel:
                 request.dataClassification?.classification.riskScore || 0.1,
-              consentObtained: true, // Assume consent obtained for API requests
+              consentObtained,
               lawfulBasis: 'legitimate_interest',
             });
 
@@ -432,20 +450,43 @@ export class EnterpriseSecurityGuard implements CanActivate {
             transmission: {
               status: 'pending' as const,
             },
-            compliance: {
-              gdprApplicable:
-                request.complianceCheck?.metadata.frameworks.includes('gdpr') ||
-                false,
-              hipaaApplicable:
-                request.complianceCheck?.metadata.frameworks.includes(
-                  'hipaa',
-                ) || false,
-              soc2Applicable: true, // Assume SOC2 compliance
-              consentObtained: true,
-              legalBasis: 'legitimate_interest',
-              dataRetentionPolicy: 'standard',
-              geographicRestrictions: [],
-            },
+            compliance: await (async () => {
+              let aiCompliance = (request as any).aiProviderCompliance;
+              if (!aiCompliance && this.aiProviderAuditService && content) {
+                aiCompliance =
+                  await this.aiProviderAuditService.checkCompliance(content, {
+                    userId: request.securityContext?.userId || 'anonymous',
+                    provider: provider,
+                    model: aiModel || 'unknown',
+                  });
+              }
+              if (aiCompliance) {
+                return {
+                  gdprApplicable: aiCompliance.gdprApplicable,
+                  hipaaApplicable: aiCompliance.hipaaApplicable,
+                  soc2Applicable: aiCompliance.soc2Applicable,
+                  consentObtained: aiCompliance.consentObtained,
+                  legalBasis: 'legitimate_interest',
+                  dataRetentionPolicy: aiCompliance.dataRetentionPolicy,
+                  geographicRestrictions: [],
+                };
+              }
+              return {
+                gdprApplicable:
+                  request.complianceCheck?.metadata.frameworks.includes(
+                    'gdpr',
+                  ) || false,
+                hipaaApplicable:
+                  request.complianceCheck?.metadata.frameworks.includes(
+                    'hipaa',
+                  ) || false,
+                soc2Applicable: true,
+                consentObtained: true,
+                legalBasis: 'legitimate_interest',
+                dataRetentionPolicy: 'standard',
+                geographicRestrictions: [],
+              };
+            })(),
           };
 
           await this.aiProviderAuditService.recordRequest(auditRequest);
@@ -932,7 +973,7 @@ export class EnterpriseSecurityGuard implements CanActivate {
    * Generate request ID
    */
   private generateRequestId(): string {
-    return `sec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `sec_${Date.now()}_${crypto.randomUUID().replace(/-/g, '')}`;
   }
 }
 

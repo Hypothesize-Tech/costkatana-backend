@@ -15,6 +15,7 @@ import {
 import { LoggerService } from '../../../common/logger/logger.service';
 import { StsCredentialService } from './sts-credential.service';
 import { PermissionBoundaryService } from './permission-boundary.service';
+import { AwsPricingService } from './aws-pricing.service';
 import { AWSConnectionDocument } from '@/schemas/integration/aws-connection.schema';
 
 export interface RDSDatabase {
@@ -38,6 +39,7 @@ export class RdsService {
   constructor(
     private readonly stsCredentialService: StsCredentialService,
     private readonly permissionBoundaryService: PermissionBoundaryService,
+    private readonly awsPricingService: AwsPricingService,
     private readonly logger: LoggerService,
   ) {}
 
@@ -552,6 +554,7 @@ export class RdsService {
     }>
   > {
     const instances = await this.listInstances(connection, region);
+    const targetRegion = region ?? 'us-east-1';
 
     const nonProdInstances: Array<{
       dbInstanceIdentifier: string;
@@ -571,7 +574,10 @@ export class RdsService {
         identifier.includes('test') ||
         identifier.includes('demo')
       ) {
-        const savings = this.calculateInstanceSavings(instance.dbInstanceClass);
+        const savings = this.calculateInstanceSavings(
+          instance.dbInstanceClass,
+          targetRegion,
+        );
 
         nonProdInstances.push({
           dbInstanceIdentifier: instance.dbInstanceIdentifier,
@@ -587,7 +593,10 @@ export class RdsService {
         instance.dbInstanceClass.includes('micro') ||
         instance.dbInstanceClass.includes('small')
       ) {
-        const savings = this.calculateInstanceSavings(instance.dbInstanceClass);
+        const savings = this.calculateInstanceSavings(
+          instance.dbInstanceClass,
+          targetRegion,
+        );
 
         // Only add if not already added
         if (
@@ -720,6 +729,7 @@ export class RdsService {
           const estimatedSavings = this.calculateInstanceClassSavings(
             instance.dbInstanceClass,
             recommendedClass,
+            targetRegion,
           );
 
           oversizedInstances.push({
@@ -895,82 +905,49 @@ export class RdsService {
   }
 
   /**
-   * Calculate estimated monthly savings from downsizing
-   * Based on on-demand pricing estimates (approximate)
+   * Calculate estimated monthly savings from downsizing.
+   * Uses AwsPricingService for consistent pricing.
    */
   private calculateInstanceClassSavings(
     currentClass: string,
     recommendedClass?: string,
+    region: string = 'us-east-1',
   ): number {
-    if (!recommendedClass) {
-      return 0;
-    }
+    if (!recommendedClass) return 0;
 
-    // Approximate hourly pricing for RDS instance classes (US East regions)
-    // These are rough estimates - actual pricing varies by region and engine
-    const pricingEstimates: Record<string, number> = {
-      // Memory optimized (r6g - Graviton)
-      'db.r6g.16xlarge': 6.2,
-      'db.r6g.8xlarge': 3.1,
-      'db.r6g.4xlarge': 1.55,
-      'db.r6g.2xlarge': 0.78,
-      'db.r6g.xlarge': 0.39,
-      'db.r6g.large': 0.195,
+    const current = this.awsPricingService.getFallbackPricing(
+      'AmazonRDS',
+      currentClass,
+      region,
+    );
+    const recommended = this.awsPricingService.getFallbackPricing(
+      'AmazonRDS',
+      recommendedClass,
+      region,
+    );
 
-      // Memory optimized (r5)
-      'db.r5.24xlarge': 11.6,
-      'db.r5.16xlarge': 7.7,
-      'db.r5.12xlarge': 5.8,
-      'db.r5.8xlarge': 3.9,
-      'db.r5.4xlarge': 1.94,
-      'db.r5.2xlarge': 0.97,
-      'db.r5.xlarge': 0.485,
-      'db.r5.large': 0.24,
+    const currentHourly = current.pricePerHour ?? 0.5;
+    const recommendedHourly = recommended.pricePerHour ?? currentHourly * 0.5;
+    const hourlySavings = currentHourly - recommendedHourly;
+    const monthlySavings = hourlySavings * 730;
 
-      // General purpose (m5)
-      'db.m5.24xlarge': 8.1,
-      'db.m5.16xlarge': 5.4,
-      'db.m5.12xlarge': 4.0,
-      'db.m5.8xlarge': 2.7,
-      'db.m5.4xlarge': 1.35,
-      'db.m5.2xlarge': 0.68,
-      'db.m5.xlarge': 0.34,
-      'db.m5.large': 0.17,
-
-      // Burstable (t3)
-      'db.t3.2xlarge': 0.54,
-      'db.t3.xlarge': 0.27,
-      'db.t3.large': 0.136,
-      'db.t3.medium': 0.068,
-      'db.t3.micro': 0.034,
-      'db.t3.small': 0.017,
-    };
-
-    const currentPrice = pricingEstimates[currentClass] || 0.5;
-    const recommendedPrice =
-      pricingEstimates[recommendedClass] || currentPrice * 0.5;
-
-    const hourlySavings = currentPrice - recommendedPrice;
-    const monthlySavings = hourlySavings * 730; // ~730 hours per month
-
-    return Math.round(monthlySavings * 100) / 100; // Round to 2 decimal places
+    return Math.round(monthlySavings * 100) / 100;
   }
 
   /**
-   * Calculate potential savings for an instance class
+   * Calculate monthly savings from stopping a non-production instance.
+   * Uses AwsPricingService; stopping saves full compute cost (storage continues).
    */
-  private calculateInstanceSavings(instanceClass: string): number {
-    // Simplified cost calculation
-    const hourlyRates: Record<string, number> = {
-      'db.t3.micro': 0.017,
-      'db.t3.small': 0.034,
-      'db.t3.medium': 0.068,
-      'db.t3.large': 0.136,
-      'db.m5.large': 0.199,
-      'db.m5.xlarge': 0.398,
-    };
-
-    const hourlyRate = hourlyRates[instanceClass] || 0.1;
-    return Math.round(hourlyRate * 24 * 30 * 0.7); // Assume 70% savings by stopping
+  private calculateInstanceSavings(
+    instanceClass: string,
+    region: string = 'us-east-1',
+  ): number {
+    const pricing = this.awsPricingService.getFallbackPricing(
+      'AmazonRDS',
+      instanceClass,
+      region,
+    );
+    const hourlyRate = pricing.pricePerHour ?? 0.1;
+    return Math.round(hourlyRate * 730 * 100) / 100;
   }
 }

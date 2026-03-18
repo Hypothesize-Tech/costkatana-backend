@@ -20,6 +20,10 @@ import {
   AIProviderAuditSchema,
 } from '../../schemas/security/ai-provider-audit.schema';
 import {
+  UserDataConsent,
+  UserDataConsentSchema,
+} from '../../schemas/security/user-data-consent.schema';
+import {
   AuditAnchor,
   AuditAnchorSchema,
 } from '../../schemas/security/audit-anchor.schema';
@@ -39,6 +43,7 @@ import { AIProviderAuditService } from '../security/services/ai-provider-audit.s
       { name: AuditAnchor.name, schema: AuditAnchorSchema },
       { name: ComprehensiveAudit.name, schema: ComprehensiveAuditSchema },
       { name: AIProviderAudit.name, schema: AIProviderAuditSchema },
+      { name: UserDataConsent.name, schema: UserDataConsentSchema },
     ]),
   ],
   controllers: [EnterpriseSecurityController],

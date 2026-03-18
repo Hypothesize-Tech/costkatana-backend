@@ -270,8 +270,6 @@ export class GithubCacheInvalidationService {
       // If using another backend, adapt this section as needed
       let deletedKeysCount = 0;
       for (const pattern of patterns) {
-        // scanKeys should return all keys matching this pattern
-        // For performance, consider using cursor-based SCAN in production if you expect many keys.
         const keys: string[] = await this.cacheService.scanKeys(pattern);
         if (keys.length > 0) {
           const numDeleted = await this.cacheService.delMany(keys);

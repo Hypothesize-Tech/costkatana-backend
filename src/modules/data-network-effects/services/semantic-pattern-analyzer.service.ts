@@ -10,7 +10,7 @@ import { Telemetry } from '../../../schemas/core/telemetry.schema';
 import { Usage } from '../../../schemas/core/usage.schema';
 import { InjectModel } from '@nestjs/mongoose';
 import { Injectable, Logger } from '@nestjs/common';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 
 /**
  * Data point for clustering
@@ -469,8 +469,13 @@ export class SemanticPatternAnalyzerService {
     // Determine category
     const category = this.determineCategory(keywords);
 
-    // Cost analysis
-    const costAnalysis = this.calculateCostAnalysis(dataPoints);
+    // Cost analysis with real cache stats from Usage
+    const cacheStats = await this.getCacheStatsForWindow(
+      startDate,
+      endDate,
+      [...new Set(dataPoints.map((p) => p.userId).filter(Boolean))],
+    );
+    const costAnalysis = this.calculateCostAnalysis(dataPoints, cacheStats);
 
     // Performance analysis
     const performanceAnalysis = this.calculatePerformanceAnalysis(dataPoints);
@@ -623,9 +628,77 @@ export class SemanticPatternAnalyzerService {
   }
 
   /**
+   * Aggregate cache hit/miss and savings from Usage for a time window.
+   */
+  private async getCacheStatsForWindow(
+    startDate: Date,
+    endDate: Date,
+    userIds: string[],
+  ): Promise<{ cacheHitRate: number; cacheCosts: number }> {
+    const match: Record<string, unknown> = {
+      createdAt: { $gte: startDate, $lte: endDate },
+    };
+    if (userIds.length > 0) {
+      match.userId = {
+        $in: userIds
+          .filter((id) => Types.ObjectId.isValid(id))
+          .map((id) => new Types.ObjectId(id)),
+      };
+    }
+
+    const result = await this.usageModel
+      .aggregate<{
+        totalHits: number;
+        totalMisses: number;
+        totalSavings: number;
+      }>([
+        { $match: match },
+        {
+          $group: {
+            _id: null,
+            totalHits: {
+              $sum: {
+                $add: [
+                  { $ifNull: ['$promptCaching.cacheHits', 0] },
+                  { $ifNull: ['$metadata.cacheHits', 0] },
+                ],
+              },
+            },
+            totalMisses: {
+              $sum: {
+                $add: [
+                  { $ifNull: ['$promptCaching.cacheMisses', 0] },
+                  { $ifNull: ['$metadata.cacheMisses', 0] },
+                ],
+              },
+            },
+            totalSavings: {
+              $sum: { $ifNull: ['$promptCaching.savingsFromCaching', 0] },
+            },
+          },
+        },
+      ])
+      .exec();
+
+    if (!result.length) {
+      return { cacheHitRate: 0, cacheCosts: 0 };
+    }
+
+    const r = result[0];
+    const total = r.totalHits + r.totalMisses;
+    const cacheHitRate = total > 0 ? r.totalHits / total : 0;
+    const cacheCosts = r.totalSavings > 0 ? r.totalSavings : 0;
+
+    return { cacheHitRate, cacheCosts };
+  }
+
+  /**
    * Calculate cost analysis
    */
-  private calculateCostAnalysis(dataPoints: DataPoint[]): IClusterCostAnalysis {
+  private calculateCostAnalysis(
+    dataPoints: DataPoint[],
+    cacheStats?: { cacheHitRate: number; cacheCosts: number },
+  ): IClusterCostAnalysis {
     const costs = dataPoints.map((p) => p.cost);
     const totalCost = costs.reduce((sum, cost) => sum + cost, 0);
     const avgCostPerRequest = totalCost / dataPoints.length;
@@ -647,10 +720,14 @@ export class SemanticPatternAnalyzerService {
       (sum, cost) => sum + cost,
       0,
     );
-    const cacheCosts = 0; // Simplified - would need cache data
-    const cacheHitRate = 0; // Simplified
 
-    const potentialSavingsWithCache = cacheCosts * 0.1; // Assume 10% savings with better caching
+    const cacheHitRate = cacheStats?.cacheHitRate ?? 0;
+    const cacheCosts = cacheStats?.cacheCosts ?? 0;
+
+    const potentialSavingsWithCache =
+      cacheCosts > 0
+        ? cacheCosts
+        : totalCost * (1 - cacheHitRate) * 0.1; // 10% savings with better caching when no cache data
     const potentialSavingsWithCheaperModel = Math.max(
       0,
       totalCost - totalCost * 0.7,

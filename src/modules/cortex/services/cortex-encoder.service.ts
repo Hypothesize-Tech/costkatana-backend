@@ -661,7 +661,12 @@ Frame: {"frameType": "event", "action": "action_create", "object": "project", "n
    * Clear the Cortex cache (including encoding entries)
    */
   clearCache(): void {
+    const stats = this.cache.getStats();
+    const entriesCleared = stats.totalEntries;
     this.cache.clear();
-    this.logger.log('Encoder cache cleared');
+    this.logger.log('Encoder cache cleared', {
+      metric: 'cortex_encoder.cache_cleared',
+      entriesCleared,
+    });
   }
 }

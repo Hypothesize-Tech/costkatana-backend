@@ -7,6 +7,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { estimateTokenCount } from '../../../utils/token-count.utils';
 import { CortexCoreService } from './cortex-core.service';
 import { CortexEncoderService } from './cortex-encoder.service';
 import { CortexDecoderService } from './cortex-decoder.service';
@@ -354,16 +355,23 @@ export class CortexLongHandshakeService {
   }
 
   /**
-   * Analyze initial request
+   * Analyze initial request using tiktoken-based token count and complexity scoring.
    */
   private async analyzeInitialRequest(
     session: HandshakeSession,
     request: any,
   ): Promise<any> {
-    // Simple analysis - in production this would be more sophisticated
+    const promptText =
+      typeof request.prompt === 'string' ? request.prompt : '';
+    const estimatedTokens = promptText
+      ? estimateTokenCount(promptText)
+      : 100;
+
+    const complexity = this.computeRequestComplexity(promptText, estimatedTokens);
+
     return {
-      complexity: request.prompt?.length > 500 ? 'high' : 'medium',
-      estimatedTokens: Math.ceil(request.prompt?.length / 4) || 100,
+      complexity,
+      estimatedTokens,
       processingType: request.enableCortex ? 'cortex' : 'standard',
       requirements: {
         hasContext: !!request.context,
@@ -371,6 +379,25 @@ export class CortexLongHandshakeService {
         needsOptimization: true,
       },
     };
+  }
+
+  /**
+   * Compute request complexity from token count and structural signals.
+   */
+  private computeRequestComplexity(
+    prompt: string,
+    estimatedTokens: number,
+  ): 'low' | 'medium' | 'high' {
+    let score = 0;
+    if (estimatedTokens > 2000) score += 2;
+    else if (estimatedTokens > 500) score += 1;
+    if (prompt && /```[\s\S]*?```/g.test(prompt)) score += 1;
+    if (prompt && (prompt.match(/\n/g) ?? []).length > 10) score += 1;
+    if (prompt && (prompt.match(/\?/g) ?? []).length > 2)
+      score += 1;
+    if (score >= 3) return 'high';
+    if (score >= 1) return 'medium';
+    return 'low';
   }
 
   /**

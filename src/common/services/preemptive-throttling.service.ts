@@ -8,9 +8,13 @@ import {
   Logger,
   OnModuleInit,
   OnModuleDestroy,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { InjectConnection } from '@nestjs/mongoose';
+import type { Connection } from 'mongoose';
+import { CacheService } from '../../cache/cache.service';
 import * as os from 'os';
 
 export type ThrottlingPhase =
@@ -92,6 +96,12 @@ export class PreemptiveThrottlingService
   private currentThrottlingFactor = 1.0;
   private phaseStartTime = Date.now();
   private lastEscalation = 0;
+  private totalEscalations = 0;
+  private phaseTransitionHistory: Array<{
+    from: ThrottlingPhase;
+    to: ThrottlingPhase;
+    timestamp: number;
+  }> = [];
 
   // Metrics tracking
   private metricsHistory: ThrottlingMetrics[] = [];
@@ -186,6 +196,8 @@ export class PreemptiveThrottlingService
   constructor(
     private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
+    @Optional() @InjectConnection() private readonly mongooseConnection?: Connection,
+    @Optional() private readonly cacheService?: CacheService,
   ) {
     this.initializeConfig();
   }
@@ -310,6 +322,13 @@ export class PreemptiveThrottlingService
       ? recent[recent.length - 1].queue_depth
       : 0;
 
+    // Real connection pool and cache metrics when available
+    const {
+      active_connections,
+      database_connections,
+      cache_hit_rate,
+    } = await this.getConnectionAndCacheMetrics();
+
     return {
       cpu_usage,
       memory_usage,
@@ -317,11 +336,53 @@ export class PreemptiveThrottlingService
       error_rate,
       request_rate,
       queue_depth,
-      active_connections: 0, // Would come from connection pool / server stats
-      database_connections: 0,
-      cache_hit_rate: 85,
+      active_connections,
+      database_connections,
+      cache_hit_rate,
       timestamp: now,
     };
+  }
+
+  /**
+   * Fetch real connection pool and cache hit rate metrics.
+   * Falls back to 0/85 when services are unavailable.
+   */
+  private async getConnectionAndCacheMetrics(): Promise<{
+    active_connections: number;
+    database_connections: number;
+    cache_hit_rate: number;
+  }> {
+    let database_connections = 0;
+    let cache_hit_rate = 85; // Default when Redis unavailable
+
+    // MongoDB connection pool stats
+    if (this.mongooseConnection?.readyState === 1) {
+      try {
+        const client = (this.mongooseConnection as any).client;
+        const pool = client?.topology?.s?.connectionPool ?? client?.topology?.pool;
+        if (pool?.totalConnectionCount != null) {
+          database_connections = pool.totalConnectionCount;
+        }
+      } catch {
+        // Driver version may not expose pool; ignore
+      }
+    }
+
+    // Cache hit rate from CacheService (application-level) or Redis INFO
+    if (this.cacheService) {
+      try {
+        const stats = await this.cacheService.getCacheStats();
+        if (stats.totalRequests > 0) {
+          cache_hit_rate = Math.round(stats.hitRate);
+        }
+      } catch {
+        // Use default on error
+      }
+    }
+
+    // active_connections: HTTP server connections not easily available in NestJS without middleware
+    const active_connections = database_connections; // Proxy for load
+    return { active_connections, database_connections, cache_hit_rate };
   }
 
   /**
@@ -475,6 +536,16 @@ export class PreemptiveThrottlingService
   private escalateToPhase(threshold: ThrottlingThreshold): void {
     const previousPhase = this.currentPhase;
 
+    this.totalEscalations++;
+    this.phaseTransitionHistory.push({
+      from: previousPhase,
+      to: threshold.phase,
+      timestamp: Date.now(),
+    });
+    if (this.phaseTransitionHistory.length > 100) {
+      this.phaseTransitionHistory.shift();
+    }
+
     this.currentPhase = threshold.phase;
     this.currentAction = threshold.action;
     this.currentThrottlingFactor = threshold.throttling_factor;
@@ -528,6 +599,15 @@ export class PreemptiveThrottlingService
    */
   private recoverToNormal(): void {
     const previousPhase = this.currentPhase;
+
+    this.phaseTransitionHistory.push({
+      from: previousPhase,
+      to: 'normal',
+      timestamp: Date.now(),
+    });
+    if (this.phaseTransitionHistory.length > 100) {
+      this.phaseTransitionHistory.shift();
+    }
 
     this.currentPhase = 'normal';
     this.currentAction = 'monitor';
@@ -789,9 +869,9 @@ export class PreemptiveThrottlingService
     );
 
     return {
-      total_escalations: 0, // Would track this
+      total_escalations: this.totalEscalations,
       current_phase_duration: currentPhaseDuration,
-      phase_transition_history: [], // Would track this
+      phase_transition_history: [...this.phaseTransitionHistory],
       average_throttling_factor: averageThrottlingFactor,
       peak_request_rate: peakRequestRate,
     };

@@ -91,7 +91,7 @@ export class PermissionValidator {
           // Continue to execution
         } else {
           // Return confirmation required response
-          const confirmationId = `confirm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          const confirmationId = `confirm_${Date.now()}_${crypto.randomUUID().replace(/-/g, '')}`;
           const impact = ConfirmationService.generateImpactDescription(
             integration,
             toolName,

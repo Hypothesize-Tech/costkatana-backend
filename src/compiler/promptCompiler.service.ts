@@ -242,8 +242,12 @@ export class PromptCompilerService {
       // Detect conditional statements
       const conditionalMatch = this.detectConditional(segment.text);
       if (conditionalMatch) {
-        // For now, treat as context with high priority
-        // Full conditional parsing would require recursive parsing
+        loggingService.warn('Conditional parsing skipped; treated as context', {
+          metric: 'prompt_compiler.conditional_parsing_skipped',
+          segmentPreview: segment.text.slice(0, 80),
+          reason: 'Full conditional parsing requires recursive parsing (not yet implemented)',
+        });
+        // Treat as context with high priority until recursive conditional parsing is implemented
         const contextNode = this.createContextNode(
           segment.text,
           'local',
@@ -1064,7 +1068,11 @@ export class PromptCompilerService {
         if (contextValue) {
           variableMap.set(implicitVar.name, contextValue);
         } else {
-          // Store as placeholder for later resolution
+          loggingService.warn('Unresolved variable; rendering may contain placeholder', {
+            metric: 'prompt_compiler.unresolved_variable_placeholder',
+            variableName: implicitVar.name,
+            instructionIndex: index,
+          });
           variableMap.set(implicitVar.name, `[${implicitVar.name}]`);
         }
       }

@@ -476,6 +476,7 @@ Return ONLY the JSON array:`;
       ) {
         this.logger.warn(
           `Only found ${validModels.length} models for ${config.provider}, using complete fallback list`,
+          { metric: 'model_discovery.hardcoded_fallback', provider: config.provider },
         );
         return ModelDiscoveryService.FALLBACK_MODELS[config.provider];
       }
@@ -485,7 +486,10 @@ Return ONLY the JSON array:`;
         config.provider === 'xai' &&
         ModelDiscoveryService.FALLBACK_MODELS[config.provider]
       ) {
-        this.logger.log(`Using complete xAI model list from official docs`);
+        this.logger.log(`Using complete xAI model list from official docs`, {
+          metric: 'model_discovery.hardcoded_fallback',
+          provider: config.provider,
+        });
         return ModelDiscoveryService.FALLBACK_MODELS[config.provider];
       }
 
@@ -499,7 +503,10 @@ Return ONLY the JSON array:`;
 
       // FALLBACK: Return hardcoded list if available
       if (ModelDiscoveryService.FALLBACK_MODELS[config.provider]) {
-        this.logger.log(`Using fallback model list for ${config.provider}`);
+        this.logger.log(`Using fallback model list for ${config.provider}`, {
+          metric: 'model_discovery.hardcoded_fallback',
+          provider: config.provider,
+        });
         return ModelDiscoveryService.FALLBACK_MODELS[config.provider];
       }
 

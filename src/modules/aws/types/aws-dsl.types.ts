@@ -379,6 +379,8 @@ export interface PlanSummary {
   requiresApproval: boolean;
   reversible: boolean;
   criticalPathDuration?: number; // seconds, optional for backward compatibility
+  /** When 'fallback', cost estimates used stale/hardcoded data - UI should surface a warning */
+  costDataSource?: 'live' | 'fallback';
 }
 
 export interface PlanApproval {

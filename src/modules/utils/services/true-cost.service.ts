@@ -5,6 +5,7 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Usage } from '../../../schemas/core/usage.schema';
 import { calculateCost, getModelPricing } from '../../../utils/pricing';
+import { getHardcodedFallbackPricing } from '../../../config/pricing-fallback.config';
 
 interface TrueCostComponents {
   // Provider API costs
@@ -384,8 +385,7 @@ export class TrueCostService {
 
   /**
    * Calculate hardcoded pricing (last-resort fallback).
-   * Logs a warning so operators know pricing registry/DB lookup failed.
-   * Values updated to approximate 2024-2025 rates - verify against provider docs.
+   * Uses config/pricing-fallback.config.ts. Emits metric for monitoring.
    */
   private calculateHardcodedPricing(metrics: RequestMetrics): {
     cost: number;
@@ -393,52 +393,17 @@ export class TrueCostService {
   } {
     this.logger.warn(
       `Using hardcoded pricing fallback for ${metrics.provider}/${metrics.model} - pricing registry/DB lookup unavailable. Consider syncing model_pricing collection.`,
-      { provider: metrics.provider, model: metrics.model },
+      {
+        provider: metrics.provider,
+        model: metrics.model,
+        metric: 'pricing.hardcoded_fallback',
+      },
     );
 
-    let inputCostPer1K = 0.0015; // Default fallback
-    let outputCostPer1K = 0.002;
-
-    // Provider-specific pricing (approximate 2024-2025 rates)
-    if (metrics.provider === 'openai') {
-      if (metrics.model.includes('gpt-4o-mini')) {
-        inputCostPer1K = 0.00015; // $0.15/1M
-        outputCostPer1K = 0.0006; // $0.60/1M
-      } else if (
-        metrics.model.includes('gpt-4o') ||
-        metrics.model.includes('gpt-4-turbo') ||
-        metrics.model.includes('gpt-4-1106')
-      ) {
-        inputCostPer1K = 0.0025; // $2.50/1M
-        outputCostPer1K = 0.01; // $10/1M
-      } else if (metrics.model.includes('gpt-4')) {
-        inputCostPer1K = 0.003; // Legacy GPT-4 approx
-        outputCostPer1K = 0.006;
-      } else if (metrics.model.includes('gpt-3.5-turbo')) {
-        inputCostPer1K = 0.0005;
-        outputCostPer1K = 0.0015;
-      }
-    } else if (metrics.provider === 'anthropic') {
-      if (metrics.model.includes('claude-3-opus')) {
-        inputCostPer1K = 0.015;
-        outputCostPer1K = 0.075;
-      } else if (metrics.model.includes('claude-3-sonnet')) {
-        inputCostPer1K = 0.003;
-        outputCostPer1K = 0.015;
-      } else if (metrics.model.includes('claude-3-haiku')) {
-        inputCostPer1K = 0.00025;
-        outputCostPer1K = 0.00125;
-      }
-    } else if (metrics.provider === 'google') {
-      if (metrics.model.includes('gemini-pro')) {
-        inputCostPer1K = 0.00025;
-        outputCostPer1K = 0.0005;
-      }
-    } else if (metrics.provider === 'groq') {
-      // Groq typically has lower costs
-      inputCostPer1K = 0.0005;
-      outputCostPer1K = 0.0005;
-    }
+    const { inputCostPer1K, outputCostPer1K } = getHardcodedFallbackPricing(
+      metrics.provider,
+      metrics.model,
+    );
 
     const inputCost = (metrics.inputTokens / 1000) * inputCostPer1K;
     const outputCost = (metrics.outputTokens / 1000) * outputCostPer1K;

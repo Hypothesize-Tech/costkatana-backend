@@ -680,25 +680,49 @@ export class LambdaService {
       if (func.memorySize < 512) continue;
 
       let avgDurationMs: number | undefined;
+      let dailyInvocations: number | undefined;
       try {
-        const resp = await cwClient.send(
-          new GetMetricStatisticsCommand({
-            Namespace: 'AWS/Lambda',
-            MetricName: 'Duration',
-            Dimensions: [{ Name: 'FunctionName', Value: func.functionName }],
-            StartTime: startTime,
-            EndTime: endTime,
-            Period: 86400,
-            Statistics: ['Average'],
-          }),
-        );
-        const pts = resp.Datapoints ?? [];
-        if (pts.length > 0) {
+        const [durationResp, invocationsResp] = await Promise.all([
+          cwClient.send(
+            new GetMetricStatisticsCommand({
+              Namespace: 'AWS/Lambda',
+              MetricName: 'Duration',
+              Dimensions: [{ Name: 'FunctionName', Value: func.functionName }],
+              StartTime: startTime,
+              EndTime: endTime,
+              Period: 86400,
+              Statistics: ['Average'],
+            }),
+          ),
+          cwClient.send(
+            new GetMetricStatisticsCommand({
+              Namespace: 'AWS/Lambda',
+              MetricName: 'Invocations',
+              Dimensions: [{ Name: 'FunctionName', Value: func.functionName }],
+              StartTime: startTime,
+              EndTime: endTime,
+              Period: 86400,
+              Statistics: ['Sum'],
+            }),
+          ),
+        ]);
+        const durationPts = durationResp.Datapoints ?? [];
+        if (durationPts.length > 0) {
           avgDurationMs =
-            pts.reduce((s, p) => s + (p.Average ?? 0), 0) / pts.length;
+            durationPts.reduce((s, p) => s + (p.Average ?? 0), 0) /
+            durationPts.length;
+        }
+        const invocPts = invocationsResp.Datapoints ?? [];
+        if (invocPts.length > 0) {
+          const totalInvocations = invocPts.reduce(
+            (s, p) => s + (p.Sum ?? 0),
+            0,
+          );
+          dailyInvocations = totalInvocations / 7;
         }
       } catch {
         avgDurationMs = undefined;
+        dailyInvocations = undefined;
       }
 
       const likelyOverProvisioned =
@@ -717,6 +741,8 @@ export class LambdaService {
           func.memorySize,
           recommendedMemory,
           reg,
+          avgDurationMs,
+          dailyInvocations,
         );
 
         const utilizationPct =
@@ -808,21 +834,24 @@ export class LambdaService {
   }
 
   /**
-   * Calculate potential savings from memory optimization
+   * Calculate potential savings from memory optimization.
+   * Uses CloudWatch Duration and Invocations when available; otherwise falls back to defaults.
    */
   private async calculateMemorySavings(
     currentMemory: number,
     recommendedMemory: number,
     region: string = 'us-east-1',
+    avgDurationMs?: number,
+    dailyInvocationsOverride?: number,
   ): Promise<number> {
+    const averageDuration = avgDurationMs ?? 1000;
+    const dailyInvocations = dailyInvocationsOverride ?? 1000;
+
     try {
-      // Get pricing from AWS Pricing API
       const pricing = await this.awsPricingService.getLambdaPricing(region);
 
       if (pricing && pricing.pricePerGBSecond) {
         const costPerGBSecond = pricing.pricePerGBSecond;
-        const averageDuration = 1000; // ms
-        const dailyInvocations = 1000;
 
         const currentCost =
           (currentMemory / 1024) *
@@ -844,12 +873,9 @@ export class LambdaService {
       );
     }
 
-    // Fallback to hardcoded pricing
     const fallbackPricing =
       this.awsPricingService.getFallbackPricing('AWSLambda');
     const costPerGBSecond = fallbackPricing.pricePerGBSecond || 0.0000166667;
-    const averageDuration = 1000; // ms
-    const dailyInvocations = 1000;
 
     const currentCost =
       (currentMemory / 1024) *

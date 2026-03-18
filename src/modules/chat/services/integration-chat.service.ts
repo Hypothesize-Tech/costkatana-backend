@@ -2834,6 +2834,66 @@ export class IntegrationChatService {
               },
             };
           }
+          if (
+            (command.entity === 'calendar' || command.entity === 'event') &&
+            this.configService.get<string>('ENABLE_GOOGLE_GMAIL_CALENDAR') ===
+              'true'
+          ) {
+            const timeMin = command.params?.startDate
+              ? new Date(command.params.startDate as string)
+              : undefined;
+            const timeMax = command.params?.endDate
+              ? new Date(command.params.endDate as string)
+              : undefined;
+            const events = await this.googleService.listCalendarEvents(conn, {
+              timeMin,
+              timeMax,
+              maxResults: 20,
+            });
+            return {
+              success: true,
+              message: `Found ${events.length} calendar event(s)`,
+              data: events,
+              metadata: {
+                type: 'calendar',
+                count: events.length,
+                service: 'google',
+              },
+            };
+          }
+          break;
+
+        case 'send':
+          if (
+            command.entity === 'email' &&
+            this.configService.get<string>('ENABLE_GOOGLE_GMAIL_CALENDAR') ===
+              'true'
+          ) {
+            const to = command.params?.to as string;
+            const subject = (command.params?.subject as string) || '(no subject)';
+            const body = (command.params?.body as string) || '';
+            if (!to) {
+              return {
+                success: false,
+                message: 'Recipient email (to) is required.',
+                error: 'Missing params',
+                metadata: { service: 'google' },
+              };
+            }
+            const result = await this.googleService.sendGmail(conn, {
+              to,
+              subject,
+              body,
+              cc: command.params?.cc as string | undefined,
+              bcc: command.params?.bcc as string | undefined,
+            });
+            return {
+              success: true,
+              message: 'Email sent successfully',
+              data: { messageId: result.messageId, threadId: result.threadId },
+              metadata: { type: 'email', service: 'google' },
+            };
+          }
           break;
 
         case 'get':
@@ -3199,28 +3259,25 @@ export class IntegrationChatService {
         'false',
       ) === 'true';
 
-      if (command.entity === 'email') {
+      if (command.entity === 'email' && !gmailCalendarEnabled) {
         return {
           success: false,
-          message: gmailCalendarEnabled
-            ? 'Gmail send is not available. Use the Gmail app or mail.google.com for now.'
-            : 'Gmail send is not enabled for this workspace. Use the Gmail app or mail.google.com.',
-          error: 'Feature not available',
-          metadata: {
-            service: 'google',
-          },
+          message:
+            'Gmail send is not enabled for this workspace. Set ENABLE_GOOGLE_GMAIL_CALENDAR=true and reconnect with Gmail scope.',
+          error: 'Feature not enabled',
+          metadata: { service: 'google' },
         };
       }
-      if (command.entity === 'calendar' || command.entity === 'event') {
+      if (
+        (command.entity === 'calendar' || command.entity === 'event') &&
+        !gmailCalendarEnabled
+      ) {
         return {
           success: false,
-          message: gmailCalendarEnabled
-            ? 'Google Calendar list is not available. Use calendar.google.com for now.'
-            : 'Google Calendar list is not enabled for this workspace. Use calendar.google.com.',
-          error: 'Feature not available',
-          metadata: {
-            service: 'google',
-          },
+          message:
+            'Google Calendar is not enabled. Set ENABLE_GOOGLE_GMAIL_CALENDAR=true and reconnect with Calendar scope.',
+          error: 'Feature not enabled',
+          metadata: { service: 'google' },
         };
       }
 

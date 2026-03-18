@@ -16,6 +16,7 @@ import { InterventionLog } from './schemas/misc/intervention-log.schema';
 import { RequestInterceptorMiddleware } from './common/middleware/request-interceptor.middleware';
 import { EnterpriseTrafficManagementMiddleware } from './common/middleware/enterprise-traffic-management.middleware';
 import { TrafficPredictionService } from './modules/analytics/services/traffic-prediction.service';
+import { CacheService } from './common/cache/cache.service';
 import { GracefulDegradationMiddleware } from './common/middleware/graceful-degradation.middleware';
 import { AgentSandboxMiddleware } from './common/middleware/agent-sandbox.middleware';
 import helmet from 'helmet';
@@ -135,9 +136,22 @@ async function bootstrap() {
   );
   app.use(aiLoggingMiddleware.use.bind(aiLoggingMiddleware));
   const trafficPredictionService = app.get(TrafficPredictionService);
+  const cacheService = app.get(CacheService);
+  try {
+    const { setTrafficPredictionBridge } = await import(
+      './services/traffic-prediction-bridge'
+    );
+    setTrafficPredictionBridge(trafficPredictionService, cacheService);
+    logger.log('Traffic prediction bridge wired successfully');
+  } catch (e) {
+    logger.warn('Traffic prediction bridge wiring skipped', {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
   const enterpriseTrafficMiddleware = new EnterpriseTrafficManagementMiddleware(
     configService,
     trafficPredictionService,
+    cacheService,
   );
   app.use(enterpriseTrafficMiddleware.use.bind(enterpriseTrafficMiddleware));
   const gracefulDegradationMiddleware = new GracefulDegradationMiddleware(

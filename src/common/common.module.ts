@@ -1,5 +1,7 @@
 import { Global, Module, forwardRef, type DynamicModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { MongooseModule } from '@nestjs/mongoose';
+import { HttpModule } from '@nestjs/axios';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { CacheModule } from '@nestjs/cache-manager';
 import { LoggerService } from './logger/logger.service';
@@ -69,6 +71,8 @@ import { AuthModule } from '../modules/auth/auth.module';
 @Module({
   imports: [
     ConfigModule,
+    MongooseModule,
+    HttpModule.register({ timeout: 10000 }),
     EventEmitterModule.forRoot({ wildcard: true }),
     CacheModule.register() as DynamicModule,
     SecurityModule,

@@ -175,6 +175,8 @@ export interface LambdaCreationConfig {
     targetArn: string;
   };
   tags?: Record<string, string>;
+  /** Estimated monthly invocations for cost projection. Default: 1_000_000 when not provided. */
+  estimatedMonthlyRequests?: number;
 }
 
 export interface LambdaCreationResult extends ResourceCreationResult {

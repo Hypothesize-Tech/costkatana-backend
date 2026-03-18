@@ -125,6 +125,9 @@ import { EnterpriseSecurityModule } from './modules/enterprise-security/enterpri
 // Request Scoring module
 import { RequestScoringModule } from './modules/request-scoring/request-scoring.module';
 
+// ROI Evaluator module
+import { RoiEvaluatorModule } from './modules/roi-evaluator/roi-evaluator.module';
+
 // Community module
 import { CommunityModule } from './modules/community/community.module';
 
@@ -288,6 +291,9 @@ import { ComprehensiveTrackingMiddleware } from './modules/usage/middleware/comp
 
     // Request Scoring module
     RequestScoringModule,
+
+    // ROI Evaluator module
+    RoiEvaluatorModule,
   ],
   controllers: [AppController],
   providers: [

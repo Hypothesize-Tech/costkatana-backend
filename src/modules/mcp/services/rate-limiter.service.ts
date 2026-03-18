@@ -258,42 +258,16 @@ export class RateLimiterService {
   }
 
   /**
-   * Get all rate limit keys for a user (for cleanup/debugging)
+   * Get all rate limit keys for a user using Redis SCAN (non-blocking)
    */
   async getUserRateLimitKeys(userId: string): Promise<string[]> {
-    // Note: This is a simplified version since CacheService doesn't have scan functionality
-    // In production, you might want to extend CacheService or use Redis directly
-    const keys: string[] = [];
-    const integrations: IntegrationType[] = [
-      'vercel',
-      'github',
-      'google',
-      'slack',
-      'discord',
-      'jira',
-      'linear',
-      'mongodb',
-      'aws',
-    ];
-    const methods = Object.keys(
-      RateLimiterService.DEFAULT_LIMITS,
-    ) as HttpMethod[];
-
-    for (const integration of integrations) {
-      for (const method of methods) {
-        const key = this.getCacheKey(userId, integration, method);
-        try {
-          const count = await this.cacheService.zcard(key);
-          if (count > 0) {
-            keys.push(key);
-          }
-        } catch {
-          // Continue on error
-        }
-      }
+    const pattern = `${this.CACHE_PREFIX}${userId}:*`;
+    try {
+      const keys = await this.cacheService.scanKeys(pattern);
+      return keys;
+    } catch {
+      return [];
     }
-
-    return keys;
   }
 
   /**

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { createHash } from 'crypto';
 import { Usage, UsageDocument } from '@/schemas/core/usage.schema';
 import {
   Project,
@@ -353,7 +354,7 @@ export class PredictiveCostIntelligenceService {
         projection.daysUntilExceedance < 30
       ) {
         alerts.push({
-          id: `budget_exceed_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+          id: `budget_exceed_${[userId, projection.scopeId, projection.projectedExceedDate?.toISOString?.() ?? projection.projectedExceedDate].join('_')}`,
           type: 'budget_exceed',
           severity:
             projection.daysUntilExceedance <= 7
@@ -397,7 +398,7 @@ export class PredictiveCostIntelligenceService {
     );
     for (const opt of highValue) {
       alerts.push({
-        id: `optimization_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        id: `optimization_${[userId, opt.title, opt.potentialSavings].join('_').replace(/\s+/g, '-')}`,
         type: 'optimization_opportunity',
         severity: opt.potentialSavings > 500 ? 'high' : 'medium',
         title: `${opt.title} - Save $${opt.potentialSavings.toFixed(2)}/month`,
@@ -632,43 +633,181 @@ export class PredictiveCostIntelligenceService {
     }
   }
 
+  private deterministicScenarioId(
+    userId: string,
+    scopeId: string | undefined,
+    scenarioType: string,
+  ): string {
+    const payload = `${userId}:${scopeId ?? 'user'}:${scenarioType}`;
+    return createHash('sha256').update(payload).digest('hex').slice(0, 12);
+  }
+
+  private async getActualModelMix(
+    userId: string,
+    scopeId: string | undefined,
+  ): Promise<Record<string, number>> {
+    const startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const match: Record<string, unknown> = {
+      userId: new Types.ObjectId(userId),
+      createdAt: { $gte: startDate },
+    };
+    if (scopeId) match.projectId = new Types.ObjectId(scopeId);
+    const result = await this.usageModel.aggregate<{
+      _id: string;
+      totalCost: number;
+    }>([
+      { $match: match },
+      { $group: { _id: '$model', totalCost: { $sum: '$cost' } } },
+    ]);
+    const total = result.reduce((s, r) => s + r.totalCost, 0);
+    if (total <= 0) {
+      return { 'gpt-4': 0.5, 'gpt-3.5-turbo': 0.5 };
+    }
+    const mix: Record<string, number> = {};
+    for (const r of result) {
+      mix[r._id] = r.totalCost / total;
+    }
+    return mix;
+  }
+
+  private async getUsageGrowthRate(
+    userId: string,
+    scopeId: string | undefined,
+  ): Promise<number> {
+    const historical = await this.getTokenHistoricalData(
+      userId,
+      scopeId,
+      90,
+    );
+    if (historical.length < 4) return 1.0;
+    const costs = historical.map((h) => h.cost);
+    const rate = this.calculateGrowthRate(costs);
+    return Math.max(0.5, Math.min(2.0, 1 + rate / 100));
+  }
+
+  /**
+   * Derive scenario variables from real user data instead of hardcoded constants.
+   * - promptComplexity: from avg prompt tokens (500 = 1.0 baseline)
+   * - optimizationLevel: from model mix (premium share = less optimized, more headroom)
+   * - optimizationSavingsRate: from potentialSavings/currentMonthly
+   */
+  private async getDerivedScenarioVariables(
+    userId: string,
+    scopeId: string | undefined,
+  ): Promise<{
+    promptComplexity: number;
+    optimizationLevel: number;
+    optimizationSavingsRate: number;
+    promptGrowth: PromptLengthGrowthAnalysis;
+  }> {
+    const [tokenHistorical, promptGrowth, currentCost] = await Promise.all([
+      this.getTokenHistoricalData(userId, scopeId, 60),
+      this.analyzePromptLengthGrowth(userId, scopeId),
+      this.getCurrentMonthlyCost(userId, scopeId),
+    ]);
+
+    const avgPromptTokens =
+      tokenHistorical.length > 0
+        ? tokenHistorical.reduce((s, d) => s + (d.averagePromptTokens ?? 0), 0) /
+          tokenHistorical.length
+        : 500;
+    const promptComplexity = Math.min(
+      1.4,
+      Math.max(0.6, (avgPromptTokens ?? 500) / 500),
+    );
+
+    const actualMix = await this.getActualModelMix(userId, scopeId);
+    const premiumPatterns = [
+      /^gpt-4o/,
+      /^gpt-4-turbo/,
+      /^gpt-4$/,
+      /^gpt-4-/,
+      /^claude-3-opus/,
+      /^claude-3-sonnet/,
+    ];
+    let premiumShare = 0;
+    for (const [model, share] of Object.entries(actualMix)) {
+      if (premiumPatterns.some((p) => p.test(model))) {
+        premiumShare += share;
+      }
+    }
+    const optimizationLevel = Math.min(
+      0.95,
+      Math.max(0.55, 0.55 + (1 - premiumShare) * 0.4),
+    );
+
+    const potentialSavings = promptGrowth.impactOnCosts.potentialSavings ?? 0;
+    const currentMonthly = promptGrowth.impactOnCosts.currentMonthly || currentCost || 1;
+    const rawRate =
+      currentMonthly > 0 ? potentialSavings / currentMonthly : 0.2;
+    const optimizationSavingsRate = Math.min(
+      0.45,
+      Math.max(0.1, rawRate || 0.2),
+    );
+
+    return {
+      promptComplexity,
+      optimizationLevel,
+      optimizationSavingsRate,
+      promptGrowth,
+    };
+  }
+
   private async simulateScenarios(
     userId: string,
     scopeId: string | undefined,
     timeHorizon: number,
   ): Promise<ScenarioSimulation[]> {
     try {
-      const currentCost = await this.getCurrentMonthlyCost(userId, scopeId);
+      const [
+        currentCost,
+        actualModelMix,
+        usageGrowthRate,
+        derivedVars,
+      ] = await Promise.all([
+        this.getCurrentMonthlyCost(userId, scopeId),
+        this.getActualModelMix(userId, scopeId),
+        this.getUsageGrowthRate(userId, scopeId),
+        this.getDerivedScenarioVariables(userId, scopeId),
+      ]);
       const timeFrameLabel =
         timeHorizon <= 30
           ? '1_month'
           : timeHorizon <= 90
             ? '3_months'
             : '6_months';
+      const monthsInHorizon = Math.max(1, Math.ceil(timeHorizon / 30));
+
+      const growthMultiplier = Math.pow(usageGrowthRate, monthsInHorizon);
+      const costAtHorizon = currentCost * monthsInHorizon * growthMultiplier;
+      const { optimizationSavingsRate, promptComplexity, optimizationLevel } =
+        derivedVars;
+      const diversifiedMix = this.computeDiversifiedModelMix(actualModelMix);
+
       const scenarios: ScenarioSimulation[] = [
         {
-          scenarioId: `growth_${Date.now()}`,
+          scenarioId: `growth_${this.deterministicScenarioId(userId, scopeId, 'growth')}`,
           name: 'Business Growth Scenario',
-          description: '50% increase in AI usage due to business expansion',
+          description: `${Math.round((usageGrowthRate - 1) * 100)}% usage growth projected; costs will rise proportionally`,
           timeframe: timeFrameLabel as
             | '1_month'
             | '3_months'
             | '6_months'
             | '1_year',
           variables: {
-            usageGrowth: 1.5,
-            modelMix: { 'gpt-4': 0.6, 'gpt-3.5-turbo': 0.4 },
-            promptComplexity: 1.2,
-            optimizationLevel: 0.8,
+            usageGrowth: usageGrowthRate,
+            modelMix: actualModelMix,
+            promptComplexity: Math.min(1.3, promptComplexity * 1.1),
+            optimizationLevel: Math.min(0.95, optimizationLevel + 0.05),
           },
           projectedCosts: {
-            baseline: currentCost * 1.5 * 3,
-            optimized: currentCost * 1.5 * 3 * 0.8,
-            savings: currentCost * 1.5 * 3 * 0.2,
+            baseline: costAtHorizon,
+            optimized: costAtHorizon * (1 - optimizationSavingsRate),
+            savings: costAtHorizon * optimizationSavingsRate,
           },
           keyInsights: [
             'Growth will significantly increase costs without optimization',
-            'Model switching can reduce impact by 20%',
+            `Model switching can reduce impact by ${Math.round(optimizationSavingsRate * 100)}%`,
             'Prompt optimization becomes critical at scale',
           ],
           recommendedActions: [
@@ -676,26 +815,29 @@ export class PredictiveCostIntelligenceService {
             'Set up prompt caching for common patterns',
             'Establish usage monitoring and alerts',
           ],
-          probabilityOfSuccess: 0.85,
+          probabilityOfSuccess: Math.min(
+            0.95,
+            Math.max(0.6, 0.7 + (Object.keys(actualModelMix).length - 1) * 0.05),
+          ),
         },
         {
-          scenarioId: `optimization_${Date.now()}`,
+          scenarioId: `optimization_${this.deterministicScenarioId(userId, scopeId, 'optimization')}`,
           name: 'Aggressive Optimization Scenario',
           description: 'Maximum cost optimization with minimal quality impact',
           timeframe: '6_months',
           variables: {
             usageGrowth: 1.0,
-            modelMix: { 'gpt-3.5-turbo': 0.7, 'claude-haiku': 0.3 },
-            promptComplexity: 0.8,
-            optimizationLevel: 0.6,
+            modelMix: diversifiedMix,
+            promptComplexity: Math.max(0.6, promptComplexity - 0.2),
+            optimizationLevel: Math.max(0.55, optimizationLevel - 0.15),
           },
           projectedCosts: {
             baseline: currentCost * 6,
-            optimized: currentCost * 6 * 0.6,
-            savings: currentCost * 6 * 0.4,
+            optimized: currentCost * 6 * (1 - optimizationSavingsRate),
+            savings: currentCost * 6 * optimizationSavingsRate,
           },
           keyInsights: [
-            'Can achieve 40% cost reduction',
+            `Can achieve ${Math.round(optimizationSavingsRate * 100)}% cost reduction`,
             'Quality impact minimal with smart switching',
             'Requires systematic implementation',
           ],
@@ -704,22 +846,21 @@ export class PredictiveCostIntelligenceService {
             'Use cheaper models for simple tasks',
             'Optimize prompt lengths and complexity',
           ],
-          probabilityOfSuccess: 0.75,
+          probabilityOfSuccess: Math.min(
+            0.9,
+            Math.max(0.6, 0.75 + (Object.keys(diversifiedMix).length - 1) * 0.03),
+          ),
         },
         {
-          scenarioId: `price_changes_${Date.now()}`,
+          scenarioId: `price_changes_${this.deterministicScenarioId(userId, scopeId, 'price_changes')}`,
           name: 'Model Price Increase Scenario',
-          description: 'GPT-4 prices increase by 25%, need adaptation strategy',
+          description: 'Price increases across providers; diversification mitigates risk',
           timeframe: '1_year',
           variables: {
-            usageGrowth: 1.1,
-            modelMix: {
-              'gpt-4': 0.3,
-              'claude-sonnet': 0.4,
-              'gpt-3.5-turbo': 0.3,
-            },
-            promptComplexity: 1.0,
-            optimizationLevel: 0.85,
+            usageGrowth: usageGrowthRate,
+            modelMix: diversifiedMix,
+            promptComplexity,
+            optimizationLevel: Math.min(0.95, optimizationLevel + 0.1),
           },
           projectedCosts: {
             baseline: currentCost * 12 * 1.15,
@@ -736,7 +877,10 @@ export class PredictiveCostIntelligenceService {
             'Implement dynamic model selection',
             'Negotiate volume discounts where possible',
           ],
-          probabilityOfSuccess: 0.9,
+          probabilityOfSuccess: Math.min(
+            0.95,
+            Math.max(0.8, 0.9 - Object.keys(actualModelMix).length * 0.03),
+          ),
         },
       ];
       return scenarios;
@@ -746,6 +890,19 @@ export class PredictiveCostIntelligenceService {
       });
       return [];
     }
+  }
+
+  private computeDiversifiedModelMix(
+    actual: Record<string, number>,
+  ): Record<string, number> {
+    const models = Object.keys(actual);
+    if (models.length >= 3) return actual;
+    const fallback: Record<string, number> = {
+      'gpt-3.5-turbo': 0.5,
+      'claude-haiku': 0.25,
+      'claude-sonnet': 0.25,
+    };
+    return { ...fallback, ...actual };
   }
 
   private async analyzeCrossPlatformInsights(
@@ -1068,12 +1225,33 @@ export class PredictiveCostIntelligenceService {
     return result[0]?.totalCost ?? 0;
   }
 
+  /**
+   * Estimate prompt optimization savings from user's avg prompt length.
+   * Cortex-style optimization: 40-75% token reduction; longer prompts have higher potential.
+   */
   private async calculatePromptOptimizationSavings(
     userId: string,
     scopeId: string | undefined,
   ): Promise<number> {
-    const current = await this.getCurrentMonthlyCost(userId, scopeId);
-    return current * 0.2;
+    const [current, tokenHistorical] = await Promise.all([
+      this.getCurrentMonthlyCost(userId, scopeId),
+      this.getTokenHistoricalData(userId, scopeId, 60),
+    ]);
+    if (current <= 0) return 0;
+    const avgPromptTokens =
+      tokenHistorical.length > 0
+        ? tokenHistorical.reduce((s, d) => s + (d.averagePromptTokens ?? 0), 0) /
+          tokenHistorical.length
+        : 400;
+    const savingsRate =
+      avgPromptTokens > 1000
+        ? 0.35
+        : avgPromptTokens > 600
+          ? 0.28
+          : avgPromptTokens > 300
+            ? 0.2
+            : 0.12;
+    return current * savingsRate;
   }
 
   private async calculateModelSwitchFrequency(

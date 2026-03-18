@@ -76,6 +76,10 @@ export class UsageController {
       const usage = await this.usageService.trackUsage({
         userId,
         ...body,
+        metadata: {
+          ...(body.metadata || {}),
+          ...(user?.apiKeyId && { apiKeyId: user.apiKeyId }),
+        },
       });
 
       // Handle session replay if user has preferences enabled

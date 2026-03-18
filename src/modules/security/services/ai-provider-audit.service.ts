@@ -7,6 +7,10 @@ import {
   AIProviderAudit,
   AIProviderAuditDocument,
 } from '../../../schemas/security/ai-provider-audit.schema';
+import {
+  UserDataConsent,
+  UserDataConsentDocument,
+} from '../../../schemas/security/user-data-consent.schema';
 
 export interface AIProviderRequest {
   requestId: string;
@@ -186,6 +190,8 @@ export class AIProviderAuditService
   constructor(
     @InjectModel(AIProviderAudit.name)
     private auditModel: Model<AIProviderAuditDocument>,
+    @InjectModel(UserDataConsent.name)
+    private userDataConsentModel: Model<UserDataConsentDocument>,
   ) {
     super();
   }
@@ -476,19 +482,45 @@ export class AIProviderAuditService
   }
 
   /**
-   * Check compliance requirements
+   * Check actual user consent records for GDPR compliance.
+   * Queries UserDataConsent collection instead of heuristics.
    */
-  checkCompliance(
+  async getUserConsentForAIProcessing(userId: string): Promise<boolean> {
+    if (!userId || userId === 'anonymous') {
+      return false;
+    }
+    try {
+      const consent = await this.userDataConsentModel
+        .findOne({
+          userId,
+          purpose: 'ai_processing',
+        })
+        .sort({ consentedAt: -1 })
+        .lean();
+      return consent?.consented === true;
+    } catch (error) {
+      this.logger.warn('Failed to fetch user consent', {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Check compliance requirements using actual user consent records.
+   */
+  async checkCompliance(
     data: string,
     context: { userId: string; provider: string; model: string },
-  ): {
+  ): Promise<{
     gdprApplicable: boolean;
     hipaaApplicable: boolean;
     soc2Applicable: boolean;
     consentObtained: boolean;
     complianceFlags: string[];
     dataRetentionPolicy: string;
-  } {
+  }> {
     const complianceFlags: string[] = [];
 
     // Analyze data for compliance implications
@@ -500,8 +532,14 @@ export class AIProviderAuditService
       piiDetected.includes('medical') || context.provider === 'custom'; // Health data
     const soc2Applicable = true; // All AI processing requires SOC2 compliance
 
-    // Check for consent requirements
-    const consentObtained = !gdprApplicable || piiDetected.length === 0; // Simplified
+    // Check actual user consent records from database (GDPR: explicit opt-in required when PII present)
+    let consentObtained: boolean;
+    if (!gdprApplicable || piiDetected.length === 0) {
+      // No GDPR implications or no PII — consent not required for processing
+      consentObtained = true;
+    } else {
+      consentObtained = await this.getUserConsentForAIProcessing(context.userId);
+    }
 
     // Generate compliance flags
     if (gdprApplicable && !consentObtained) {

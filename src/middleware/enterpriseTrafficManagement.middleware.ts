@@ -469,30 +469,17 @@ export function enterpriseTrafficManagementMiddleware(
 }
 
 /**
- * Record traffic data for prediction service
+ * Record traffic data for prediction service.
+ * Uses TrafficPredictionService via legacy bridge when wired during bootstrap.
  */
-function recordTrafficData(_req: any, _systemStatus: any): void {
+async function recordTrafficData(req: any, systemStatus: any): Promise<void> {
   try {
-    // This would integrate with the traffic prediction service
-    // For now, we'll just log the data point
-    const _dataPoint = {
-      timestamp: Date.now(),
-      requests_per_second: 1, // Would be calculated from actual metrics
-      unique_users: 1,
-      response_time: _systemStatus.performance_metrics.average_response_time,
-      error_rate: _systemStatus.performance_metrics.error_rate,
-      cpu_usage: _systemStatus.performance_metrics.cpu_usage,
-      memory_usage: _systemStatus.performance_metrics.memory_usage,
-      endpoint_distribution: { [_req.path]: 1 },
-      user_tier_distribution: { [_req.user?.tier || 'free']: 1 },
-      geographic_distribution: {
-        [_req.headers['x-forwarded-for'] || 'unknown']: 1,
-      },
-    };
-
-    // Record would happen here - simplified for this implementation
-  } catch (error) {
-    // Non-critical error
+    const { recordTrafficDataLegacy } = await import(
+      '../services/traffic-prediction-bridge'
+    );
+    await recordTrafficDataLegacy(req, systemStatus);
+  } catch {
+    // Non-critical; bridge may not be wired if legacy middleware used standalone
   }
 }
 

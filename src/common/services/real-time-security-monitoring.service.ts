@@ -813,8 +813,72 @@ export class RealTimeSecurityMonitoringService
       top_threats: this.aggregateThreats(recentAlerts),
       geographic_distribution: this.aggregateGeographicThreats(recentAlerts),
       attack_vectors: this.aggregateAttackVectors(recentAlerts),
-      threat_actors: [], // Would integrate with threat intelligence feeds
+      threat_actors: this.aggregateThreatActors(recentAlerts),
     });
+  }
+
+  /**
+   * Derive observed threat actors from alerts and data flows.
+   * Uses alert sources and flow metadata (IPs, user agents) as observed attack origins.
+   * For full threat intel, integrate with MISP, VirusTotal, or similar feeds.
+   */
+  private aggregateThreatActors(
+    alerts: SecurityAlert[],
+  ): Array<{ name: string; confidence: number; last_seen: number }> {
+    const actorMap = new Map<
+      string,
+      { count: number; lastSeen: number; confidence: number }
+    >();
+
+    for (const alert of alerts) {
+      const source = alert.alert?.source ?? 'unknown';
+      const attribution = alert.threat?.attribution;
+      const key = attribution || source;
+      const existing = actorMap.get(key);
+      const confidence = alert.alert?.confidence ?? 0.5;
+      if (existing) {
+        existing.count++;
+        existing.lastSeen = Math.max(existing.lastSeen, alert.timestamp);
+        existing.confidence = Math.max(existing.confidence, confidence);
+      } else {
+        actorMap.set(key, {
+          count: 1,
+          lastSeen: alert.timestamp,
+          confidence,
+        });
+      }
+    }
+
+    for (const flow of this.dataFlows.values()) {
+      const src = flow.flow?.source as { ip_address?: string } | undefined;
+      const ip = src?.ip_address;
+      if (ip && flow.security?.risk_score && flow.security.risk_score > 50) {
+        const key = `ip:${ip}`;
+        const existing = actorMap.get(key);
+        const confidence = Math.min(1, (flow.security.risk_score ?? 0) / 100);
+        if (existing) {
+          existing.count++;
+          existing.lastSeen = Math.max(existing.lastSeen, flow.timestamp);
+          existing.confidence = Math.max(existing.confidence, confidence);
+        } else {
+          actorMap.set(key, {
+            count: 1,
+            lastSeen: flow.timestamp,
+            confidence,
+          });
+        }
+      }
+    }
+
+    return Array.from(actorMap.entries())
+      .filter(([, v]) => v.count >= 1)
+      .map(([name, v]) => ({
+        name: name.startsWith('ip:') ? name : name,
+        confidence: Math.round(v.confidence * 100) / 100,
+        last_seen: v.lastSeen,
+      }))
+      .sort((a, b) => b.last_seen - a.last_seen)
+      .slice(0, 20);
   }
 
   /**

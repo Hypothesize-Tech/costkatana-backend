@@ -5,12 +5,15 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Document as LangchainDocument } from '@langchain/core/documents';
 import {
   FaissVectorService,
   VectorSearchOptions,
 } from './faiss-vector.service';
 import { LangchainVectorStoreService } from './langchain-vector-store.service';
+import {
+  SparseSearchService,
+  SparseSearchOptions,
+} from './sparse-search.service';
 
 export interface HybridSearchOptions {
   repoFullName?: string;
@@ -59,6 +62,7 @@ export class HybridSearchService {
     private configService: ConfigService,
     private faissVectorService: FaissVectorService,
     private langchainVectorStoreService: LangchainVectorStoreService,
+    private sparseSearchService: SparseSearchService,
   ) {}
 
   /**
@@ -129,68 +133,33 @@ export class HybridSearchService {
   }
 
   /**
-   * Perform sparse search (BM25-style using MongoDB text search)
+   * Perform sparse search using real BM25 via MongoDB text index (SparseSearchService)
    */
   private async performSparseSearch(
     query: string,
     options: HybridSearchOptions,
   ): Promise<SparseSearchResult[]> {
     try {
-      // Use LangchainVectorStoreService for text search
-      const limit = options.limit ? options.limit * 2 : 100;
-      const filters: any = {
-        status: 'active',
+      const sparseOptions: SparseSearchOptions = {
+        limit: options.limit ? options.limit * 2 : 100,
+        repoFullName: options.repoFullName,
+        language: options.language,
+        chunkType: options.chunkType,
+        filePath: options.filePath,
+        userId: options.userId,
       };
 
-      if (options.repoFullName) {
-        filters.repoFullName = options.repoFullName;
-      }
+      const results = await this.sparseSearchService.search(query, sparseOptions);
 
-      if (options.language) {
-        filters.language = options.language;
-      }
-
-      if (options.chunkType) {
-        filters.chunkType = options.chunkType;
-      }
-
-      if (options.userId) {
-        filters.userId = options.userId;
-      }
-
-      // Perform text search using LangchainVectorStoreService
-      const documents = await this.langchainVectorStoreService.similaritySearch(
-        query,
-        limit,
-        filters,
-      );
-
-      // Convert to sparse results format with BM25-style scoring
-      return documents.map((doc: LangchainDocument, index: number) => {
-        const metadata = doc.metadata || {};
-        // Simulate BM25 scoring based on position and content match
-        const bm25Score = this.calculateBM25Score(
-          query,
-          doc.pageContent,
-          index,
-        );
-
-        return {
-          chunkId: metadata._id || `chunk_${index}`,
-          content: doc.pageContent,
-          score: bm25Score,
-          metadata: {
-            repoFullName: metadata.repoFullName,
-            filePath: metadata.filePath,
-            startLine: metadata.startLine,
-            endLine: metadata.endLine,
-            commitSha: metadata.commitSha,
-            chunkType: metadata.chunkType,
-            language: metadata.language,
-            astMetadata: metadata.astMetadata,
-          },
-        };
-      });
+      return results.map((r) => ({
+        chunkId: r.chunkId,
+        content: r.content,
+        score: r.score,
+        metadata: {
+          ...r.metadata,
+          astMetadata: (r.metadata as { astMetadata?: unknown })?.astMetadata,
+        },
+      }));
     } catch (error) {
       this.logger.error('Sparse search failed', {
         error: error instanceof Error ? error.message : String(error),
@@ -389,35 +358,4 @@ export class HybridSearchService {
     }));
   }
 
-  /**
-   * Calculate BM25-style score for sparse search simulation
-   */
-  private calculateBM25Score(
-    query: string,
-    content: string,
-    position: number,
-  ): number {
-    const queryTerms = query
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((term) => term.length > 2);
-    const contentLower = content.toLowerCase();
-
-    let score = 0;
-    const k1 = 1.5; // BM25 parameter
-    const b = 0.75; // BM25 parameter
-
-    // Simple term frequency scoring
-    for (const term of queryTerms) {
-      const termCount = (contentLower.match(new RegExp(term, 'g')) || [])
-        .length;
-      if (termCount > 0) {
-        // BM25-like scoring with position penalty
-        const positionPenalty = Math.exp(-position * 0.1); // Prefer earlier results
-        score += ((termCount * (k1 + 1)) / (termCount + k1)) * positionPenalty;
-      }
-    }
-
-    return score;
-  }
 }

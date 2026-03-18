@@ -187,6 +187,17 @@ export class GatewayAnalyticsService {
           });
         } else {
           // Create new usage record if we don't have an existing one
+          const metadata: Record<string, unknown> = {
+            requestId,
+            method: request.method,
+            url: request.originalUrl,
+          };
+          if (context.proxyKeyId) {
+            metadata.proxyKeyId = context.proxyKeyId;
+          }
+          if (context.apiKeyId) {
+            metadata.apiKeyId = context.apiKeyId;
+          }
           const usageRecord = new this.usageModel({
             userId: context.userId,
             projectId: context.projectId,
@@ -199,11 +210,7 @@ export class GatewayAnalyticsService {
                   .join('\n')
               : request.body?.prompt || '',
             ...updateData,
-            requestMetadata: {
-              requestId,
-              method: request.method,
-              url: request.originalUrl,
-            },
+            metadata,
             requestTimestamp: new Date(context.startTime),
           });
 

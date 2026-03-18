@@ -640,17 +640,19 @@ Respond with ONLY a valid JSON object:
             },
           );
 
-          // Fallback to text matching if vector search fails
-          const results = templates.map((template) => {
-            const score = this.calculateTextRelevance(template, query);
-            const matchedContent = this.findMatchingContent(template, query);
+          // Fallback to embedding similarity or text matching
+          const results = await Promise.all(
+            templates.map(async (template) => {
+              const score = await this.calculateTextRelevance(template, query);
+              const matchedContent = this.findMatchingContent(template, query);
 
-            return {
-              template,
-              relevanceScore: score,
-              matchedContent,
-            };
-          });
+              return {
+                template,
+                relevanceScore: score,
+                matchedContent,
+              };
+            }),
+          );
 
           return results
             .filter((result) => result.relevanceScore > 0.1)
@@ -828,7 +830,52 @@ Respond with ONLY a valid JSON object:
     template: any,
     count: number,
   ): Promise<any[]> {
-    // Simplified - in production would generate actual alternatives
+    try {
+      const systemPrompt = `You are an expert prompt engineer. Generate ${count} alternative versions of the given prompt template.
+Each alternative should achieve the same goal but use different wording, structure, or approach.
+Preserve all {{variable}} placeholders exactly. Return ONLY a JSON array of objects with: name, description, content, variables.
+No explanatory text.`;
+
+      const userPrompt = `Original template:
+Name: ${template.name}
+Description: ${template.description || 'N/A'}
+Content: ${template.content}
+
+Generate ${count} distinct alternatives as a JSON array.`;
+
+      const response = await this.model.invoke([
+        new SystemMessage(systemPrompt),
+        new HumanMessage(userPrompt),
+      ]);
+
+      const text = typeof response.content === 'string'
+        ? response.content
+        : (response.content as any[])?.[0]?.text ?? String(response.content ?? '');
+      const raw = text.trim();
+      let alternatives: any[];
+      if (raw.startsWith('[')) {
+        const arrMatch = raw.match(/\[[\s\S]*\]/);
+        alternatives = arrMatch ? JSON.parse(arrMatch[0]) : [];
+      } else {
+        const parsed = this.extractAndParseJSON(raw);
+        alternatives = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+      }
+      if (Array.isArray(alternatives) && alternatives.length > 0) {
+        return alternatives.slice(0, count).map((alt: any, i: number) => ({
+          ...template,
+          name: alt.name || `${template.name} (Variant ${i + 1})`,
+          description: alt.description ?? template.description,
+          content: alt.content ?? template.content,
+          variables: alt.variables ?? template.variables,
+          version: i + 1,
+        }));
+      }
+    } catch (error) {
+      this.logger.warn(
+        'AI alternative generation failed, using fallback variants',
+        { error: error instanceof Error ? error.message : String(error) },
+      );
+    }
     return Array(count)
       .fill(null)
       .map((_, i) => ({
@@ -980,22 +1027,54 @@ Respond with ONLY a valid JSON object:
     };
   }
 
-  private calculateTextRelevance(
+  private async calculateTextRelevance(
+    template: PromptTemplateDocument,
+    query: string,
+  ): Promise<number> {
+    try {
+      const searchText =
+        `${template.name} ${template.description ?? ''} ${template.content}`.trim();
+      if (!searchText || !query.trim()) return 0.5;
+
+      const [templateEmb, queryEmb] = await Promise.all([
+        this.vectorStoreService.embedText(searchText),
+        this.vectorStoreService.embedText(query.trim()),
+      ]);
+      if (
+        !templateEmb?.length ||
+        !queryEmb?.length ||
+        templateEmb.length !== queryEmb.length
+      ) {
+        return this.calculateTextRelevanceFallback(template, query);
+      }
+      const dot = templateEmb.reduce(
+        (sum, v, i) => sum + v * (queryEmb[i] ?? 0),
+        0,
+      );
+      const normA = Math.sqrt(
+        templateEmb.reduce((s, v) => s + v * v, 0),
+      );
+      const normB = Math.sqrt(queryEmb.reduce((s, v) => s + v * v, 0));
+      const similarity = normA && normB ? dot / (normA * normB) : 0;
+      return Math.max(0, Math.min(1, (similarity + 1) / 2)); // cosine to [0,1]
+    } catch {
+      return this.calculateTextRelevanceFallback(template, query);
+    }
+  }
+
+  private calculateTextRelevanceFallback(
     template: PromptTemplateDocument,
     query: string,
   ): number {
     const searchText =
-      `${template.name} ${template.description} ${template.content}`.toLowerCase();
+      `${template.name} ${template.description ?? ''} ${template.content}`.toLowerCase();
     const queryLower = query.toLowerCase();
-
-    // Simple word matching - in production would use better similarity
-    const queryWords = queryLower.split(' ');
+    const queryWords = queryLower.split(/\s+/).filter(Boolean);
+    if (queryWords.length === 0) return 0.5;
     let matches = 0;
-
     for (const word of queryWords) {
       if (searchText.includes(word)) matches++;
     }
-
     return matches / queryWords.length;
   }
 

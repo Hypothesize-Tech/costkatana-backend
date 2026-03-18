@@ -780,6 +780,9 @@ export class TreeSitterService implements OnModuleInit {
   private extractPythonVisibility(
     node: any,
   ): 'public' | 'private' | 'protected' {
+    const name = this.extractPythonFunctionName(node) ?? this.extractFunctionName(node) ?? '';
+    if (name.startsWith('__')) return 'private';
+    if (name.startsWith('_')) return 'protected';
     return 'public';
   }
 

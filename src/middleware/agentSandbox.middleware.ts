@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { loggingService } from '../common/services/logging.service';
+import { getAgentIdentityService } from '../modules/governance/services/agent-identity.service';
 
 // Extend Express Request type to include agent context
 declare global {
@@ -63,17 +64,75 @@ export const agentSandboxMiddleware = (
         return;
       }
 
-      loggingService.info('Agent token detected - Agent Governance disabled', {
+      loggingService.info('Agent token detected - validating via AgentIdentityService', {
         component: 'AgentSandboxMiddleware',
         operation: 'agentSandboxMiddleware',
       });
 
-      // Agent Governance feature removed: deny agent token requests with 403
-      res.status(403).json({
-        error: 'Agent governance disabled',
-        message:
-          'Agent Governance has been removed. Agent token authentication is not available.',
+      let agentIdentityService;
+      try {
+        agentIdentityService = getAgentIdentityService();
+      } catch (initError) {
+        loggingService.error('AgentIdentityService not available', {
+          component: 'AgentSandboxMiddleware',
+          error: initError instanceof Error ? initError.message : String(initError),
+        });
+        res.status(503).json({
+          error: 'Service unavailable',
+          message: 'Agent authentication service is not initialized',
+        });
+        return;
+      }
+      const identity = await agentIdentityService.authenticateAgent(agentToken);
+
+      if (!identity) {
+        loggingService.warn('Agent token validation failed', {
+          component: 'AgentSandboxMiddleware',
+          operation: 'agentSandboxMiddleware',
+        });
+        res.status(401).json({
+          error: 'Invalid agent token',
+          message: 'Agent authentication failed',
+        });
+        return;
+      }
+
+      const permissionResult = await agentIdentityService.checkPermission(
+        identity,
+        options.action,
+        options.resource,
+      );
+
+      if (!permissionResult.allowed) {
+        loggingService.warn('Agent permission check failed', {
+          component: 'AgentSandboxMiddleware',
+          operation: 'agentSandboxMiddleware',
+          reason: permissionResult.reason,
+        });
+        res.status(403).json({
+          error: 'Agent action not allowed',
+          message: permissionResult.reason ?? 'Agent does not have permission for this action',
+        });
+        return;
+      }
+
+      req.agentContext = {
+        agentId: identity.agentId,
+        agentIdentityId: (identity as { _id?: unknown })._id?.toString() ?? '',
+        userId: identity.userId?.toString() ?? '',
+        workspaceId: identity.workspaceId?.toString(),
+        organizationId: identity.organizationId?.toString(),
+        token: agentToken,
+        governanceCheckPassed: true,
+      };
+
+      loggingService.info('Agent authenticated and authorized', {
+        component: 'AgentSandboxMiddleware',
+        operation: 'agentSandboxMiddleware',
+        agentId: identity.agentId,
       });
+
+      next();
       return;
     } catch (error) {
       loggingService.error('Agent sandbox middleware error', {

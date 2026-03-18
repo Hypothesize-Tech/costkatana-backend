@@ -1,4 +1,5 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { LoggerService } from '../../../common/logger/logger.service';
 
 /**
@@ -122,10 +123,20 @@ export class KillSwitchService implements OnModuleInit, OnModuleDestroy {
 
   private expirationCheckerInterval?: NodeJS.Timeout;
 
-  constructor(private readonly logger: LoggerService) {}
+  constructor(
+    private readonly logger: LoggerService,
+    private readonly configService: ConfigService,
+  ) {}
 
   onModuleInit() {
-    // Start expiration checker
+    if (process.env.NODE_ENV === 'production') {
+      const phone = this.configService.get<string>('EMERGENCY_PHONE_NUMBER');
+      if (!phone || phone.includes('XXX')) {
+        this.logger.warn(
+          'EMERGENCY_PHONE_NUMBER not configured. Kill-switch notifications will show a placeholder. Set EMERGENCY_PHONE_NUMBER in production.',
+        );
+      }
+    }
     this.startExpirationChecker();
   }
 
@@ -453,7 +464,7 @@ Add this statement to your role's trust policy:
 ## Contact Support
 If you believe there's a security incident, contact us immediately:
 - Email: security@costkatana.com
-- Emergency: +1-XXX-XXX-XXXX
+- Emergency: ${this.configService.get<string>('EMERGENCY_PHONE_NUMBER') ?? 'Not configured - set EMERGENCY_PHONE_NUMBER in production'}
 `;
   }
 

@@ -20,6 +20,7 @@ import { LRUCache } from 'lru-cache';
 // Internal imports
 import { AIRouterService } from '../../../modules/cortex/services/ai-router.service';
 import { PricingService } from '../../../modules/utils/services/pricing.service';
+import { TokenCounterService } from '../../../modules/utils/services/token-counter.service';
 import { BedrockService } from '../../bedrock/bedrock.service';
 
 // Schema imports
@@ -84,6 +85,7 @@ export class ExperimentationService {
     @InjectModel(Usage.name) private usageModel: Model<UsageDocument>,
     private readonly aiRouterService: AIRouterService,
     private readonly pricingService: PricingService,
+    private readonly tokenCounterService: TokenCounterService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
@@ -765,9 +767,6 @@ export class ExperimentationService {
 
       const estimatedInputTokens = Math.ceil(evaluationPrompt.length / 4);
 
-      // Add substantial delay to prevent throttling
-      await new Promise((resolve) => setTimeout(resolve, 15000));
-
       let evaluationResponse: string | undefined;
 
       // Prioritize comparison models first (user-selected, already proven to work in this session)
@@ -802,7 +801,6 @@ export class ExperimentationService {
             `Evaluation model ${modelId} failed:`,
             lastError.message,
           );
-          await new Promise((resolve) => setTimeout(resolve, 5000));
         }
       }
 
@@ -1048,7 +1046,6 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
             `Analysis model ${modelId} failed:`,
             lastAnalysisError.message,
           );
-          await new Promise((resolve) => setTimeout(resolve, 5000));
         }
       }
 
@@ -2566,13 +2563,16 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   }
 
   /**
-   * Calculate prompt cost
+   * Calculate prompt cost using token-based estimation
    */
   private async calculatePromptCost(
     prompt: string,
     model: string,
   ): Promise<number> {
-    const inputTokens = Math.ceil(prompt.length / 4);
+    const tokenResult = this.tokenCounterService.countTokens(prompt, {
+      model,
+    });
+    const inputTokens = tokenResult.tokens;
     const pricing = MODEL_PRICING.find((p) =>
       p.modelName.toLowerCase().includes(model.toLowerCase()),
     );
@@ -2583,17 +2583,34 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   }
 
   /**
-   * Simulate context trimming
+   * Simulate context trimming using token-based length estimation
    */
   private async simulateContextTrimming(
     prompt: string,
     model: string,
     trimPercentage: number,
-  ): Promise<any[]> {
+    ): Promise<
+      Array<{
+        type: 'context_trimming';
+        originalLength: number;
+        trimmedLength: number;
+        trimPercentage: number;
+        originalCost: number;
+        trimmedCost: number;
+        savings: number;
+        description: string;
+      }>
+    > {
     const originalCost = await this.calculatePromptCost(prompt, model);
-    const trimmedLength = Math.floor(
-      prompt.length * (1 - trimPercentage / 100),
+    const originalTokens = this.tokenCounterService.countTokens(prompt, {
+      model,
+    }).tokens;
+    const trimmedTokens = Math.max(
+      1,
+      Math.floor(originalTokens * (1 - trimPercentage / 100)),
     );
+    const charPerToken = prompt.length / Math.max(1, originalTokens);
+    const trimmedLength = Math.floor(trimmedTokens * charPerToken);
     const trimmedPrompt = prompt.substring(0, trimmedLength);
     const trimmedCost = await this.calculatePromptCost(trimmedPrompt, model);
 
@@ -2612,19 +2629,25 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   }
 
   /**
-   * Simulate model alternatives
+   * Simulate model alternatives (currentCost hoisted out of loop)
    */
   private async simulateModelAlternatives(
     prompt: string,
     alternativeModels: string[],
     currentModel: string,
-  ): Promise<any[]> {
-    const results = [];
+  ): Promise<
+    Array<{ model: string; cost: number; savings: number; efficiency: number }>
+  > {
+    const currentCost = await this.calculatePromptCost(prompt, currentModel);
+    const results: Array<{
+      model: string;
+      cost: number;
+      savings: number;
+      efficiency: number;
+    }> = [];
 
     for (const altModel of alternativeModels) {
       const altCost = await this.calculatePromptCost(prompt, altModel);
-      const currentCost = await this.calculatePromptCost(prompt, currentModel);
-
       results.push({
         model: altModel,
         cost: altCost,
@@ -2638,17 +2661,26 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   }
 
   /**
-   * Simulate prompt optimization
+   * Simulate prompt optimization: collapse whitespace, remove filler words
    */
   private async simulatePromptOptimization(
     prompt: string,
     model: string,
-  ): Promise<any[]> {
-    // Simple optimization: remove redundant words and shorten
+  ): Promise<
+    Array<{
+      type: 'prompt_optimization';
+      originalLength: number;
+      optimizedLength: number;
+      originalCost: number;
+      optimizedCost: number;
+      savings: number;
+      description: string;
+    }>
+  > {
     const optimizedPrompt = prompt
       .replace(/\s+/g, ' ')
-      .replace(/very\s+/g, '')
-      .replace(/really\s+/g, '')
+      .replace(/\b(very|really|quite|extremely|absolutely)\s+/gi, '')
+      .replace(/\s+/g, ' ')
       .trim();
 
     const originalCost = await this.calculatePromptCost(prompt, model);

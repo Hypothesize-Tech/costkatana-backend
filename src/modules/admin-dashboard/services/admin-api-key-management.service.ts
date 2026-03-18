@@ -138,11 +138,16 @@ export class AdminApiKeyManagementService {
       for (const user of users) {
         const apiKeys = (user as any).apiKeys || [];
         for (const key of apiKeys) {
-          // Get usage for this key (simplified - would need to track key usage in Usage model)
+          // Aggregate Usage by metadata.apiKeyId for real per-key tracking
+          // When key.id exists, match only Usage records that reference this key
+          const apiKeyIdFilter = key.id
+            ? { 'metadata.apiKeyId': key.id }
+            : { 'metadata.apiKeyId': '__unattributed__' }; // No key id: match nothing
           const usage = await this.usageModel.aggregate([
             {
               $match: {
                 userId: user._id,
+                ...apiKeyIdFilter,
                 createdAt: {
                   ...(startDate ? { $gte: startDate } : {}),
                   ...(endDate ? { $lte: endDate } : {}),
@@ -159,7 +164,7 @@ export class AdminApiKeyManagementService {
             },
           ]);
 
-          const stats = usage[0] || {
+          const stats = usage[0] ?? {
             totalRequests: 0,
             totalCost: 0,
             totalTokens: 0,
@@ -194,7 +199,7 @@ export class AdminApiKeyManagementService {
         }
       }
 
-      // Get proxy keys with usage
+      // Get proxy keys with real per-key usage from Usage metadata.proxyKeyId
       const proxyKeys = await this.proxyKeyModel.find().lean();
       for (const key of proxyKeys) {
         const user = await this.userModel
@@ -206,6 +211,7 @@ export class AdminApiKeyManagementService {
           {
             $match: {
               userId: key.userId,
+              'metadata.proxyKeyId': key.keyId,
               createdAt: {
                 ...(startDate ? { $gte: startDate } : {}),
                 ...(endDate ? { $lte: endDate } : {}),
@@ -222,7 +228,7 @@ export class AdminApiKeyManagementService {
           },
         ]);
 
-        const stats = usage[0] || {
+        const stats = usage[0] ?? {
           totalRequests: 0,
           totalCost: 0,
           totalTokens: 0,

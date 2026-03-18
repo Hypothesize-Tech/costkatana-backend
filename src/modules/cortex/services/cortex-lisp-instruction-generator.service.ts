@@ -43,11 +43,78 @@ export interface LispProgram {
   };
 }
 
+/** Cortex instruction constructs emitted by generate*Instructions (frame types) */
+const CORTEX_FRAME_INSTRUCTIONS = [
+  'query',
+  'constraint',
+  'answer',
+  'content',
+  'event',
+  'instrument',
+  'location',
+  'state',
+  'properties',
+  'entity',
+  'attributes',
+  'list',
+  'item',
+  'if',
+  'then',
+  'else',
+  'for-each',
+  'while',
+  'do-while',
+  'for-of',
+  'for-in',
+  'loop',
+  'body',
+  'sequence',
+  'step',
+] as const;
+
+/** LISP primitives supported in Cortex expressions */
+const LISP_PRIMITIVES = [
+  '+',
+  '-',
+  '*',
+  '/',
+  'cons',
+  'car',
+  'cdr',
+  'list',
+  'append',
+  'length',
+  'nth',
+  'mapcar',
+  'apply',
+  'funcall',
+] as const;
+
 @Injectable()
 export class CortexLispInstructionGeneratorService {
   private readonly logger = new Logger(
     CortexLispInstructionGeneratorService.name,
   );
+
+  /** Function allowlist built from Cortex instruction set (lazy init) */
+  private _functionAllowlist: Set<string> | null = null;
+
+  /** Build function allowlist dynamically from registered Cortex instruction set */
+  private getFunctionAllowlist(): Set<string> {
+    if (!this._functionAllowlist) {
+      this._functionAllowlist = new Set([
+        ...CORTEX_FRAME_INSTRUCTIONS,
+        ...LISP_PRIMITIVES,
+      ]);
+    }
+    return this._functionAllowlist;
+  }
+
+  private isAllowedFunction(name: string): boolean {
+    if (this.getFunctionAllowlist().has(name)) return true;
+    if (name.startsWith('frame-type-')) return true;
+    return false;
+  }
 
   /**
    * Generate LISP instructions from a Cortex frame
@@ -835,27 +902,10 @@ export class CortexLispInstructionGeneratorService {
     while ((match = functionCallPattern.exec(program)) !== null) {
       const functionName = match[1];
 
-      // Check for undefined functions (simplified check)
-      const knownFunctions = [
-        '+',
-        '-',
-        '*',
-        '/',
-        'cons',
-        'car',
-        'cdr',
-        'list',
-        'append',
-        'length',
-        'nth',
-        'mapcar',
-        'apply',
-        'funcall',
-      ];
-      if (!knownFunctions.includes(functionName)) {
-        // Could be a user-defined function, so just warn
+      // Check against dynamically built allowlist from Cortex instruction set
+      if (!this.isAllowedFunction(functionName)) {
         warnings.push(
-          `Function '${functionName}' is not in the standard library`,
+          `Function '${functionName}' is not in the Cortex instruction set`,
         );
       }
 

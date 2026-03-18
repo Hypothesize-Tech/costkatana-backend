@@ -168,6 +168,7 @@ export class CalculationUtilsService {
     totalRequests: number,
     totalCost: number,
     totalTokens: number,
+    options?: { windowSeconds?: number },
   ): PerformanceMetrics {
     if (responseTimes.length === 0 || totalRequests === 0) {
       return this.getEmptyPerformanceMetrics();
@@ -185,9 +186,8 @@ export class CalculationUtilsService {
     const successRate = successCount / totalRequests;
     const errorRate = 1 - successRate;
 
-    // Calculate throughput (assuming we have time window data)
-    // For now, using a simple estimation
-    const throughput = totalRequests / 60; // requests per second (assuming 1 minute window)
+    const windowSeconds = options?.windowSeconds ?? 60;
+    const throughput = totalRequests / Math.max(1, windowSeconds);
 
     // Calculate cost metrics
     const costPerRequest = totalCost / totalRequests;
