@@ -12,6 +12,7 @@ import { JwtModule } from '@nestjs/jwt';
 // Internal modules - from src/modules/experimentation/
 import { SchemasModule } from '../../schemas/schemas.module';
 import { CortexModule } from '../cortex/cortex.module';
+import { CompilerModule } from '../compiler/compiler.module';
 import { UserSessionModule } from '../user-session/user-session.module';
 import { UtilsModule } from '../utils/utils.module';
 import { AuthModule } from '../auth/auth.module';
@@ -47,6 +48,7 @@ const experimentationProviders = [
     SchemasModule,
     UserSessionModule,
     CortexModule,
+    CompilerModule,
     UtilsModule,
     AuthModule,
   ],
