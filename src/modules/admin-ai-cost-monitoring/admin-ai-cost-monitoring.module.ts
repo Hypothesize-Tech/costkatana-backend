@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { CommonModule } from '../../common/common.module';
 import { AuthModule } from '../auth/auth.module';
+import { UtilsModule } from '../utils/utils.module';
 import { AdminAiCostMonitoringController } from './admin-ai-cost-monitoring.controller';
 import { AICostTrackingService } from './ai-cost-tracking.service';
 import {
@@ -13,6 +14,7 @@ import {
   imports: [
     CommonModule,
     AuthModule,
+    UtilsModule,
     MongooseModule.forFeature([
       { name: AICallRecord.name, schema: AICallRecordSchema },
     ]),

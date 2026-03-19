@@ -558,14 +558,26 @@ export class AgentIdentityService {
   }
 
   /**
+   * Get deterministic system user ObjectId from env or well-known fallback
+   */
+  private getSystemUserId(): Types.ObjectId {
+    const envId = process.env.SYSTEM_USER_ID;
+    if (envId && /^[a-fA-F0-9]{24}$/.test(envId)) {
+      return new Types.ObjectId(envId);
+    }
+    return new Types.ObjectId('000000000000000000000001');
+  }
+
+  /**
    * Ensure critical system identities exist
    */
   private async ensureSystemIdentities(): Promise<void> {
+    const systemUserId = this.getSystemUserId();
     const systemIdentities = [
       {
         agentName: 'System Admin Agent',
         agentType: 'system' as const,
-        userId: new Types.ObjectId(), // Would be a system user
+        userId: systemUserId,
         allowedActions: ['*'],
         capabilities: ['admin', 'system'],
         isActive: true,
@@ -573,7 +585,7 @@ export class AgentIdentityService {
       {
         agentName: 'Audit Agent',
         agentType: 'system' as const,
-        userId: new Types.ObjectId(), // Would be a system user
+        userId: systemUserId,
         allowedActions: ['read_audit_logs', 'write_audit_logs'],
         capabilities: ['audit', 'monitoring'],
         isActive: true,

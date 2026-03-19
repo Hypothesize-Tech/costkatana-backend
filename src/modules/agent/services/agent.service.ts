@@ -52,6 +52,7 @@ import { GenericHTTPTool } from '../tools/generic-http.tool';
 
 // RAG
 import { ModularRAGOrchestrator } from '../../rag/orchestrator/modular-rag.orchestrator';
+import { SafeBedrockEmbeddingsService } from '../../ingestion/services/safe-bedrock-embeddings.service';
 
 // Vercel
 import { VercelService } from '../../vercel/vercel.service';
@@ -116,6 +117,8 @@ export class AgentService implements OnModuleInit {
     private readonly vercelTools: VercelToolsService,
     @Inject(ModularRAGOrchestrator)
     private readonly ragOrchestrator: ModularRAGOrchestrator,
+    @Inject(SafeBedrockEmbeddingsService)
+    private readonly embeddingsService: SafeBedrockEmbeddingsService,
     @Inject(VercelService)
     private readonly vercelService: VercelService,
     @InjectModel(VercelConnection.name)
@@ -1690,22 +1693,29 @@ export class AgentService implements OnModuleInit {
 
   /**
    * Generate context embeddings for RAG/knowledge context.
-   * Uses VectorStoreService (Bedrock Titan) when available; falls back to deterministic hash-based vector.
+   * Uses SafeBedrockEmbeddingsService (primary), then VectorStoreService, then hash-based fallback.
    */
   private async generateContextEmbeddings(
     contextString: string,
   ): Promise<number[]> {
     try {
-      if (
-        this.vectorStore &&
-        typeof this.vectorStore.embedText === 'function'
-      ) {
-        return await this.vectorStore.embedText(contextString);
-      }
+      return await this.embeddingsService.embedQuery(contextString);
     } catch (err) {
-      this.logger.warn('Vector store embedText failed, using fallback', {
+      this.logger.warn('EmbeddingsService failed, trying vector store', {
         err: err instanceof Error ? err.message : String(err),
       });
+      try {
+        if (
+          this.vectorStore &&
+          typeof this.vectorStore.embedText === 'function'
+        ) {
+          return await this.vectorStore.embedText(contextString);
+        }
+      } catch (vecErr) {
+        this.logger.warn('Vector store embedText failed, using hash fallback', {
+          err: vecErr instanceof Error ? vecErr.message : String(vecErr),
+        });
+      }
     }
     const hash = contextString
       .split('')

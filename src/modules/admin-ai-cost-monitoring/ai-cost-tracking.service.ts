@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { LoggingService } from '../../common/services/logging.service';
+import { PricingService } from '../utils/services/pricing.service';
 import {
   AICallRecord as AICallRecordModel,
   AICallRecordDocument,
@@ -11,12 +12,16 @@ import type {
   AICostSummary,
 } from './interfaces/ai-cost-tracking.interface';
 
+/** Fallback cost per 1K tokens when model is not in pricing registry (conservative estimate) */
+const DEFAULT_COST_PER_1K_TOKENS = 0.01;
+
 @Injectable()
 export class AICostTrackingService {
   private readonly logger = new Logger(AICostTrackingService.name);
 
   constructor(
     private readonly loggingService: LoggingService,
+    private readonly pricingService: PricingService,
     @InjectModel(AICallRecordModel.name)
     private readonly aiCallRecordModel: Model<AICallRecordDocument>,
   ) {}
@@ -38,8 +43,12 @@ export class AICostTrackingService {
     metadata?: any,
   ): Promise<any> {
     try {
-      // Calculate cost based on usage
-      const cost = this.calculateCost(prompt.model, response.usage.totalTokens);
+      // Calculate cost based on usage using PricingService
+      const cost = this.calculateCost(
+        prompt.model,
+        response.usage.promptTokens,
+        response.usage.completionTokens,
+      );
 
       // Create usage record for storage (AICallRecord format)
       const usageRecord: AICallRecord = {
@@ -89,21 +98,24 @@ export class AICostTrackingService {
   }
 
   /**
-   * Calculate cost based on model and token usage
+   * Calculate cost based on model and token usage using PricingService.
+   * Falls back to conservative default when model is not in pricing registry.
    */
-  private calculateCost(model: string, totalTokens: number): number {
-    // Simple cost calculation - should be replaced with proper pricing logic
-    let costPer1K = 0.002; // Default
-
-    if (model.includes('gpt-4')) {
-      costPer1K = 0.03;
-    } else if (model.includes('gpt-3.5')) {
-      costPer1K = 0.002;
-    } else if (model.includes('claude')) {
-      costPer1K = 0.015;
+  private calculateCost(
+    model: string,
+    inputTokens: number,
+    outputTokens: number,
+  ): number {
+    const estimate = this.pricingService.estimateCost(
+      model,
+      inputTokens,
+      outputTokens,
+    );
+    if (estimate !== null) {
+      return estimate.totalCost;
     }
-
-    return (totalTokens / 1000) * costPer1K;
+    const totalTokens = inputTokens + outputTokens;
+    return (totalTokens / 1000) * DEFAULT_COST_PER_1K_TOKENS;
   }
 
   /**

@@ -602,17 +602,44 @@ RESPONSE FORMAT - ONLY JSON:
     totalViews: number;
     helpfulnessScore: number;
   }> {
-    const [viewStats, ratingStats] = await Promise.all([
+    const [viewStats, ratingStats, lastActivity] = await Promise.all([
       this.getPageViewStats(pageId),
       this.getRatingStats(pageId),
+      this.getPageLastActivity(pageId),
     ]);
 
     return {
       pageId,
-      lastUpdated: null, // Would be populated from git or CMS
+      lastUpdated: lastActivity,
       totalViews: viewStats.totalViews,
       helpfulnessScore: ratingStats.upvotePercentage,
     };
+  }
+
+  private async getPageLastActivity(pageId: string): Promise<Date | null> {
+    const [latestView, latestRating, latestFeedback] = await Promise.all([
+      this.docsPageViewModel
+        .findOne({ pageId })
+        .sort({ updatedAt: -1 })
+        .select('updatedAt')
+        .lean(),
+      this.docsPageRatingModel
+        .findOne({ pageId })
+        .sort({ createdAt: -1 })
+        .select('createdAt')
+        .lean(),
+      this.docsPageFeedbackModel
+        .findOne({ pageId })
+        .sort({ createdAt: -1 })
+        .select('createdAt')
+        .lean(),
+    ]);
+    const dates = [
+      latestView?.updatedAt,
+      latestRating?.createdAt,
+      latestFeedback?.createdAt,
+    ].filter((d): d is Date => d != null);
+    return dates.length > 0 ? new Date(Math.max(...dates.map((d) => d.getTime()))) : null;
   }
 
   // ==================== ANALYTICS AGGREGATION ====================
