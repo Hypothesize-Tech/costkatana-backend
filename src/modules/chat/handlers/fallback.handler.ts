@@ -145,7 +145,10 @@ export class FallbackHandler {
           useSystemPrompt: true,
         },
       );
-      responseText = typeof response === 'string' ? response : (response as { response?: string })?.response || '';
+      responseText =
+        typeof response === 'string'
+          ? response
+          : (response as { response?: string })?.response || '';
       // Estimate tokens for non-streaming (could be improved)
       inputTokens = Math.ceil(
         (messages[messages.length - 1]?.content || '').length / 4,

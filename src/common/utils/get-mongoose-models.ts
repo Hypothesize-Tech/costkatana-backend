@@ -10,20 +10,35 @@ import mongoose, { Model } from 'mongoose';
 
 // User & Auth
 import { User, UserSchema } from '../../schemas/user/user.schema';
-import { UserSession, UserSessionSchema } from '../../schemas/user/user-session.schema';
+import {
+  UserSession,
+  UserSessionSchema,
+} from '../../schemas/user/user-session.schema';
 import {
   UserApprovalRequest,
   UserApprovalRequestSchema,
 } from '../../schemas/user/user-approval-request.schema';
 
 // Project & Team
-import { Project, ProjectSchema } from '../../schemas/team-project/project.schema';
+import {
+  Project,
+  ProjectSchema,
+} from '../../schemas/team-project/project.schema';
 
 // Core
 import { Usage, UsageSchema } from '../../schemas/core/usage.schema';
-import { Optimization, OptimizationSchema } from '../../schemas/core/optimization.schema';
-import { Subscription, SubscriptionSchema } from '../../schemas/core/subscription.schema';
-import { Telemetry, TelemetrySchema } from '../../schemas/core/telemetry.schema';
+import {
+  Optimization,
+  OptimizationSchema,
+} from '../../schemas/core/optimization.schema';
+import {
+  Subscription,
+  SubscriptionSchema,
+} from '../../schemas/core/subscription.schema';
+import {
+  Telemetry,
+  TelemetrySchema,
+} from '../../schemas/core/telemetry.schema';
 
 // Integration
 import {
@@ -62,18 +77,29 @@ import {
 } from '../../schemas/security/mcp-security-event-log.schema';
 
 function getModel<T>(name: string, schema: mongoose.Schema): Model<T> {
-  return (mongoose.models[name] as Model<T>) ?? (mongoose.model<T>(name, schema) as Model<T>);
+  return (
+    (mongoose.models[name] as Model<T>) ??
+    (mongoose.model<T>(name, schema) as Model<T>)
+  );
 }
 
 export const getUserModel = () => getModel<User>(User.name, UserSchema);
-export const getUserSessionModel = () => getModel<UserSession>(UserSession.name, UserSessionSchema);
+export const getUserSessionModel = () =>
+  getModel<UserSession>(UserSession.name, UserSessionSchema);
 export const getUserApprovalRequestModel = () =>
-  getModel<UserApprovalRequest>(UserApprovalRequest.name, UserApprovalRequestSchema);
-export const getProjectModel = () => getModel<Project>(Project.name, ProjectSchema);
+  getModel<UserApprovalRequest>(
+    UserApprovalRequest.name,
+    UserApprovalRequestSchema,
+  );
+export const getProjectModel = () =>
+  getModel<Project>(Project.name, ProjectSchema);
 export const getUsageModel = () => getModel<Usage>(Usage.name, UsageSchema);
-export const getOptimizationModel = () => getModel<Optimization>(Optimization.name, OptimizationSchema);
-export const getSubscriptionModel = () => getModel<Subscription>(Subscription.name, SubscriptionSchema);
-export const getTelemetryModel = () => getModel<Telemetry>(Telemetry.name, TelemetrySchema);
+export const getOptimizationModel = () =>
+  getModel<Optimization>(Optimization.name, OptimizationSchema);
+export const getSubscriptionModel = () =>
+  getModel<Subscription>(Subscription.name, SubscriptionSchema);
+export const getTelemetryModel = () =>
+  getModel<Telemetry>(Telemetry.name, TelemetrySchema);
 export const getMongoDBConnectionModel = () =>
   getModel<MongoDBConnection>(MongoDBConnection.name, MongoDBConnectionSchema);
 export const getGitHubConnectionModel = () =>
@@ -87,6 +113,12 @@ export const getVercelConnectionModel = () =>
 export const getMcpPermissionModel = () =>
   getModel<McpPermission>(McpPermission.name, McpPermissionSchema);
 export const getMongodbMcpAuditLogModel = () =>
-  getModel<MongodbMcpAuditLog>(MongodbMcpAuditLog.name, MongodbMcpAuditLogSchema);
+  getModel<MongodbMcpAuditLog>(
+    MongodbMcpAuditLog.name,
+    MongodbMcpAuditLogSchema,
+  );
 export const getMcpSecurityEventLogModel = () =>
-  getModel<McpSecurityEventLog>(McpSecurityEventLog.name, McpSecurityEventLogSchema);
+  getModel<McpSecurityEventLog>(
+    McpSecurityEventLog.name,
+    McpSecurityEventLogSchema,
+  );

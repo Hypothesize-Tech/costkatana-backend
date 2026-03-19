@@ -12,6 +12,7 @@ import { CortexCoreService } from './cortex-core.service';
 import { CortexEncoderService } from './cortex-encoder.service';
 import { CortexDecoderService } from './cortex-decoder.service';
 import type { CortexProcessingResult } from '../types/cortex.types';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface HandshakeSession {
   id: string;
@@ -158,7 +159,7 @@ export class CortexLongHandshakeService {
     if (!session) return;
 
     const step: HandshakeStep = {
-      id: `step_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: generateSecureId('step'),
       timestamp: new Date(),
       type,
       content,
@@ -361,13 +362,13 @@ export class CortexLongHandshakeService {
     session: HandshakeSession,
     request: any,
   ): Promise<any> {
-    const promptText =
-      typeof request.prompt === 'string' ? request.prompt : '';
-    const estimatedTokens = promptText
-      ? estimateTokenCount(promptText)
-      : 100;
+    const promptText = typeof request.prompt === 'string' ? request.prompt : '';
+    const estimatedTokens = promptText ? estimateTokenCount(promptText) : 100;
 
-    const complexity = this.computeRequestComplexity(promptText, estimatedTokens);
+    const complexity = this.computeRequestComplexity(
+      promptText,
+      estimatedTokens,
+    );
 
     return {
       complexity,
@@ -393,8 +394,7 @@ export class CortexLongHandshakeService {
     else if (estimatedTokens > 500) score += 1;
     if (prompt && /```[\s\S]*?```/g.test(prompt)) score += 1;
     if (prompt && (prompt.match(/\n/g) ?? []).length > 10) score += 1;
-    if (prompt && (prompt.match(/\?/g) ?? []).length > 2)
-      score += 1;
+    if (prompt && (prompt.match(/\?/g) ?? []).length > 2) score += 1;
     if (score >= 3) return 'high';
     if (score >= 1) return 'medium';
     return 'low';

@@ -561,19 +561,17 @@ export class RequestInterceptorMiddleware {
     prompt: string,
   ): Promise<{ model: string; provider: string; cost: number } | null> {
     try {
-      const complexity =
-        this.cortexModelRouter.analyzePromptComplexity(prompt);
-      const routingDecision =
-        this.cortexModelRouter.makeRoutingDecision(
-          complexity,
-          {
-            priority: 'cost',
-            maxCostPerRequest:
-              this.getCostPerToken(currentModel) *
-              0.7 *
-              Math.ceil(prompt.length / 4),
-          } as RoutingPreferences,
-        );
+      const complexity = this.cortexModelRouter.analyzePromptComplexity(prompt);
+      const routingDecision = this.cortexModelRouter.makeRoutingDecision(
+        complexity,
+        {
+          priority: 'cost',
+          maxCostPerRequest:
+            this.getCostPerToken(currentModel) *
+            0.7 *
+            Math.ceil(prompt.length / 4),
+        } as RoutingPreferences,
+      );
 
       if (routingDecision?.selectedTier) {
         const config =

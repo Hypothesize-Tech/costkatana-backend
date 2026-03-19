@@ -8,6 +8,7 @@ import { MCPMessage } from '../types/mcp.types';
 import { BaseTransport } from './base.transport';
 import { loggingService } from '../../common/services/logging.service';
 import { Request, Response } from 'express';
+import { generateSecureId } from '../../common/utils/secure-id.util';
 import { EventEmitter } from 'events';
 
 export interface SSEConnection {
@@ -295,7 +296,7 @@ export class SSETransport extends BaseTransport {
    * Generate unique connection ID
    */
   private generateConnectionId(): string {
-    return `sse_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return generateSecureId('sse');
   }
 
   /**

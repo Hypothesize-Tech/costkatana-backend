@@ -1,8 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
 
-export type GatewayProviderMetricsDocument =
-  GatewayProviderMetrics & Document;
+export type GatewayProviderMetricsDocument = GatewayProviderMetrics & Document;
 
 /**
  * Persistent gateway provider/model performance metrics for production scalability.
@@ -38,8 +37,9 @@ export class GatewayProviderMetrics {
   lastUpdated: Date;
 }
 
-export const GatewayProviderMetricsSchema =
-  SchemaFactory.createForClass(GatewayProviderMetrics);
+export const GatewayProviderMetricsSchema = SchemaFactory.createForClass(
+  GatewayProviderMetrics,
+);
 
 GatewayProviderMetricsSchema.index({ provider: 1, model: 1 }, { unique: true });
 GatewayProviderMetricsSchema.index({ lastUpdated: -1 });

@@ -3,7 +3,7 @@
  * Provides traffic prediction, observability, and analytics services
  */
 
-import { Module, type DynamicModule } from '@nestjs/common';
+import { Module, forwardRef, type DynamicModule } from '@nestjs/common';
 import { CacheModule } from '@nestjs/cache-manager';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -34,7 +34,6 @@ import { GitHubModule } from '../github/github.module';
 import { AuthModule } from '../auth/auth.module';
 import { RequestFeedbackModule } from '../request-feedback/request-feedback.module';
 import { ProjectModule } from '../project/project.module';
-import { SecurityModule } from '../security/security.module';
 
 @Module({
   imports: [
@@ -49,7 +48,7 @@ import { SecurityModule } from '../security/security.module';
     AuthModule, // JwtService, User model, UserSessionService for JwtAuthGuard
     RequestFeedbackModule, // RequestFeedbackService for AnalyticsController
     ProjectModule, // ProjectService for AnalyticsController
-    SecurityModule, // LlmSecurityService for ChatSecurityHandlerService
+    forwardRef(() => require('../security/security.module').SecurityModule), // Lazy require breaks cycle
   ],
   controllers: [AnalyticsController],
   providers: [

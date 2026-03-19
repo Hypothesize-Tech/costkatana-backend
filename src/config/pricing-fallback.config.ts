@@ -1,6 +1,6 @@
 /**
  * Hardcoded pricing fallback used when pricing registry and DB lookup fail.
- * Last verified: 2025-03. Update periodically against provider docs.
+ * Last verified: 2026-03. Update periodically against provider docs.
  */
 
 export interface FallbackPriceEntry {
@@ -22,6 +22,16 @@ const PRICING_RULES: Array<{
   outputCostPer1K: number;
 }> = [
   // OpenAI
+  {
+    match: (p, m) => p === 'openai' && m.includes('o4-mini'),
+    inputCostPer1K: 0.0011,
+    outputCostPer1K: 0.0044,
+  },
+  {
+    match: (p, m) => p === 'openai' && m.includes('o4'),
+    inputCostPer1K: 0.015,
+    outputCostPer1K: 0.06,
+  },
   {
     match: (p, m) => p === 'openai' && m.includes('o3-mini'),
     inputCostPer1K: 0.0011,
@@ -48,9 +58,16 @@ const PRICING_RULES: Array<{
     outputCostPer1K: 0.0006,
   },
   {
+    match: (p, m) => p === 'openai' && m.includes('gpt-4.1'),
+    inputCostPer1K: 0.002,
+    outputCostPer1K: 0.008,
+  },
+  {
     match: (p, m) =>
       p === 'openai' &&
-      (m.includes('gpt-4o') || m.includes('gpt-4-turbo') || m.includes('gpt-4-1106')),
+      (m.includes('gpt-4o') ||
+        m.includes('gpt-4-turbo') ||
+        m.includes('gpt-4-1106')),
     inputCostPer1K: 0.0025,
     outputCostPer1K: 0.01,
   },
@@ -66,12 +83,32 @@ const PRICING_RULES: Array<{
   },
   // Anthropic
   {
-    match: (p, m) => p === 'anthropic' && m.includes('claude-3-5-sonnet'),
+    match: (p, m) =>
+      p === 'anthropic' &&
+      (m.includes('claude-4-sonnet') || m.includes('claude-sonnet-4')),
     inputCostPer1K: 0.003,
     outputCostPer1K: 0.015,
   },
   {
-    match: (p, m) => p === 'anthropic' && m.includes('claude-3-5-haiku'),
+    match: (p, m) =>
+      p === 'anthropic' &&
+      (m.includes('claude-3-7-sonnet') ||
+        m.includes('claude-3-5-sonnet') ||
+        m.includes('claude-sonnet-3')),
+    inputCostPer1K: 0.003,
+    outputCostPer1K: 0.015,
+  },
+  {
+    match: (p, m) =>
+      p === 'anthropic' &&
+      (m.includes('claude-4-haiku') || m.includes('claude-haiku-4')),
+    inputCostPer1K: 0.001,
+    outputCostPer1K: 0.005,
+  },
+  {
+    match: (p, m) =>
+      p === 'anthropic' &&
+      (m.includes('claude-3-5-haiku') || m.includes('claude-haiku-3')),
     inputCostPer1K: 0.0008,
     outputCostPer1K: 0.004,
   },
@@ -97,6 +134,18 @@ const PRICING_RULES: Array<{
   },
   // Google
   {
+    match: (p, m) => p === 'google' && m.includes('gemini-2.5-pro'),
+    inputCostPer1K: 0.00125,
+    outputCostPer1K: 0.01,
+  },
+  {
+    match: (p, m) =>
+      p === 'google' &&
+      (m.includes('gemini-2.0-flash') || m.includes('gemini-2-flash')),
+    inputCostPer1K: 0.0001,
+    outputCostPer1K: 0.0004,
+  },
+  {
     match: (p, m) => p === 'google' && m.includes('gemini-2.0'),
     inputCostPer1K: 0.00125,
     outputCostPer1K: 0.005,
@@ -115,6 +164,44 @@ const PRICING_RULES: Array<{
     match: (p, m) => p === 'google' && m.includes('gemini'),
     inputCostPer1K: 0.0005,
     outputCostPer1K: 0.0015,
+  },
+  // AWS Bedrock
+  {
+    match: (p, m) =>
+      (p === 'bedrock' || p === 'amazon') &&
+      (m.includes('llama-3.1-70b') || m.includes('llama-3-70b')),
+    inputCostPer1K: 0.00265,
+    outputCostPer1K: 0.0035,
+  },
+  {
+    match: (p, m) =>
+      (p === 'bedrock' || p === 'amazon') &&
+      (m.includes('llama-3.1-8b') || m.includes('llama-3-8b')),
+    inputCostPer1K: 0.0003,
+    outputCostPer1K: 0.0006,
+  },
+  {
+    match: (p, m) => (p === 'bedrock' || p === 'amazon') && m.includes('llama'),
+    inputCostPer1K: 0.001,
+    outputCostPer1K: 0.0015,
+  },
+  {
+    match: (p, m) =>
+      (p === 'bedrock' || p === 'amazon') &&
+      (m.includes('claude-sonnet') || m.includes('claude-3-5-sonnet')),
+    inputCostPer1K: 0.003,
+    outputCostPer1K: 0.015,
+  },
+  {
+    match: (p, m) =>
+      (p === 'bedrock' || p === 'amazon') && m.includes('claude'),
+    inputCostPer1K: 0.003,
+    outputCostPer1K: 0.015,
+  },
+  {
+    match: (p) => p === 'bedrock' || p === 'amazon',
+    inputCostPer1K: 0.0015,
+    outputCostPer1K: 0.002,
   },
   // Groq (per-model)
   {

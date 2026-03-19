@@ -19,6 +19,7 @@ import { PaymentGatewayService } from '../payment-gateway/payment-gateway.servic
 import type { PaymentGatewayType } from '../payment-gateway/payment-gateway.interface';
 import { SubscriptionNotificationService } from './subscription-notification.service';
 import { getPlanPriceOrNull } from '../../config/plan-pricing.config';
+import { generateSecureId } from '../../common/utils/secure-id.util';
 
 // Subscription plan limits based on new pricing structure
 export const SUBSCRIPTION_PLAN_LIMITS = {
@@ -1044,7 +1045,7 @@ export class SubscriptionService {
       const taxAmount = totalAmount * 0.1; // 10% tax
       const finalAmount = totalAmount + taxAmount;
 
-      const invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substring(6).toUpperCase()}`;
+      const invoiceNumber = generateSecureId('INV').replace('_', '-');
 
       const invoice = new this.invoiceModel({
         invoiceNumber,
@@ -1231,7 +1232,7 @@ export class SubscriptionService {
                 await recentPaidInvoice.save();
 
                 const creditInvoice = new this.invoiceModel({
-                  invoiceNumber: `CR-${Date.now()}-${Math.random().toString(36).substring(6).toUpperCase()}`,
+                  invoiceNumber: generateSecureId('CR').replace('_', '-'),
                   userId,
                   subscriptionId,
                   lineItems: [
@@ -2850,9 +2851,58 @@ export class SubscriptionService {
     if (!subscription) {
       throw new NotFoundException('Subscription not found');
     }
-    await this.subscriptionModel.findByIdAndUpdate((subscription as any)._id, {
-      $inc: { 'usage.current.requests': 1 },
-      $set: { 'usage.current.lastActivity': new Date() },
+    await this.subscriptionModel.findByIdAndUpdate(
+      (subscription as unknown as { _id?: unknown })._id,
+      {
+        $inc: { 'usage.current.requests': 1 },
+        $set: { 'usage.current.lastActivity': new Date() },
+      },
+    );
+    await this.checkUsageAlerts(userId);
+  }
+
+  /**
+   * Check agent trace / workflow quota before execution (Express parity).
+   */
+  async checkAgentTraceQuota(userId: string): Promise<void> {
+    const subscription = await this.subscriptionModel
+      .findOne({ userId })
+      .select('plan usage')
+      .lean()
+      .exec();
+    if (!subscription) {
+      throw new NotFoundException('Subscription not found');
+    }
+    const planLimits =
+      SUBSCRIPTION_PLAN_LIMITS[
+        (subscription.plan as keyof typeof SUBSCRIPTION_PLAN_LIMITS) ?? 'free'
+      ];
+    const limit = (planLimits as { agentTraces?: number }).agentTraces ?? 10;
+    if (limit === -1) return;
+    const usage = subscription.usage as
+      | { agentTracesUsed?: number }
+      | undefined;
+    const used = usage?.agentTracesUsed ?? 0;
+    if (used >= limit) {
+      throw new BadRequestException(
+        `Workflow quota exceeded. Limit: ${limit}, Used: ${used}. Please upgrade your plan.`,
+      );
+    }
+  }
+
+  /**
+   * Increment agent trace usage after workflow completion (Express parity).
+   */
+  async incrementAgentTracesUsed(userId: string): Promise<void> {
+    const subscription = await this.subscriptionModel
+      .findOne({ userId })
+      .select('_id')
+      .exec();
+    if (!subscription) {
+      throw new NotFoundException('Subscription not found');
+    }
+    await this.subscriptionModel.findByIdAndUpdate(subscription._id, {
+      $inc: { 'usage.agentTracesUsed': 1 },
     });
     await this.checkUsageAlerts(userId);
   }

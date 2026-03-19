@@ -83,8 +83,7 @@ export class GithubConnectionService {
   async upsertInstallation(data: UpsertInstallationData): Promise<void> {
     const { userId, installationId, accountId, accountLogin } = data;
 
-    const accountIdStr =
-      accountId != null ? String(accountId) : undefined;
+    const accountIdStr = accountId != null ? String(accountId) : undefined;
 
     await this.githubConnectionModel.findOneAndUpdate(
       { installationId },
@@ -97,7 +96,9 @@ export class GithubConnectionService {
           tokenType: 'app',
           isActive: true,
           lastSyncedAt: new Date(),
-          accessToken: `app:${installationId}`, // Placeholder - app tokens obtained on-demand via JWT
+          // Intentional: GitHub App installation tokens are short-lived (1h). Real tokens
+          // are fetched on-demand via JWT when needed. This marker satisfies schema requirements.
+          accessToken: `app:${installationId}`,
         },
         $setOnInsert: {
           createdAt: new Date(),

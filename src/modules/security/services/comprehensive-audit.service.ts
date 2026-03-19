@@ -161,6 +161,8 @@ export interface AuditReport {
     complianceEvents: number;
     anomalousEvents: number;
     failedEvents: number;
+    /** Percentage of events with encrypted protocol (https/wss/tls). Undefined when no events have protocol. */
+    encryptionRate?: number;
   };
   findings: Array<{
     type: string;
@@ -420,6 +422,21 @@ export class ComprehensiveAuditService
 
       const { events, aggregations } = await this.queryEvents(query);
 
+      // Calculate encryption rate from events with protocol (https/wss/tls = encrypted)
+      const eventsWithProtocol = events.filter(
+        (e) =>
+          e.technical?.protocol != null &&
+          String(e.technical.protocol).trim() !== '',
+      );
+      const encryptedProtocols = /^(https|wss|tls|tls1\.[0-9]|ssl)$/i;
+      const encryptedCount = eventsWithProtocol.filter((e) =>
+        encryptedProtocols.test(String(e.technical!.protocol)),
+      ).length;
+      const encryptionRate =
+        eventsWithProtocol.length > 0
+          ? Math.round((encryptedCount / eventsWithProtocol.length) * 100)
+          : undefined;
+
       // Calculate summary statistics
       const summary = {
         totalEvents: events.length,
@@ -436,6 +453,7 @@ export class ComprehensiveAuditService
           .length,
         failedEvents: events.filter((e) => e.event.outcome === 'failure')
           .length,
+        encryptionRate,
       };
 
       // Analyze findings based on report type

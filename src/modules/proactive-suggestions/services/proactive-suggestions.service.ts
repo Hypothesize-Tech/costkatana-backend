@@ -10,6 +10,7 @@ import { RealtimeUpdateService } from '../../usage/services/realtime-update.serv
 import { CacheService } from '../../../common/cache/cache.service';
 import { SubscriptionService } from '../../subscription/subscription.service';
 import { OptimizationFeedbackLoopService } from './optimization-feedback-loop.service';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface CostSavingSuggestion {
   id: string;
@@ -245,7 +246,7 @@ export class ProactiveSuggestionsService {
           const totalCost = usages.reduce((s, u: any) => s + (u.cost ?? 0), 0);
           const cacheSavings = totalCost * 0.7;
           suggestions.push({
-            id: `semantic_cache_${userId}_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+            id: generateSecureId(`semantic_cache_${userId}`),
             userId,
             type: 'semantic_cache',
             title: 'Enable semantic caching for repeated requests',

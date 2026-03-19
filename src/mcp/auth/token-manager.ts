@@ -50,7 +50,8 @@ export class TokenManager {
         case 'slack':
         case 'discord': {
           // These use the generic Integration model
-          const { Integration } = await import('../../schemas/integration/integration.schema');
+          const { Integration } =
+            await import('../../schemas/integration/integration.schema');
           const conn = await Integration.findById(connectionId)
             .select('metadata')
             .lean();
@@ -246,7 +247,8 @@ export class TokenManager {
         case 'slack':
         case 'discord': {
           // These use the generic Integration model
-          const { Integration } = await import('../../schemas/integration/integration.schema');
+          const { Integration } =
+            await import('../../schemas/integration/integration.schema');
           const integration_doc = await Integration.findById(connectionId);
 
           if (!integration_doc) {

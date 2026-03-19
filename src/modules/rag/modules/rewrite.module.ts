@@ -224,8 +224,7 @@ Hypothetical answer:`;
         'amazon.nova-pro-v1:0',
         { useSystemPrompt: false },
       );
-      const hypothesis =
-        typeof response === 'string' ? response.trim() : query;
+      const hypothesis = typeof response === 'string' ? response.trim() : query;
 
       this.logger.log('HyDE hypothesis generated', {
         originalQuery: query.substring(0, 50),

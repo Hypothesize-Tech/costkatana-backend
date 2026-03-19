@@ -17,7 +17,9 @@ export class SecurityDashboardGuard implements CanActivate {
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest();
-    const user = request.user as { id?: string; role?: string; permissions?: string[] } | undefined;
+    const user = request.user as
+      | { id?: string; role?: string; permissions?: string[] }
+      | undefined;
 
     if (!user?.id) {
       throw new ForbiddenException('Authentication required');
@@ -33,8 +35,14 @@ export class SecurityDashboardGuard implements CanActivate {
     }
 
     // IP-based protection (optional)
-    const allowedIPsRaw = this.configService.get<string>('SECURITY_DASHBOARD_ALLOWED_IPS');
-    const allowedIPs = allowedIPsRaw?.split(',').map((s) => s.trim()).filter(Boolean) ?? [];
+    const allowedIPsRaw = this.configService.get<string>(
+      'SECURITY_DASHBOARD_ALLOWED_IPS',
+    );
+    const allowedIPs =
+      allowedIPsRaw
+        ?.split(',')
+        .map((s) => s.trim())
+        .filter(Boolean) ?? [];
 
     if (allowedIPs.length > 0 && !allowedIPs.includes('*')) {
       const clientIP =
@@ -72,9 +80,11 @@ export class SecurityDashboardGuard implements CanActivate {
   }
 
   private ipToNumber(ip: string): number {
-    return ip
-      .split('.')
-      .map((part) => parseInt(part, 10))
-      .reduce((acc, octet) => (acc << 8) + octet, 0) >>> 0;
+    return (
+      ip
+        .split('.')
+        .map((part) => parseInt(part, 10))
+        .reduce((acc, octet) => (acc << 8) + octet, 0) >>> 0
+    );
   }
 }

@@ -36,6 +36,7 @@ import { FileByFileCodeGeneratorService } from './file-by-file-code-generator.se
 import { PostDeploymentManagerService } from './post-deployment-manager.service';
 import { BedrockService } from '../../bedrock/bedrock.service';
 import { ChatEventsService } from '../../chat/services/chat-events.service';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 @Injectable()
 export class GovernedAgentService implements OnModuleDestroy {
@@ -2676,6 +2677,6 @@ Provide a helpful, accurate answer based on the task context. Be concise but inf
    * Generate unique task ID
    */
   private generateTaskId(): string {
-    return `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return generateSecureId('task');
   }
 }

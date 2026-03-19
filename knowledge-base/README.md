@@ -3,6 +3,11 @@
 ## Overview
 This knowledge base provides comprehensive information about all features and capabilities of the Costkatana. It serves as a reference for AI agents in the multiagent chat system to understand system architecture, provide accurate assistance, and make informed recommendations.
 
+## Quick Reference
+
+- **[User FAQ](./faq-user.md)** – Common questions about features, billing, integrations, and setup
+- **[Troubleshooting & Integration FAQ](./faq-troubleshooting.md)** – API keys, installation, and developer issues
+
 ## Knowledge Base Structure
 
 ### 📊 Core Features
@@ -11,12 +16,29 @@ This knowledge base provides comprehensive information about all features and ca
 - **[AI Insights](./ai-insights/README.md)** - Intelligent analysis and recommendations
 - **[User Coaching](./user-coaching/README.md)** - Personalized guidance and education
 - **[Predictive Analytics](./predictive-analytics/README.md)** - Forecasting and trend analysis
+- **[Model Discovery](./model-discovery/README.md)** - 400+ models, capability registry, proactive suggestions, intelligent routing
+- **[ROI & Benchmarking](./roi-benchmarking/README.md)** - ROI calculator, benchmark fetcher, cost simulation, experimentation
 
 ### 🔧 Technical Components
 - **[Multi-Agent Workflows](./multi-agent-workflows/README.md)** - Agent coordination and workflow management
 - **[API Integration](./api-integration/README.md)** - System integration and external connections
 - **[Security Monitoring](./security-monitoring/README.md)** - Security features and threat detection
 - **[Data Analytics](./data-analytics/README.md)** - Data processing and analysis capabilities
+- **[RAG & Ingestion](./rag-ingestion/README.md)** - Vector pipeline, FAISS, hybrid search, BM25, reranking, semantic caching, RAG patterns
+- **[Gateway](./gateway/README.md)** - API proxy, traffic management, failover, budget enforcement, rate limiting, prompt caching
+- **[Observability & Tracing](./observability-tracing/README.md)** - Distributed tracing, session replay, telemetry, cost streaming
+- **[CKQL](./ckql/README.md)** - Cost Katana Query Language for natural language analytics queries
+- **[Prompt Templates](./prompt-templates/README.md)** - Template engine, variable interpolation, execution tracking
+
+### 🔌 Integrations & Infrastructure
+- **[MCP Integrations](./mcp-integrations/README.md)** - Model Context Protocol, 9 provider integrations (AWS, GitHub, Google, Discord, Jira, Linear, Slack, Vercel, MongoDB)
+- **[AWS Integration](./aws-integration/README.md)** - Natural language plan generation, execution engine, kill switch, cost anomaly guard
+- **[IDE Integrations](./ide-integrations/README.md)** - Cursor extension, GitHub, Vercel, ChatGPT integration
+
+### 💼 Business & Organization
+- **[Billing & Subscriptions](./billing-subscriptions/README.md)** - Plans, payment methods, Stripe, budget, invoices, discounts
+- **[Team & Organization](./team-organization/README.md)** - Workspaces, teams, members, onboarding, community, magic links
+- **[Governance & Guardrails](./governance-guardrails/README.md)** - Agent identity, approval workflows, guardrails, audit trails
 
 ## System Architecture
 

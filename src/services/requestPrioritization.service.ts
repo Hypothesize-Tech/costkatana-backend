@@ -2,7 +2,13 @@
  * Bridge for legacy Express middleware.
  * Request prioritization is handled by PriorityQueueService in GatewayModule.
  */
-export type RequestPriority = 'critical' | 'high' | 'medium' | 'low' | 'bulk' | 'background';
+export type RequestPriority =
+  | 'critical'
+  | 'high'
+  | 'medium'
+  | 'low'
+  | 'bulk'
+  | 'background';
 
 export const requestPrioritizationService = {
   getPriority: () => 'medium' as RequestPriority,

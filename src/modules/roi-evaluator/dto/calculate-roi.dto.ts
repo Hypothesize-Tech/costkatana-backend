@@ -1,7 +1,21 @@
-import { IsString, IsNumber, IsArray, IsOptional, IsEnum, IsIn, Min, Max } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsArray,
+  IsOptional,
+  IsEnum,
+  IsIn,
+  Min,
+  Max,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
-export const COMPANY_SIZE_OPTIONS = ['1-50', '51-200', '201-1000', '1000+'] as const;
+export const COMPANY_SIZE_OPTIONS = [
+  '1-50',
+  '51-200',
+  '201-1000',
+  '1000+',
+] as const;
 export type CompanySize = (typeof COMPANY_SIZE_OPTIONS)[number];
 
 export const TIME_HORIZON_OPTIONS = [12, 24, 36] as const;

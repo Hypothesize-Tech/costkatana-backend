@@ -239,10 +239,7 @@ export class GooglePromptCachingService {
     }
 
     const modelName = model.startsWith('models/') ? model : `models/${model}`;
-    const ttlSeconds = Math.min(
-      Math.max(ttlHours * 3600, 300),
-      86400,
-    ); // 5 min - 24h
+    const ttlSeconds = Math.min(Math.max(ttlHours * 3600, 300), 86400); // 5 min - 24h
     const displayName = `Cache-${Date.now()}`;
 
     const requestBody = {
@@ -280,8 +277,11 @@ export class GooglePromptCachingService {
         displayName: data.displayName || displayName,
         model: data.model || model,
         createTime: data.createTime || new Date().toISOString(),
-        updateTime: data.updateTime || data.createTime || new Date().toISOString(),
-        expireTime: data.expireTime || new Date(Date.now() + ttlHours * 3600 * 1000).toISOString(),
+        updateTime:
+          data.updateTime || data.createTime || new Date().toISOString(),
+        expireTime:
+          data.expireTime ||
+          new Date(Date.now() + ttlHours * 3600 * 1000).toISOString(),
         content: content[0],
         usageMetadata: data.usageMetadata,
       };

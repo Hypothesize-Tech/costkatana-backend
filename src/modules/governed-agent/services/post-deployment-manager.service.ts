@@ -311,7 +311,7 @@ Provide a JSON response with:
       const aiResponseText =
         typeof aiResult === 'string'
           ? aiResult
-          : (aiResult as { response?: string })?.response ?? '';
+          : ((aiResult as { response?: string })?.response ?? '');
 
       // Parse AI response or provide fallback
       let analysisData;
@@ -600,7 +600,10 @@ Generate the complete modified file content that incorporates the requested chan
         'amazon.nova-pro-v1:0',
         { useSystemPrompt: false },
       );
-      const response = typeof result === 'string' ? result : (result as { response?: string }).response ?? '';
+      const response =
+        typeof result === 'string'
+          ? result
+          : ((result as { response?: string }).response ?? '');
 
       return response.trim();
     } catch (error) {
@@ -914,7 +917,11 @@ Output only the JSON array, no markdown or explanation.`;
           useSystemPrompt: false,
         },
       );
-      const raw = (typeof result === 'string' ? result : (result as { response?: string })?.response ?? '').trim();
+      const raw = (
+        typeof result === 'string'
+          ? result
+          : ((result as { response?: string })?.response ?? '')
+      ).trim();
       const jsonMatch = raw.match(/\[[\s\S]*\]/);
       const jsonStr = jsonMatch ? jsonMatch[0] : raw;
       const parsed = JSON.parse(jsonStr) as Array<{
@@ -948,8 +955,7 @@ Output only the JSON array, no markdown or explanation.`;
           analysis,
         );
         const isFallback =
-          inferredFile ===
-          PostDeploymentManagerService.INFERRED_PATH_FALLBACK;
+          inferredFile === PostDeploymentManagerService.INFERRED_PATH_FALLBACK;
         changes.push({
           file: inferredFile,
           changeType: 'modify',

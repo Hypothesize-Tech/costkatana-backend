@@ -17,6 +17,7 @@ import {
 } from '../../schemas/chat/chat-message.schema';
 import { StorageService } from '../storage/storage.service';
 import { IngestionService } from '../ingestion/services/ingestion.service';
+import { generateSecureId } from '../../common/utils/secure-id.util';
 
 const PRESIGNED_URL_EXPIRY_SECONDS = 3600;
 const USER_FILES_LIMIT = 50;
@@ -88,7 +89,7 @@ export class FileUploadService {
     size: number,
   ): Promise<UploadFileResult> {
     const fileType = originalname.split('.').pop()?.toLowerCase() || 'unknown';
-    const documentId = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const documentId = generateSecureId('doc');
 
     const userIdStr = typeof userId === 'string' ? userId : String(userId);
 

@@ -660,3 +660,60 @@ export class AgentSandboxMiddleware implements NestMiddleware {
     return false;
   }
 }
+
+/**
+ * Require agent identity - ensures request is from an authenticated agent.
+ * Use after agentSandboxMiddleware (or equivalent) has set req.agentContext.
+ */
+export const requireAgentIdentity = () => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!(req as any).agentContext) {
+      res.status(401).json({
+        error: 'Agent identity required',
+        message: 'This endpoint requires an authenticated agent',
+      });
+      return;
+    }
+    next();
+  };
+};
+
+/**
+ * Require specific agent action permission.
+ * Assumes req.agentContext.allowedActions (string[]) is set by upstream middleware.
+ */
+export const requireAgentAction = (...actions: string[]) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const agentContext = (req as any).agentContext;
+    if (!agentContext) {
+      res.status(401).json({
+        error: 'Agent identity required',
+        message: 'This endpoint requires an authenticated agent',
+      });
+      return;
+    }
+    const allowedActions = (agentContext as any).allowedActions as
+      | string[]
+      | undefined;
+    if (!allowedActions || !Array.isArray(allowedActions)) {
+      res.status(403).json({
+        error: 'Action not allowed',
+        message: 'Agent action permissions not found',
+      });
+      return;
+    }
+    const hasAction =
+      actions.length === 0 ||
+      actions.some((action) => allowedActions.includes(action));
+    if (!hasAction) {
+      res.status(403).json({
+        error: 'Action not allowed',
+        message:
+          'Agent does not have permission to perform the requested action',
+        requiredAction: actions,
+      });
+      return;
+    }
+    next();
+  };
+};

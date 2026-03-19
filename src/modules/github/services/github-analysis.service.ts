@@ -350,15 +350,21 @@ export class GithubAnalysisService {
 
     const hasPath = (p: string) =>
       Array.from(paths).some(
-        (path) => path === p || path.endsWith('/' + p) || path.includes('/' + p + '/'),
+        (path) =>
+          path === p || path.endsWith('/' + p) || path.includes('/' + p + '/'),
       );
 
-    if (hasPath('next.config.js') || hasPath('next.config.ts') || hasPath('next.config.mjs')) {
+    if (
+      hasPath('next.config.js') ||
+      hasPath('next.config.ts') ||
+      hasPath('next.config.mjs')
+    ) {
       return 'next';
     }
     if (hasPath('nuxt.config.ts') || hasPath('nuxt.config.js')) return 'nuxt';
     if (hasPath('angular.json')) return 'angular';
-    if (hasPath('svelte.config.js') || hasPath('svelte.config.cjs')) return 'svelte';
+    if (hasPath('svelte.config.js') || hasPath('svelte.config.cjs'))
+      return 'svelte';
     if (hasPath('vue.config.js')) return 'vue';
     if (hasPath('vite.config.ts') || hasPath('vite.config.js')) return 'vite';
     if (hasPath('manage.py')) return 'django';
@@ -367,7 +373,8 @@ export class GithubAnalysisService {
       if (hasPath('app.py') || hasPath('application.py')) return 'flask';
     }
     if (hasPath('artisan') || hasPath('artisan.php')) return 'laravel';
-    if (hasPath('config/routes.rb') || hasPath('config/application.rb')) return 'rails';
+    if (hasPath('config/routes.rb') || hasPath('config/application.rb'))
+      return 'rails';
     if (hasPath('go.mod')) return 'go';
     if (hasPath('cargo.toml')) return 'rust';
     if (hasPath('pom.xml')) return 'spring';

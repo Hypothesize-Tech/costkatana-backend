@@ -231,7 +231,8 @@ export class ProviderAdapterInitializerService implements OnModuleInit {
       const startTime = Date.now();
       const apiKey = adapter.config.apiKey;
       const baseUrl =
-        adapter.config.baseUrl?.replace(/\/$/, '') ?? this.getDefaultBaseUrl(adapter.type);
+        adapter.config.baseUrl?.replace(/\/$/, '') ??
+        this.getDefaultBaseUrl(adapter.type);
 
       if (!apiKey) {
         this.logger.warn('Adapter has no API key', {

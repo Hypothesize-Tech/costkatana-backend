@@ -713,7 +713,8 @@ export class AwsPricingService {
         pricingInfo.pricingModel = 'Reserved';
         pricingInfo.termLength = bestReservedPricing.termLength;
         pricingInfo.description = `Reserved Instance (${bestReservedPricing.termLength}, ${bestReservedPricing.paymentOption})`;
-        pricingInfo.reservedHourlyRate = bestReservedPricing.effectiveHourlyRate;
+        pricingInfo.reservedHourlyRate =
+          bestReservedPricing.effectiveHourlyRate;
         pricingInfo.reservedUpfrontCost = bestReservedPricing.upfrontCost;
         pricingInfo.reservedMonthlyRecurring = bestReservedPricing.monthlyCost;
 
@@ -874,7 +875,8 @@ export class AwsPricingService {
       source.reservedHourlyRate ??
       reservedPricing?.pricePerHour ??
       onDemandHourly * 0.7; // Fallback only when AWS API returns no RI data
-    const termLength = source.termLength ?? reservedPricing?.termLength ?? '1yr';
+    const termLength =
+      source.termLength ?? reservedPricing?.termLength ?? '1yr';
     const upfrontFromApi =
       source.reservedUpfrontCost ?? reservedPricing?.reservedUpfrontCost;
 
@@ -979,8 +981,7 @@ export class AwsPricingService {
     const annualOnDemandCost = onDemandHourly * 24 * 365.25;
     // Conservative fallback: AWS typically offers ~30-40% discount for RI; upfront varies by payment option
     // All Upfront: ~50% of discounted annual; Partial: ~25%; No Upfront: 0
-    const discount =
-      years === 3 ? 0.45 : years === 1 ? 0.35 : 0.25;
+    const discount = years === 3 ? 0.45 : years === 1 ? 0.35 : 0.25;
     const discountedAnnual = annualOnDemandCost * (1 - discount);
     const upfrontRatio = years === 3 ? 0.45 : years === 1 ? 0.28 : 0.12;
     return Math.round(discountedAnnual * upfrontRatio * 100) / 100;

@@ -2870,7 +2870,8 @@ export class IntegrationChatService {
               'true'
           ) {
             const to = command.params?.to as string;
-            const subject = (command.params?.subject as string) || '(no subject)';
+            const subject =
+              (command.params?.subject as string) || '(no subject)';
             const body = (command.params?.body as string) || '';
             if (!to) {
               return {
@@ -3254,10 +3255,11 @@ export class IntegrationChatService {
           break;
       }
 
-      const gmailCalendarEnabled = this.configService.get<string>(
-        'ENABLE_GOOGLE_GMAIL_CALENDAR',
-        'false',
-      ) === 'true';
+      const gmailCalendarEnabled =
+        this.configService.get<string>(
+          'ENABLE_GOOGLE_GMAIL_CALENDAR',
+          'false',
+        ) === 'true';
 
       if (command.entity === 'email' && !gmailCalendarEnabled) {
         return {

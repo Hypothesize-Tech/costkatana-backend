@@ -10,6 +10,7 @@ import {
   CostAllocationRule as CostAllocationRuleModel,
   CostAllocationRuleDocument,
 } from '@/schemas/tagging/cost-allocation-rule.schema';
+import { generateSecureId } from '../../common/utils/secure-id.util';
 
 export interface TagHierarchy {
   id: string;
@@ -539,7 +540,7 @@ export class TaggingService {
   }
 
   private generateTagId(): string {
-    return `tag_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    return generateSecureId('tag');
   }
 
   private generateRandomColor(): string {

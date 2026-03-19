@@ -265,7 +265,7 @@ export class GatewayAnalyticsService {
         timestamp: new Date().toISOString(),
       });
 
-        // Store latency metrics for provider routing decisions
+      // Store latency metrics for provider routing decisions
       try {
         const cacheKey = `provider_latency:${provider}:${model}`;
         const existingMetrics = await this.getProviderMetrics(provider, model);
@@ -343,10 +343,15 @@ export class GatewayAnalyticsService {
 
       const processingTime = Date.now() - (context.startTime || Date.now());
 
-      // Compute input/output tokens if not present on context, optionally extract from response if needed
-      // For now, only using context as original
-      const inputTokens = context.inputTokens || 0;
-      const outputTokens = context.outputTokens || 0;
+      let inputTokens = context.inputTokens ?? 0;
+      let outputTokens = context.outputTokens ?? 0;
+      if (inputTokens === 0 && outputTokens === 0 && responseBody) {
+        const extracted = this.extractTokensFromResponseBody(responseBody);
+        if (extracted) {
+          inputTokens = extracted.input;
+          outputTokens = extracted.output;
+        }
+      }
 
       // Compute cost if not present on context, optionally extract from response if needed
       const cost = context.cost || 0;
@@ -696,6 +701,44 @@ export class GatewayAnalyticsService {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
+  }
+
+  /**
+   * Extract token counts from provider response body (OpenAI usage, Anthropic usage, etc.)
+   */
+  private extractTokensFromResponseBody(
+    body: unknown,
+  ): { input: number; output: number } | null {
+    try {
+      const obj =
+        typeof body === 'string'
+          ? (JSON.parse(body) as Record<string, unknown>)
+          : body;
+      if (!obj || typeof obj !== 'object') return null;
+      const usage = (obj as Record<string, unknown>).usage;
+      if (!usage || typeof usage !== 'object') return null;
+      const u = usage as Record<string, unknown>;
+      const input =
+        (u.prompt_tokens as number) ??
+        (u.input_tokens as number) ??
+        (u.inputTokens as number) ??
+        0;
+      const output =
+        (u.completion_tokens as number) ??
+        (u.output_tokens as number) ??
+        (u.outputTokens as number) ??
+        0;
+      if (
+        typeof input === 'number' &&
+        typeof output === 'number' &&
+        (input > 0 || output > 0)
+      ) {
+        return { input, output };
+      }
+    } catch {
+      // Ignore parse errors
+    }
+    return null;
   }
 
   /**

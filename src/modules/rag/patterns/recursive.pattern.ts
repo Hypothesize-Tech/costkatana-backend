@@ -182,8 +182,7 @@ Provide the sub-questions as a numbered list:
         'amazon.nova-pro-v1:0',
         { useSystemPrompt: false },
       );
-      const content =
-        typeof response === 'string' ? response : '';
+      const content = typeof response === 'string' ? response : '';
 
       // Parse sub-questions
       const lines = content

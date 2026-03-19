@@ -132,4 +132,72 @@ export class GoogleService {
     });
     return result.files;
   }
+
+  /**
+   * List calendars available to the connected account.
+   * Requires calendar.readonly or calendar scope.
+   */
+  async listCalendars(connectionId: string): Promise<
+    Array<{ id: string; summary?: string; primary?: boolean }>
+  > {
+    try {
+      const connection =
+        await this.googleConnectionModel.findById(connectionId).select('+accessToken');
+      if (!connection) {
+        throw new Error('Google connection not found');
+      }
+
+      const accessToken = (connection as { accessToken?: string }).accessToken;
+      if (!accessToken) {
+        throw new Error('Google access token not available');
+      }
+
+      const response = await fetch(
+        'https://www.googleapis.com/calendar/v3/users/me/calendarList',
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: 'application/json',
+          },
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Google Calendar API error: ${response.status} ${response.statusText}`,
+        );
+      }
+
+      const data = (await response.json()) as {
+        items?: Array<{ id?: string; summary?: string; primary?: boolean }>;
+      };
+      return (data.items ?? []).map((c) => ({
+        id: c.id!,
+        summary: c.summary,
+        primary: c.primary ?? false,
+      }));
+    } catch (error) {
+      this.logger.error('Failed to list Google calendars', {
+        connectionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * List calendars for a user by looking up their Google connection.
+   */
+  async listCalendarsForUser(
+    userId: string,
+  ): Promise<Array<{ id: string; summary?: string; primary?: boolean }>> {
+    const connection = await this.googleConnectionModel
+      .findOne({ userId, status: 'active', isActive: true })
+      .select('+accessToken')
+      .exec();
+    if (!connection) {
+      return [];
+    }
+    return this.listCalendars(connection._id.toString());
+  }
 }

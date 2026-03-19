@@ -41,6 +41,8 @@ export interface HybridSearchResult {
     chunkType: string;
     language: string;
     astMetadata?: any;
+    /** Timestamp when the chunk was indexed (for recency boost in reranking) */
+    indexedAt?: number | Date;
   };
 }
 
@@ -149,7 +151,10 @@ export class HybridSearchService {
         userId: options.userId,
       };
 
-      const results = await this.sparseSearchService.search(query, sparseOptions);
+      const results = await this.sparseSearchService.search(
+        query,
+        sparseOptions,
+      );
 
       return results.map((r) => ({
         chunkId: r.chunkId,
@@ -229,6 +234,8 @@ export class HybridSearchService {
             chunkType: metadata.chunkType,
             language: metadata.language,
             astMetadata: metadata.astMetadata,
+            indexedAt:
+              metadata._createdAt ?? metadata.indexedAt ?? metadata.createdAt,
           },
         };
       });
@@ -357,5 +364,4 @@ export class HybridSearchService {
       metadata: result.metadata,
     }));
   }
-
 }

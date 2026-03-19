@@ -13,7 +13,8 @@ export {
  */
 import { PermissionService as NestPermissionService } from '../modules/team/services/permission.service';
 
-let _permissionInstance: InstanceType<typeof NestPermissionService> | null = null;
+let _permissionInstance: InstanceType<typeof NestPermissionService> | null =
+  null;
 
 export function setPermissionServiceInstance(
   instance: InstanceType<typeof NestPermissionService>,
@@ -35,8 +36,12 @@ export const permissionService = new Proxy(
       if (!_permissionInstance) {
         return () => throwIfNotWired(String(prop));
       }
-      const method = (_permissionInstance as Record<string, unknown>)[prop as string];
-      return typeof method === 'function' ? method.bind(_permissionInstance) : method;
+      const method = (_permissionInstance as Record<string, unknown>)[
+        prop as string
+      ];
+      return typeof method === 'function'
+        ? method.bind(_permissionInstance)
+        : method;
     },
   },
 );

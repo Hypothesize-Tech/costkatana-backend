@@ -373,11 +373,13 @@ export class PermissionManager {
     integration: IntegrationType,
     connectionId: string,
   ): Promise<ToolPermissions | null> {
-    const permission = await getMcpPermissionModel().findOne({
-      userId,
-      integration,
-      connectionId,
-    }).lean();
+    const permission = await getMcpPermissionModel()
+      .findOne({
+        userId,
+        integration,
+        connectionId,
+      })
+      .lean();
 
     return permission?.permissions || null;
   }
@@ -440,7 +442,7 @@ export class PermissionManager {
   /**
    * Clean up expired permissions
    */
-  static async cleanupExpiredPermissions(  ): Promise<number> {
+  static async cleanupExpiredPermissions(): Promise<number> {
     const result = await getMcpPermissionModel().deleteMany({
       expiresAt: { $lt: new Date() },
     });

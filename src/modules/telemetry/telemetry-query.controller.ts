@@ -22,6 +22,7 @@ import { CostStreamingService } from './services/cost-streaming.service';
 import { TelemetryQueryDto } from './dto/telemetry-query.dto';
 import { MetricsQueryDto } from './dto/metrics-query.dto';
 import { EnrichedSpansQueryDto } from './dto/enriched-spans-query.dto';
+import { generateSecureId } from '../../common/utils/secure-id.util';
 
 @Controller('api/telemetry')
 @UseGuards(JwtAuthGuard)
@@ -474,7 +475,7 @@ export class TelemetryQueryController {
 
       // Register client for streaming
       this.costStreamingService.registerClient(
-        `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        generateSecureId('client'),
         res,
         user.id,
         user.workspaceId,

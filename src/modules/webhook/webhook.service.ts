@@ -26,6 +26,7 @@ import {
   GetWebhooksQueryDto,
   GetDeliveriesQueryDto,
 } from './dto/webhook.dto';
+import { generateSecureId } from '../../common/utils/secure-id.util';
 
 let webhookServiceInstance: WebhookService | null = null;
 
@@ -312,7 +313,7 @@ export class WebhookService {
       }
 
       const testEventData: WebhookEventData = {
-        eventId: `test_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        eventId: generateSecureId('test'),
         eventType: WEBHOOK_EVENTS.SYSTEM_ERROR, // Use a system event for testing
         occurredAt: new Date(),
         userId,

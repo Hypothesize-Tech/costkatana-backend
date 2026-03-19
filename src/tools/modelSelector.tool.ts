@@ -225,10 +225,7 @@ export class ModelSelectorTool extends Tool {
       for (const prompt of prompts) {
         const start = Date.now();
         try {
-          const responseText = await BedrockService.invokeModel(
-            prompt,
-            model,
-          );
+          const responseText = await BedrockService.invokeModel(prompt, model);
           const responseTime = Date.now() - start;
           const inputTokens = Math.ceil(prompt.length / 4);
           const outputTokens = Math.ceil(

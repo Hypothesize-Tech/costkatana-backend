@@ -538,7 +538,9 @@ export class AIProviderAuditService
       // No GDPR implications or no PII — consent not required for processing
       consentObtained = true;
     } else {
-      consentObtained = await this.getUserConsentForAIProcessing(context.userId);
+      consentObtained = await this.getUserConsentForAIProcessing(
+        context.userId,
+      );
     }
 
     // Generate compliance flags

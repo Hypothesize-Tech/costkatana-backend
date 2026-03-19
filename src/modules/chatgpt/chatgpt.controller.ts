@@ -114,7 +114,11 @@ export class ChatGPTController {
       connectionStatus.userId,
       body.conversation_data,
     );
-    return { success: true, message: 'Usage tracked successfully', data: result };
+    return {
+      success: true,
+      message: 'Usage tracked successfully',
+      data: result,
+    };
   }
 
   /**

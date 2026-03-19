@@ -356,7 +356,11 @@ If you can't determine the action, respond with "unknown".`;
 
     const schema = integrationActionSchemas[integration]?.[action];
     if (schema) {
-      const inferred = this.inferParamsFromMessage(message, integration, action);
+      const inferred = this.inferParamsFromMessage(
+        message,
+        integration,
+        action,
+      );
       Object.assign(params, inferred);
       const result = schema.safeParse(params);
       if (result.success) {
@@ -381,25 +385,36 @@ If you can't determine the action, respond with "unknown".`;
       integration === 'github' &&
       (action === 'create_pr' || action === 'create_pull_request')
     ) {
-      const repoMatch = message.match(/(?:repo|repository)[:\s]+([^\s,]+)/i) ||
+      const repoMatch =
+        message.match(/(?:repo|repository)[:\s]+([^\s,]+)/i) ||
         message.match(/\b([a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+)\b/);
       if (repoMatch) inferred.repo = repoMatch[1];
-      const titleMatch = message.match(/(?:title|pr title)[:\s]+"([^"]+)"|(?:title|pr title)[:\s]+([^\n,]+)/i);
-      if (titleMatch) inferred.title = (titleMatch[1] || titleMatch[2] || '').trim();
+      const titleMatch = message.match(
+        /(?:title|pr title)[:\s]+"([^"]+)"|(?:title|pr title)[:\s]+([^\n,]+)/i,
+      );
+      if (titleMatch)
+        inferred.title = (titleMatch[1] || titleMatch[2] || '').trim();
     }
     if (integration === 'github' && action === 'get_issue') {
       const numMatch = message.match(/#(\d+)|issue\s*#?(\d+)/i);
       if (numMatch) inferred.issueNumber = numMatch[1] || numMatch[2];
     }
     if (integration === 'vercel' && action === 'get_logs') {
-      const depMatch = message.match(/(?:deployment|dpl)[:\s]+([a-zA-Z0-9_-]+)/i);
+      const depMatch = message.match(
+        /(?:deployment|dpl)[:\s]+([a-zA-Z0-9_-]+)/i,
+      );
       if (depMatch) inferred.deploymentId = depMatch[1];
     }
     if (integration === 'jira' && action === 'create_issue') {
-      const projMatch = message.match(/(?:project)[:\s]+([A-Z][A-Z0-9]+)/i) || message.match(/\b([A-Z][A-Z0-9]{1,9})\b/);
+      const projMatch =
+        message.match(/(?:project)[:\s]+([A-Z][A-Z0-9]+)/i) ||
+        message.match(/\b([A-Z][A-Z0-9]{1,9})\b/);
       if (projMatch) inferred.project = projMatch[1];
-      const titleMatch = message.match(/(?:title)[:\s]+"([^"]+)"|(?:title)[:\s]+([^\n,]+)/i);
-      if (titleMatch) inferred.title = (titleMatch[1] || titleMatch[2] || '').trim();
+      const titleMatch = message.match(
+        /(?:title)[:\s]+"([^"]+)"|(?:title)[:\s]+([^\n,]+)/i,
+      );
+      if (titleMatch)
+        inferred.title = (titleMatch[1] || titleMatch[2] || '').trim();
     }
 
     return inferred;
@@ -412,7 +427,9 @@ If you can't determine the action, respond with "unknown".`;
     userId: string,
     integrationName: string,
     paramName: string,
-  ): Promise<Array<{ value: string; label: string; metadata?: Record<string, unknown> }>> {
+  ): Promise<
+    Array<{ value: string; label: string; metadata?: Record<string, unknown> }>
+  > {
     const optionType = PARAM_TO_OPTION_TYPE[paramName];
     if (!optionType) return [];
 
@@ -452,7 +469,10 @@ If you can't determine the action, respond with "unknown".`;
 
     const path = firstError.path[0];
     const paramName = typeof path === 'string' ? path : String(path);
-    const readableName = paramName.replace(/([A-Z])/g, ' $1').toLowerCase().trim();
+    const readableName = paramName
+      .replace(/([A-Z])/g, ' $1')
+      .toLowerCase()
+      .trim();
 
     return {
       missingParam: paramName,

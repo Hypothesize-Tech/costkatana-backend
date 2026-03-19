@@ -321,7 +321,9 @@ export class CortexControlFlowService {
     // Parse control steps from the frame
     const steps = this.parseControlSteps(controlFrame);
 
-    for (const step of steps) {
+    let i = 0;
+    while (i < steps.length) {
+      const step = steps[i];
       executedSteps.push(step.id);
 
       try {
@@ -351,14 +353,23 @@ export class CortexControlFlowService {
         };
         errors.push(controlError);
 
+        const maybeGoto = (): boolean => {
+          const gotoStepId = step.errorHandling?.gotoStep;
+          if (!gotoStepId) return false;
+          const gotoIndex = steps.findIndex((s) => s.id === gotoStepId);
+          if (gotoIndex < 0) return false;
+          i = gotoIndex;
+          return true;
+        };
+
         // Handle error based on error handling strategy
         if (
           step.errorHandling?.onError === 'retry' &&
           step.errorHandling.retryCount &&
           step.errorHandling.retryCount > 0
         ) {
-          // Implement retry logic
           let retryCount = 0;
+          let retrySuccess = false;
           while (retryCount < step.errorHandling.retryCount) {
             try {
               const retryResult = await this.executeStep(step);
@@ -379,38 +390,35 @@ export class CortexControlFlowService {
                 ) as CortexFrame[];
                 results.push(...frames);
               }
-              break; // Success, exit retry loop
+              retrySuccess = true;
+              break;
             } catch (retryError) {
               retryCount++;
               if (retryCount >= step.errorHandling.retryCount) {
-                // Max retries reached, handle final error
-                if (step.errorHandling.gotoStep) {
-                  // Jump to specified step
-                  const gotoIndex = steps.findIndex(
-                    (s) => s.id === step.errorHandling!.gotoStep,
-                  );
-                  if (gotoIndex >= 0) {
-                    // Continue from goto step (would need to modify loop)
-                  }
-                }
+                if (maybeGoto()) continue;
+                break;
               }
             }
           }
+          if (retrySuccess) {
+            i++;
+            continue;
+          }
+          if (maybeGoto()) continue;
+          break;
         } else if (
           step.errorHandling?.onError === 'goto' &&
           step.errorHandling.gotoStep
         ) {
-          // Jump to specified step
-          const gotoIndex = steps.findIndex(
-            (s) => s.id === step.errorHandling!.gotoStep,
-          );
-          if (gotoIndex >= 0) {
-            // Continue from goto step (would need to modify loop index)
-          }
-        } else if (!controlError.recoverable) {
+          if (maybeGoto()) continue;
+        }
+
+        if (!controlError.recoverable) {
           break;
         }
       }
+
+      i++;
     }
 
     return results;

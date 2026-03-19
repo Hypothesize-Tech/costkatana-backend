@@ -8,15 +8,12 @@
 
 import { Injectable } from '@nestjs/common';
 import { BedrockService } from '../../bedrock/bedrock.service';
-import {
-  PromptCompilerService as LegacyPromptCompiler,
-} from '../../../compiler/promptCompiler.service';
+import { PromptCompilerService as LegacyPromptCompiler } from '../../../compiler/promptCompiler.service';
 
 const SUMMARIZATION_MODEL = 'us.anthropic.claude-3-haiku-20240307-v1:0';
 
 @Injectable()
 export class IRPromptCompilerService {
-
   /**
    * Compile prompt with full optimization pipeline and real AI summarization.
    */

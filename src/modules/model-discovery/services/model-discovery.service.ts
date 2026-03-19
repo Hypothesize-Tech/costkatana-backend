@@ -476,7 +476,10 @@ Return ONLY the JSON array:`;
       ) {
         this.logger.warn(
           `Only found ${validModels.length} models for ${config.provider}, using complete fallback list`,
-          { metric: 'model_discovery.hardcoded_fallback', provider: config.provider },
+          {
+            metric: 'model_discovery.hardcoded_fallback',
+            provider: config.provider,
+          },
         );
         return ModelDiscoveryService.FALLBACK_MODELS[config.provider];
       }

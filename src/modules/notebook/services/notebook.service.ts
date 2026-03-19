@@ -18,9 +18,11 @@ import {
   NotebookExecution,
   NotebookExecutionDocument,
 } from '../../../schemas/notebook/notebook-execution.schema';
+import { marked } from 'marked';
 import { CKQLService } from './ckql.service';
 import { AIInsightsService } from './ai-insights.service';
 import { TelemetryService } from '../../../modules/utils/services/telemetry.service';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface NotebookCell {
   id: string;
@@ -1081,18 +1083,11 @@ Provide a single, valuable recommendation or observation. Keep it concise and ac
   }
 
   private generateExecutionId(): string {
-    return `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return generateSecureId('exec');
   }
 
   private renderMarkdown(content: string): string {
-    // Simple markdown rendering - in a real implementation, you'd use a proper markdown library
-    return content
-      .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-      .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-      .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-      .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
-      .replace(/\*(.*)\*/gim, '<em>$1</em>')
-      .replace(/\n/gim, '<br>');
+    return marked.parse(content, { async: false }) as string;
   }
 
   private async executeWithRetry(

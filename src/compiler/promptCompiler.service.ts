@@ -241,7 +241,9 @@ export class PromptCompilerService {
       }
 
       // Detect and parse conditional statements recursively
-      const conditionalMatch = PromptCompilerService.parseConditional(segment.text);
+      const conditionalMatch = PromptCompilerService.parseConditional(
+        segment.text,
+      );
       if (conditionalMatch) {
         const conditionalNode = PromptCompilerService.createConditionalNode(
           conditionalMatch,
@@ -571,7 +573,9 @@ export class PromptCompilerService {
     }
 
     // Fallback: treat first clause as condition, rest as then
-    const firstWord = t.match(/^(if|when|whenever|provided that|assuming|suppose)\s+/i);
+    const firstWord = t.match(
+      /^(if|when|whenever|provided that|assuming|suppose)\s+/i,
+    );
     if (firstWord) {
       const rest = t.slice(firstWord[0].length).trim();
       const thenElse = rest.split(/\s+else\s+/i);
@@ -609,9 +613,17 @@ export class PromptCompilerService {
       metadata: { startPos, endPos },
     };
 
-    const thenBody = PromptCompilerService.parseSegmentsToStatements([parsed.then], startPos, endPos);
+    const thenBody = PromptCompilerService.parseSegmentsToStatements(
+      [parsed.then],
+      startPos,
+      endPos,
+    );
     const elseBody = parsed.else
-      ? PromptCompilerService.parseSegmentsToStatements([parsed.else], startPos, endPos)
+      ? PromptCompilerService.parseSegmentsToStatements(
+          [parsed.else],
+          startPos,
+          endPos,
+        )
       : undefined;
 
     return {
@@ -642,7 +654,12 @@ export class PromptCompilerService {
         const parsed = PromptCompilerService.parseConditional(seg);
         if (parsed) {
           nodes.push(
-            PromptCompilerService.createConditionalNode(parsed, startPos, endPos, i),
+            PromptCompilerService.createConditionalNode(
+              parsed,
+              startPos,
+              endPos,
+              i,
+            ),
           );
         } else {
           nodes.push(
@@ -1198,11 +1215,14 @@ export class PromptCompilerService {
         if (contextValue) {
           variableMap.set(implicitVar.name, contextValue);
         } else {
-          loggingService.warn('Unresolved variable; rendering may contain placeholder', {
-            metric: 'prompt_compiler.unresolved_variable_placeholder',
-            variableName: implicitVar.name,
-            instructionIndex: index,
-          });
+          loggingService.warn(
+            'Unresolved variable; rendering may contain placeholder',
+            {
+              metric: 'prompt_compiler.unresolved_variable_placeholder',
+              variableName: implicitVar.name,
+              instructionIndex: index,
+            },
+          );
           variableMap.set(implicitVar.name, `[${implicitVar.name}]`);
         }
       }
@@ -1436,7 +1456,12 @@ export class PromptCompilerService {
     };
 
     const foldExpression = (node: ExpressionNode): ExpressionNode => {
-      const n = node as { type?: string; operator?: string; left?: ExpressionNode; right?: ExpressionNode };
+      const n = node as {
+        type?: string;
+        operator?: string;
+        left?: ExpressionNode;
+        right?: ExpressionNode;
+      };
       if (n.type === 'BinaryOp' && n.operator === '+' && n.left && n.right) {
         const left = foldExpression(n.left);
         const right = foldExpression(n.right);
@@ -1447,7 +1472,9 @@ export class PromptCompilerService {
           const mergedStr = leftStr + rightStr;
           const tokensSaved = Math.max(
             1,
-            estimateTokenCount(leftStr) + estimateTokenCount(rightStr) - estimateTokenCount(mergedStr),
+            estimateTokenCount(leftStr) +
+              estimateTokenCount(rightStr) -
+              estimateTokenCount(mergedStr),
           );
           transformations.push({
             type: 'constant_fold',
@@ -1492,7 +1519,9 @@ export class PromptCompilerService {
         const mergedStr = leftStr + rightStr;
         const tokensSaved = Math.max(
           1,
-          estimateTokenCount(leftStr) + estimateTokenCount(rightStr) - estimateTokenCount(mergedStr),
+          estimateTokenCount(leftStr) +
+            estimateTokenCount(rightStr) -
+            estimateTokenCount(mergedStr),
         );
         const mergedContent = mergeLiteral(curr.content, next.content);
         mergedBody.push({ ...curr, content: mergedContent });

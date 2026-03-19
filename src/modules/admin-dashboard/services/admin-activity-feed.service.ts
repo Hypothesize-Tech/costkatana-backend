@@ -5,6 +5,7 @@ import { Observable, Subject, interval, merge, of } from 'rxjs';
 import { map, catchError, finalize } from 'rxjs/operators';
 import { Usage, UsageDocument } from '../../../schemas/core/usage.schema';
 import { ActivityEvent, ActivityFilters } from '../interfaces';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 interface AdminConnection {
   connectionId: string;
@@ -53,7 +54,7 @@ export class AdminActivityFeedService {
     adminId: string,
     filters?: ActivityFilters,
   ): Observable<object> {
-    const connectionId = `admin_${adminId}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const connectionId = generateSecureId(`admin_${adminId}`);
     const subject = new Subject<object>();
 
     const connection: AdminConnection = {
@@ -150,7 +151,7 @@ export class AdminActivityFeedService {
     try {
       const fullEvent: ActivityEvent = {
         ...event,
-        id: `${event.type}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+        id: generateSecureId(event.type),
         timestamp: new Date(),
       };
 

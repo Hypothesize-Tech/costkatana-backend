@@ -5,6 +5,7 @@ import {
   QueueStats,
   PriorityRequest,
 } from '../interfaces/gateway.interfaces';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 @Injectable()
 export class PriorityQueueService {
@@ -345,13 +346,12 @@ export class PriorityQueueService {
   ): Promise<void> {
     const queueKey = 'gateway:priority_queue';
     const slotKey = 'gateway:active_slots';
-    const maxConcurrent = parseInt('100',
-      10,
-    );
+    const maxConcurrent = parseInt('100', 10);
     const requestId =
       (Array.isArray(req.headers?.['x-request-id'])
         ? req.headers['x-request-id'][0]
-        : req.headers?.['x-request-id']) || `pq-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        : req.headers?.['x-request-id']) ||
+      generateSecureId('pq').replace('_', '-');
     const slotId = `${requestId}:${Date.now()}`;
     const pollInterval = 50;
     const maxWaitMs = parseInt(
@@ -391,7 +391,10 @@ export class PriorityQueueService {
 
           res.on('finish', () => {
             this.releaseSlot(slotKey, slotId).catch((err) => {
-              this.logger.warn('Failed to release slot', { slotId, error: err instanceof Error ? err.message : String(err) });
+              this.logger.warn('Failed to release slot', {
+                slotId,
+                error: err instanceof Error ? err.message : String(err),
+              });
             });
           });
           return;
@@ -399,7 +402,10 @@ export class PriorityQueueService {
 
         if (Date.now() - startWait > maxWaitMs) {
           await this.cacheService.zrem(queueKey, requestData);
-          this.logger.warn('Queue mode slot acquire timeout', { requestId, priority });
+          this.logger.warn('Queue mode slot acquire timeout', {
+            requestId,
+            priority,
+          });
           return;
         }
         await new Promise((r) => setTimeout(r, pollInterval));
@@ -426,7 +432,8 @@ export class PriorityQueueService {
     const requestId =
       (Array.isArray(req.headers?.['x-request-id'])
         ? req.headers['x-request-id'][0]
-        : req.headers?.['x-request-id']) || `slot-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        : req.headers?.['x-request-id']) ||
+      generateSecureId('slot').replace('_', '-');
     const slotId = `${requestId}:${Date.now()}`;
     const pollInterval = 50;
     const maxWaitMs = parseInt(

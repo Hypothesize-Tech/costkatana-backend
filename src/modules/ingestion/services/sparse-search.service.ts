@@ -20,6 +20,7 @@ export interface SparseSearchResult {
     commitSha: string;
     chunkType: string;
     language: string;
+    indexedAt?: Date;
   };
 }
 
@@ -103,6 +104,7 @@ export class SparseSearchService {
             commitSha: doc.metadata.commitSha,
             chunkType: doc.metadata.chunkType,
             language: doc.metadata.language,
+            indexedAt: doc.createdAt,
           },
         }));
 
@@ -180,6 +182,7 @@ export class SparseSearchService {
           commitSha: doc.metadata.commitSha,
           chunkType: doc.metadata.chunkType,
           language: doc.metadata.language,
+          indexedAt: doc.createdAt,
         },
       }));
 
@@ -243,6 +246,7 @@ export class SparseSearchService {
           commitSha: doc.metadata.commitSha,
           chunkType: doc.metadata.chunkType,
           language: doc.metadata.language,
+          indexedAt: doc.createdAt,
         },
       }));
 
@@ -326,6 +330,7 @@ export class SparseSearchService {
               commitSha: doc.metadata.commitSha,
               chunkType: doc.metadata.chunkType,
               language: doc.metadata.language,
+              indexedAt: doc.createdAt,
             },
           };
         })

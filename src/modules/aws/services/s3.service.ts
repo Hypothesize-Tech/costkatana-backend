@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   S3Client,
+  HeadBucketCommand,
   ListBucketsCommand,
   CreateBucketCommand,
   PutBucketEncryptionCommand,
@@ -544,8 +545,42 @@ export class S3Service {
     // No uppercase, underscores, or special characters (already checked above)
     // No need to check underscores or uppercase as regex above excludes them
 
-    // All checks passed, name is syntactically valid and suitable for attempting creation
     return true;
+  }
+
+  /**
+   * Verify S3 bucket name global uniqueness via AWS HeadBucket API.
+   * Returns true if the bucket does not exist (name is available), false if it exists.
+   */
+  async checkBucketNameUniqueness(
+    connection: AWSConnectionDocument,
+    bucketName: string,
+    region?: string,
+  ): Promise<{ available: boolean; error?: string }> {
+    if (!this.isBucketNameAvailable(bucketName)) {
+      return { available: false, error: 'Invalid bucket name format' };
+    }
+    try {
+      const client = await this.getClient(connection, region);
+      await client.send(new HeadBucketCommand({ Bucket: bucketName }));
+      return { available: false };
+    } catch (err: unknown) {
+      const e = err as {
+        name?: string;
+        $metadata?: { httpStatusCode?: number };
+      };
+      const is404 =
+        e?.$metadata?.httpStatusCode === 404 ||
+        e?.name === 'NotFound' ||
+        e?.name === 'NoSuchBucket';
+      if (is404) {
+        return { available: true };
+      }
+      return {
+        available: false,
+        error: err instanceof Error ? err.message : 'Unknown error',
+      };
+    }
   }
 
   /**

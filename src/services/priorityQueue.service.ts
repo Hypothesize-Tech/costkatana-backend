@@ -15,8 +15,9 @@ export {
 import type { PriorityQueueService as NestPriorityQueueService } from '../modules/gateway/services/priority-queue.service';
 import type { QueueStats } from '../modules/gateway/interfaces/gateway.interfaces';
 
-let _priorityQueueInstance: InstanceType<typeof NestPriorityQueueService> | null =
-  null;
+let _priorityQueueInstance: InstanceType<
+  typeof NestPriorityQueueService
+> | null = null;
 
 export function setPriorityQueueServiceInstance(
   instance: InstanceType<typeof NestPriorityQueueService>,
@@ -38,10 +39,14 @@ export const priorityQueueService = {
     _priorityQueueInstance?.parsePriorityHeader(h) ?? undefined,
 
   getQueueStats: async (): Promise<QueueStats> =>
-    _priorityQueueInstance ? _priorityQueueInstance.getQueueStats() : defaultStats,
+    _priorityQueueInstance
+      ? _priorityQueueInstance.getQueueStats()
+      : defaultStats,
 
   isQueueOverCapacity: async (): Promise<boolean> =>
-    _priorityQueueInstance ? _priorityQueueInstance.isQueueOverCapacity() : false,
+    _priorityQueueInstance
+      ? _priorityQueueInstance.isQueueOverCapacity()
+      : false,
 
   wouldExceedMaxWaitTime: async (): Promise<boolean> =>
     _priorityQueueInstance

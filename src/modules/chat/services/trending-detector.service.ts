@@ -553,11 +553,41 @@ export class TrendingDetectorService {
       score += 5;
     }
 
-    // Factor 5: Category relevance
+    // Factor 5: Category relevance (match article category/topic to requested category)
     if (options.category && options.category !== 'general') {
-      // This would require more sophisticated category matching
-      // For now, give a small bonus if category is specified
-      score += 5;
+      const articleCategory = (
+        article.category ??
+        article.topic ??
+        article.section ??
+        ''
+      )
+        .toLowerCase()
+        .trim();
+      const requestedCategory = options.category.toLowerCase().trim();
+      if (articleCategory && requestedCategory) {
+        if (articleCategory === requestedCategory) {
+          score += 15;
+        } else if (
+          articleCategory.includes(requestedCategory) ||
+          requestedCategory.includes(articleCategory)
+        ) {
+          score += 10;
+        } else {
+          const categorySynonyms: Record<string, string[]> = {
+            tech: ['technology', 'science', 'ai', 'software'],
+            business: ['economy', 'finance', 'markets', 'startups'],
+            world: ['international', 'global', 'politics'],
+            health: ['science', 'medicine', 'wellness'],
+            sports: ['sport', 'football', 'soccer', 'basketball'],
+          };
+          const synonyms = categorySynonyms[requestedCategory] ?? [];
+          if (synonyms.some((s) => articleCategory.includes(s))) {
+            score += 8;
+          }
+        }
+      } else {
+        score += 5;
+      }
     }
 
     // Factor 6: Regional relevance
@@ -785,10 +815,9 @@ export class TrendingDetectorService {
 
       return trends;
     } catch (error) {
-      this.logger.error(
-        'Twitter API failed, cannot return fabricated trends',
-        { error: error instanceof Error ? error.message : String(error) },
-      );
+      this.logger.error('Twitter API failed, cannot return fabricated trends', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw new InternalServerErrorException(
         'Twitter trends API is temporarily unavailable. Please try again later.',
         { cause: error instanceof Error ? error : undefined },
@@ -1097,9 +1126,12 @@ Example: {"intent":"cost_analysis","confidence":0.9,"requiresWebSearch":false}`;
         };
       }
     } catch (error) {
-      this.logger.warn('Bedrock classification failed, using heuristic fallback', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      this.logger.warn(
+        'Bedrock classification failed, using heuristic fallback',
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
     }
 
     // Fallback to heuristic when Bedrock fails or returns unparseable JSON

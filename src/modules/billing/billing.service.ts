@@ -283,8 +283,7 @@ export class BillingService {
       gatewayCustomerId = customerResult.customerId;
     }
 
-    const gatewayType =
-      dto.type === 'paypal_account' ? 'paypal' : dto.type;
+    const gatewayType = dto.type === 'paypal_account' ? 'paypal' : dto.type;
 
     const paymentMethodParams: Record<string, unknown> = {
       customerId: gatewayCustomerId,

@@ -8,6 +8,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { CortexFrame } from '../types/cortex.types';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface ConversationContext {
   id: string;
@@ -448,7 +449,7 @@ export class CortexContextManagerService {
   }
 
   private generateId(): string {
-    return `id_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return generateSecureId('id');
   }
 
   private extractEntitiesFromFrame(
@@ -462,7 +463,8 @@ export class CortexContextManagerService {
     }> = [
       // UUIDs and IDs
       {
-        pattern: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+        pattern:
+          /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
         type: 'uuid',
         extractId: (m) => `uuid_${m[0].toLowerCase()}`,
       },

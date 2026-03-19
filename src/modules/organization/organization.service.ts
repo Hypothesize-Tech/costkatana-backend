@@ -38,7 +38,11 @@ export class OrganizationService {
     private readonly organizationModel: Model<OrganizationDocument>,
   ) {}
 
-  async list(ownerId: string, limit = 50, offset = 0): Promise<{
+  async list(
+    ownerId: string,
+    limit = 50,
+    offset = 0,
+  ): Promise<{
     organizations: Organization[];
     total: number;
   }> {
@@ -46,7 +50,9 @@ export class OrganizationService {
     const [organizations, total] = await Promise.all([
       this.organizationModel
         .find(query)
-        .select('name slug ownerId securitySettings isActive createdAt updatedAt')
+        .select(
+          'name slug ownerId securitySettings isActive createdAt updatedAt',
+        )
         .sort({ createdAt: -1 })
         .skip(offset)
         .limit(limit)
@@ -116,7 +122,9 @@ export class OrganizationService {
       throw new NotFoundException('Organization not found');
     }
     if (doc.ownerId.toString() !== userId) {
-      throw new ForbiddenException('Only the owner can update this organization');
+      throw new ForbiddenException(
+        'Only the owner can update this organization',
+      );
     }
 
     if (dto.name !== undefined) doc.name = dto.name.trim();

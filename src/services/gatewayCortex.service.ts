@@ -4,7 +4,10 @@
  */
 import { GatewayCortexService as NestGatewayCortexService } from '../modules/gateway/services/gateway-cortex.service';
 
-const processGatewayRequest = async (_req: unknown, opts: { prompt?: string }) => ({
+const processGatewayRequest = async (
+  _req: unknown,
+  opts: { prompt?: string },
+) => ({
   shouldBypass: true,
   processedBody: { prompt: opts?.prompt || '' },
 });

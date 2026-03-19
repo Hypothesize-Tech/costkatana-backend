@@ -246,15 +246,12 @@ Based ONLY on the search results above, provide a factual answer:`;
     let aiResponse: string;
     try {
       // Use injected BedrockService for AI synthesis
-      const bedrockResult = await BedrockService.invokeModelDirectly(
-        modelId,
-        {
-          prompt: responsePrompt,
-          max_tokens: 600,
-          temperature: 0.3,
-          stop_sequences: [],
-        },
-      );
+      const bedrockResult = await BedrockService.invokeModelDirectly(modelId, {
+        prompt: responsePrompt,
+        max_tokens: 600,
+        temperature: 0.3,
+        stop_sequences: [],
+      });
       aiResponse = bedrockResult.response?.trim() || '';
     } catch (bedrockError) {
       this.logger.warn(

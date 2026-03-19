@@ -44,6 +44,7 @@ import { VercelService } from '../vercel/vercel.service';
 import { ExecuteCommandDto, AutocompleteQueryDto } from './dto';
 import type { RequestWithMentions } from './interceptors/chat-mentions.interceptor';
 import { McpIntegrationHandlerService } from './services/mcp-integration-handler.service';
+import { generateSecureId } from '../../common/utils/secure-id.util';
 
 interface AuthenticatedUser {
   id: string;
@@ -137,7 +138,7 @@ export class IntegrationChatController {
       }
 
       // Generate a unique command ID for tracking
-      const commandId = `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const commandId = generateSecureId('cmd');
 
       // Execute command via MCP integration handler for security, rate limiting, and audit logging
       const mcpRequest = {

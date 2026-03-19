@@ -19,7 +19,12 @@ const INTEGRATION_TYPES = [
 
 @Schema({ timestamps: true, collection: 'mcp_security_event_logs' })
 export class McpSecurityEventLog {
-  @Prop({ type: String, required: true, enum: ['confirmation', 'permission_denial'], index: true })
+  @Prop({
+    type: String,
+    required: true,
+    enum: ['confirmation', 'permission_denial'],
+    index: true,
+  })
   eventType: McpSecurityEventType;
 
   @Prop({ type: Date, required: true, default: Date.now, index: true })
@@ -73,7 +78,8 @@ export class McpSecurityEventLog {
   updatedAt: Date;
 }
 
-export const McpSecurityEventLogSchema = SchemaFactory.createForClass(McpSecurityEventLog);
+export const McpSecurityEventLogSchema =
+  SchemaFactory.createForClass(McpSecurityEventLog);
 
 McpSecurityEventLogSchema.index({ userId: 1, timestamp: -1 });
 McpSecurityEventLogSchema.index({ integration: 1, timestamp: -1 });

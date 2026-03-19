@@ -25,6 +25,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { IngestionService, UploadProgress } from './services/ingestion.service';
 import type { ProcessedDocument } from './services/document-processor.service';
+import { generateSecureId } from '../../common/utils/secure-id.util';
 
 @Controller('api/ingestion')
 @UseGuards(JwtAuthGuard)
@@ -133,10 +134,10 @@ export class IngestionController {
     });
 
     // Generate upload ID for progress tracking
-    const uploadId = `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const uploadId = generateSecureId('upload');
 
     // Generate (predictable) documentId, save in DB during ingestion
-    const documentId = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const documentId = generateSecureId('doc');
 
     // Start background processing ASYNCHRONOUSLY (don't await!)
     this.ingestionService

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Usage, UsageSchema } from '../../schemas/analytics/usage.schema';
 import {
@@ -9,6 +9,7 @@ import { CommonModule } from '../../common/common.module';
 import { SubscriptionModule } from '../subscription/subscription.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { AuthModule } from '../auth/auth.module';
+import { CortexModule } from '../cortex/cortex.module';
 import { WorkflowController } from './workflow.controller';
 import { WorkflowService } from './workflow.service';
 import { WorkflowOrchestratorService } from './workflow-orchestrator.service';
@@ -22,6 +23,7 @@ import { WorkflowOptimizationService } from './services/workflow-optimization.se
     SubscriptionModule,
     PricingModule,
     AuthModule,
+    forwardRef(() => CortexModule),
     MongooseModule.forFeature([
       { name: Usage.name, schema: UsageSchema },
       {

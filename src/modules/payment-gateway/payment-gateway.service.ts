@@ -305,7 +305,9 @@ export class PaymentGatewayService {
     }
 
     if (!paymentMethodData.customerId) {
-      throw new Error('Customer ID is required for Razorpay payment method creation');
+      throw new Error(
+        'Customer ID is required for Razorpay payment method creation',
+      );
     }
 
     if (paymentMethodData.type === 'card') {
@@ -327,7 +329,9 @@ export class PaymentGatewayService {
           return { paymentMethodId: token.id };
         } catch (tokenError: unknown) {
           const errorMessage =
-            tokenError instanceof Error ? tokenError.message : String(tokenError);
+            tokenError instanceof Error
+              ? tokenError.message
+              : String(tokenError);
           this.logger.error('Razorpay token creation failed', {
             error: errorMessage,
           });
@@ -373,10 +377,16 @@ export class PaymentGatewayService {
       throw new Error('PayPal SDK not initialized');
     }
 
-    if (paymentMethodData.type === 'paypal' || paymentMethodData.type === 'paypal_account') {
-      const email = paymentMethodData.paypalEmail || paymentMethodData.customerId;
+    if (
+      paymentMethodData.type === 'paypal' ||
+      paymentMethodData.type === 'paypal_account'
+    ) {
+      const email =
+        paymentMethodData.paypalEmail || paymentMethodData.customerId;
       if (!email || typeof email !== 'string') {
-        throw new Error('PayPal email is required for PayPal payment method creation');
+        throw new Error(
+          'PayPal email is required for PayPal payment method creation',
+        );
       }
       const sanitizedEmail = email.includes('@')
         ? email.replace('@', '_at_')
@@ -887,24 +897,35 @@ export class PaymentGatewayService {
    * Uses next_billing_time from billing_info when available.
    */
   private extractPayPalPeriodEnd(subscription: Record<string, unknown>): Date {
-    const billingInfo = subscription.billing_info as Record<string, unknown> | undefined;
+    const billingInfo = subscription.billing_info as
+      | Record<string, unknown>
+      | undefined;
     if (billingInfo?.next_billing_time) {
       const next = billingInfo.next_billing_time;
       if (typeof next === 'string') return new Date(next);
       if (typeof next === 'number') return new Date(next * 1000);
     }
-    const lastPayment = billingInfo?.last_payment as Record<string, unknown> | undefined;
+    const lastPayment = billingInfo?.last_payment as
+      | Record<string, unknown>
+      | undefined;
     if (lastPayment?.time) {
       const last = lastPayment.time;
       if (typeof last === 'string') return new Date(last);
       if (typeof last === 'number') return new Date(last * 1000);
     }
     const plan = subscription.plan as Record<string, unknown> | undefined;
-    const cycles = plan?.billing_cycles as Record<string, unknown>[] | undefined;
+    const cycles = plan?.billing_cycles as
+      | Record<string, unknown>[]
+      | undefined;
     const cycle = cycles?.[0] as Record<string, unknown> | undefined;
     if (cycle) {
-      const frequency = cycle.frequency as { interval_unit?: string; interval_count?: number } | undefined;
-      const months = frequency?.interval_unit === 'MONTH' ? (frequency?.interval_count ?? 1) : 1;
+      const frequency = cycle.frequency as
+        | { interval_unit?: string; interval_count?: number }
+        | undefined;
+      const months =
+        frequency?.interval_unit === 'MONTH'
+          ? (frequency?.interval_count ?? 1)
+          : 1;
       const end = new Date();
       end.setMonth(end.getMonth() + months);
       return end;

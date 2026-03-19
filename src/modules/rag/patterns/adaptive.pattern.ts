@@ -178,9 +178,7 @@ Respond with ONLY one of these three words: retrieve, parametric, or hybrid`;
         { useSystemPrompt: false },
       );
       const content =
-        typeof response === 'string'
-          ? response.toLowerCase().trim()
-          : 'hybrid';
+        typeof response === 'string' ? response.toLowerCase().trim() : 'hybrid';
 
       let decision: 'retrieve' | 'parametric' | 'hybrid' = 'hybrid';
       if (content.includes('retrieve')) decision = 'retrieve';
@@ -341,9 +339,7 @@ Final integrated answer:`;
         'amazon.nova-pro-v1:0',
         { useSystemPrompt: false },
       );
-      return typeof response === 'string'
-        ? response.trim()
-        : parametricAnswer;
+      return typeof response === 'string' ? response.trim() : parametricAnswer;
     } catch (error) {
       return parametricAnswer;
     }

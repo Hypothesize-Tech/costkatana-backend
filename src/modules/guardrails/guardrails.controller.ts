@@ -10,7 +10,7 @@ import {
   Req,
   HttpCode,
   HttpStatus,
-  HttpException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { GuardrailsService } from './guardrails.service';
 import { SubscriptionService } from '../subscription/subscription.service';
@@ -322,20 +322,14 @@ export class GuardrailsController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: SimulateUsageDto,
   ) {
-    const userId = req.user?.id ?? req.user?._id ?? req.userId;
-    if (
-      (req.user as { role?: string })?.role !== 'admin' ||
-      process.env.NODE_ENV === 'production'
-    ) {
-      throw new HttpException(
-        {
-          statusCode: 503,
-          error: 'Service Unavailable',
-          message:
-            'Usage simulation is not available in production. This endpoint is for development and testing only.',
-        },
-        503,
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException(
+        'Usage simulation is disabled in production. This endpoint is for development and testing only.',
       );
+    }
+    const userId = req.user?.id ?? req.user?._id ?? req.userId;
+    if ((req.user as { role?: string })?.role !== 'admin') {
+      throw new ForbiddenException('Admin role required for usage simulation');
     }
     const targetUserId = dto.userId ?? userId;
     if (!targetUserId) {

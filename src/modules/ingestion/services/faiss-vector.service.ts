@@ -49,9 +49,9 @@ export const USER_INDEX_SOURCES: VectorSource[] = [
 export const FAISS_SENTINEL_MARKER = '_faiss_sentinel' as const;
 
 /** Check if a document is the FAISS init sentinel (must be filtered from search results). Supports legacy _dummy marker. */
-export function isFaissSentinelDocument(
-  doc: { metadata?: Record<string, unknown> },
-): boolean {
+export function isFaissSentinelDocument(doc: {
+  metadata?: Record<string, unknown>;
+}): boolean {
   const m = doc.metadata;
   return m?.[FAISS_SENTINEL_MARKER] === true || m?._dummy === true;
 }

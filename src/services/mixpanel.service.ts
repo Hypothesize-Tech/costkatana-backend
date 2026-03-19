@@ -14,22 +14,44 @@ export function setMixpanelInstance(instance: MixpanelServiceType): void {
 
 const noop = () => {};
 export const mixpanelService = {
-  track: (event: string, props?: Record<string, unknown>, distinctId?: string) =>
-    _mixpanelInstance ? _mixpanelInstance.track(event, props, distinctId) : noop(),
+  track: (
+    event: string,
+    props?: Record<string, unknown>,
+    distinctId?: string,
+  ) =>
+    _mixpanelInstance
+      ? _mixpanelInstance.track(event, props, distinctId)
+      : noop(),
   trackAnalyticsEvent: (event: string, data?: Record<string, unknown>) =>
-    _mixpanelInstance ? _mixpanelInstance.trackAnalyticsEvent(event, data) : noop(),
-  trackFeatureUsage: (a: string | Record<string, unknown>, b?: Record<string, unknown>) =>
-    _mixpanelInstance ? _mixpanelInstance.trackFeatureUsage(a, b) : noop(),
-  trackAuthEvent: (a: string | Record<string, unknown>, b?: Record<string, unknown>) =>
-    _mixpanelInstance ? _mixpanelInstance.trackAuthEvent(a, b) : noop(),
-  trackProjectEvent: (a: string | Record<string, unknown>, b?: Record<string, unknown>) =>
-    _mixpanelInstance ? _mixpanelInstance.trackProjectEvent(a, b) : noop(),
-  trackOptimization: (a: string | Record<string, unknown>, b?: Record<string, unknown>) =>
-    _mixpanelInstance ? _mixpanelInstance.trackOptimization(a, b) : noop(),
+    _mixpanelInstance
+      ? _mixpanelInstance.trackAnalyticsEvent(event, data)
+      : noop(),
+  trackFeatureUsage: (
+    a: string | Record<string, unknown>,
+    b?: Record<string, unknown>,
+  ) => (_mixpanelInstance ? _mixpanelInstance.trackFeatureUsage(a, b) : noop()),
+  trackAuthEvent: (
+    a: string | Record<string, unknown>,
+    b?: Record<string, unknown>,
+  ) => (_mixpanelInstance ? _mixpanelInstance.trackAuthEvent(a, b) : noop()),
+  trackProjectEvent: (
+    a: string | Record<string, unknown>,
+    b?: Record<string, unknown>,
+  ) => (_mixpanelInstance ? _mixpanelInstance.trackProjectEvent(a, b) : noop()),
+  trackOptimization: (
+    a: string | Record<string, unknown>,
+    b?: Record<string, unknown>,
+  ) => (_mixpanelInstance ? _mixpanelInstance.trackOptimization(a, b) : noop()),
   setUserProfile: (userId: string, props?: Record<string, unknown>) =>
-    _mixpanelInstance ? _mixpanelInstance.setUserProfile(userId, props) : noop(),
-  trackError: (a: string | Record<string, unknown>, b?: Record<string, unknown>) =>
-    _mixpanelInstance ? _mixpanelInstance.trackError(a, b) : noop(),
-  trackPerformance: (a: string | Record<string, unknown>, b?: Record<string, unknown>) =>
-    _mixpanelInstance ? _mixpanelInstance.trackPerformance(a, b) : noop(),
+    _mixpanelInstance
+      ? _mixpanelInstance.setUserProfile(userId, props)
+      : noop(),
+  trackError: (
+    a: string | Record<string, unknown>,
+    b?: Record<string, unknown>,
+  ) => (_mixpanelInstance ? _mixpanelInstance.trackError(a, b) : noop()),
+  trackPerformance: (
+    a: string | Record<string, unknown>,
+    b?: Record<string, unknown>,
+  ) => (_mixpanelInstance ? _mixpanelInstance.trackPerformance(a, b) : noop()),
 };

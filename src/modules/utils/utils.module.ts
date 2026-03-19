@@ -37,14 +37,13 @@ import {
 } from '../../schemas/core/optimization.schema';
 import { MongooseModule } from '@nestjs/mongoose';
 import { HttpModule } from '@nestjs/axios';
-import { GatewayModule } from '../gateway/gateway.module';
 import { AuthModule } from '../auth/auth.module';
 import { StorageModule } from '../storage/storage.module';
 
 @Module({
   imports: [
     HttpModule,
-    forwardRef(() => GatewayModule), // For GatewayAnalyticsService (circular dependency)
+    forwardRef(() => require('../gateway/gateway.module').GatewayModule), // Lazy require breaks cycle
     AuthModule,
     StorageModule, // TextExtractionService depends on StorageService
     MongooseModule.forFeature([

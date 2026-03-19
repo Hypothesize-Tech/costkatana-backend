@@ -27,17 +27,17 @@ const DEFAULT_COST_DOMAINS = [
 function getCostDomains(): string[] {
   const env = process.env.SEARCH_COST_DOMAINS;
   if (env && env.trim()) {
-    return env.split(',').map((d) => d.trim()).filter(Boolean);
+    return env
+      .split(',')
+      .map((d) => d.trim())
+      .filter(Boolean);
   }
   return DEFAULT_COST_DOMAINS;
 }
 
 export const SEARCH_CONFIG = {
   // Cache configuration (env: SEARCH_CACHE_TTL)
-  CACHE_TTL: parseInt(
-    process.env.SEARCH_CACHE_TTL ?? '3600',
-    10,
-  ) as number,
+  CACHE_TTL: parseInt(process.env.SEARCH_CACHE_TTL ?? '3600', 10) as number,
 
   // Search limits (env: SEARCH_MAX_RESULTS, SEARCH_DAILY_QUOTA_LIMIT, SEARCH_DEEP_CONTENT_PAGES)
   MAX_RESULTS: parseInt(process.env.SEARCH_MAX_RESULTS ?? '10', 10) as number,
@@ -55,8 +55,7 @@ export const SEARCH_CONFIG = {
 
   // API configuration (env: SEARCH_API_URL)
   GOOGLE_SEARCH_API_URL:
-    process.env.SEARCH_API_URL ??
-    'https://www.googleapis.com/customsearch/v1',
+    process.env.SEARCH_API_URL ?? 'https://www.googleapis.com/customsearch/v1',
 
   // Quota tracking (env: SEARCH_QUOTA_WARNING_THRESHOLD, SEARCH_QUOTA_BLOCK_THRESHOLD)
   QUOTA_WARNING_THRESHOLD: parseFloat(

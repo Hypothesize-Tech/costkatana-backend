@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Usage, UsageDocument } from '@/schemas/core/usage.schema';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 interface PerformanceMetrics {
   timestamp: Date;
@@ -624,7 +625,7 @@ export class PerformanceMonitoringService extends EventEmitter2 {
     threshold: number,
   ): AnomalyAlert {
     return {
-      id: `alert_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: generateSecureId('alert'),
       type,
       severity,
       message,

@@ -553,7 +553,8 @@ Your capabilities:
             description: `Fetch the user's AI spending and usage analytics. Use for cost, spending, usage, breakdown, or analytics queries. Input must be JSON: {"userId":"<user_id>","timeRange":"this month"|"last week"|"last 30 days"|"yesterday"|"all time"}. Use userId from context and timeRange from user's natural language.`,
             func: async (input: string): Promise<string> => {
               try {
-                const raw = typeof input === 'string' ? JSON.parse(input) : input;
+                const raw =
+                  typeof input === 'string' ? JSON.parse(input) : input;
                 const parsed = GetUserAnalyticsInputSchema.safeParse(raw);
                 if (!parsed.success) {
                   return JSON.stringify({
@@ -1812,9 +1813,7 @@ Return ONLY the JSON array, no other text.`);
         }
       }
 
-      actions = actions
-        .sort((a, b) => b.priority - a.priority)
-        .slice(0, 5);
+      actions = actions.sort((a, b) => b.priority - a.priority).slice(0, 5);
 
       this.logger.log('AI determined autonomous actions', {
         actionCount: actions.length,
@@ -2040,8 +2039,9 @@ Format as JSON array of objects with: model, cost_per_token, quality_score, use_
               try {
                 const parsed = JSON.parse(recMatch[0]);
                 const result = ModelRecommendationsSchema.safeParse(parsed);
-                recommendations =
-                  result.success ? result.data : recommendations;
+                recommendations = result.success
+                  ? result.data
+                  : recommendations;
               } catch {
                 // Use fallback recommendations
               }
@@ -2236,7 +2236,9 @@ Return ONLY a JSON array of predicted needs as strings.`);
     return optionKeywords.some((keyword) => lowerQuestion.includes(keyword));
   }
 
-  private parseOptionsFromResponse(content: string): z.infer<typeof StrategicOptionsSchema> {
+  private parseOptionsFromResponse(
+    content: string,
+  ): z.infer<typeof StrategicOptionsSchema> {
     try {
       const parsed = JSON.parse(content);
       const result = StrategicOptionsSchema.safeParse(

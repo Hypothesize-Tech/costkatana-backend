@@ -23,6 +23,7 @@ import { User } from '../../schemas/user/user.schema';
 import { Usage } from '../../schemas/core/usage.schema';
 import { Activity } from '../../schemas/logging/activity.schema';
 import { Alert } from '../../schemas/core/alert.schema';
+import { generateSecureId } from '../../common/utils/secure-id.util';
 
 // 🚀 NEW CORTEX IMPORTS - ADVANCED STREAMING
 import { CortexCoreService } from '../cortex/services/cortex-core.service';
@@ -274,7 +275,7 @@ export class OptimizationService implements OnModuleDestroy {
     const startTime = Date.now();
 
     // 🎯 Initialize training data collection (fire-and-forget)
-    const sessionId = `cortex_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const sessionId = generateSecureId('cortex');
     const trainingCollector = this.cortexTrainingDataCollector as any;
 
     trainingCollector.startSession?.(sessionId, userId, originalPrompt, {
@@ -3043,9 +3044,9 @@ REPLY FORMAT (JSON only):
 
   /**
    * Get the complete optimization configuration, with documentation for each option.
-   * In a real implementation, this would retrieve configuration from persistent storage.
+   * When userId is provided, fetches user-specific overrides from User.optimizationConfig and merges with defaults.
    */
-  async getOptimizationConfig(): Promise<any> {
+  async getOptimizationConfig(userId?: string): Promise<any> {
     // Default config object with complete keys, explanations, and options
     const defaultConfig = {
       enabledTechniques: process.env.ENABLED_OPTIMIZATION_TECHNIQUES?.split(
@@ -3116,7 +3117,43 @@ REPLY FORMAT (JSON only):
       },
     };
 
+    if (userId) {
+      const user = await this.userModel
+        .findById(userId)
+        .select('optimizationConfig')
+        .lean();
+      const stored = (user as any)?.optimizationConfig;
+      if (stored && typeof stored === 'object') {
+        return this.deepMergeConfig(defaultConfig, stored);
+      }
+    }
+
     return defaultConfig;
+  }
+
+  /**
+   * Deep merge user config overrides into default config
+   */
+  private deepMergeConfig(
+    defaultConfig: Record<string, any>,
+    overrides: Record<string, any>,
+  ): Record<string, any> {
+    const result = { ...defaultConfig };
+    for (const key of Object.keys(overrides)) {
+      if (
+        overrides[key] !== undefined &&
+        typeof overrides[key] === 'object' &&
+        !Array.isArray(overrides[key]) &&
+        defaultConfig[key] &&
+        typeof defaultConfig[key] === 'object' &&
+        !Array.isArray(defaultConfig[key])
+      ) {
+        result[key] = this.deepMergeConfig(defaultConfig[key], overrides[key]);
+      } else if (overrides[key] !== undefined) {
+        result[key] = overrides[key];
+      }
+    }
+    return result;
   }
 
   /**

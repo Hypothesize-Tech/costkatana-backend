@@ -715,27 +715,24 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
           },
         );
         await new Promise<void>((resolve, reject) => {
-          this.exporter.export(
-            reconstructedSpans,
-            (result) => {
-              if (result.code === 0) {
-                loggingService.info('Recovered spans exported successfully', {
+          this.exporter.export(reconstructedSpans, (result) => {
+            if (result.code === 0) {
+              loggingService.info('Recovered spans exported successfully', {
+                component: 'SelfHealingSpanProcessor',
+                operation: 'loadBufferFromRedis',
+                spanCount: reconstructedSpans.length,
+              });
+            } else {
+              loggingService.warn(
+                'Recovered span export completed with errors',
+                {
                   component: 'SelfHealingSpanProcessor',
-                  operation: 'loadBufferFromRedis',
-                  spanCount: reconstructedSpans.length,
-                });
-              } else {
-                loggingService.warn(
-                  'Recovered span export completed with errors',
-                  {
-                    component: 'SelfHealingSpanProcessor',
-                    error: result.error?.message,
-                  },
-                );
-              }
-              resolve();
-            },
-          );
+                  error: result.error?.message,
+                },
+              );
+            }
+            resolve();
+          });
         });
       }
 

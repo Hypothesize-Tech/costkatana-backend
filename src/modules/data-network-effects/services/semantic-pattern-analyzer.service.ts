@@ -470,11 +470,9 @@ export class SemanticPatternAnalyzerService {
     const category = this.determineCategory(keywords);
 
     // Cost analysis with real cache stats from Usage
-    const cacheStats = await this.getCacheStatsForWindow(
-      startDate,
-      endDate,
-      [...new Set(dataPoints.map((p) => p.userId).filter(Boolean))],
-    );
+    const cacheStats = await this.getCacheStatsForWindow(startDate, endDate, [
+      ...new Set(dataPoints.map((p) => p.userId).filter(Boolean)),
+    ]);
     const costAnalysis = this.calculateCostAnalysis(dataPoints, cacheStats);
 
     // Performance analysis
@@ -725,9 +723,7 @@ export class SemanticPatternAnalyzerService {
     const cacheCosts = cacheStats?.cacheCosts ?? 0;
 
     const potentialSavingsWithCache =
-      cacheCosts > 0
-        ? cacheCosts
-        : totalCost * (1 - cacheHitRate) * 0.1; // 10% savings with better caching when no cache data
+      cacheCosts > 0 ? cacheCosts : totalCost * (1 - cacheHitRate) * 0.1; // 10% savings with better caching when no cache data
     const potentialSavingsWithCheaperModel = Math.max(
       0,
       totalCost - totalCost * 0.7,

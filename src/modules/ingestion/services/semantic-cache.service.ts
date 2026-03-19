@@ -463,7 +463,6 @@ export class SemanticCacheService {
     return embedding;
   }
 
-
   /**
    * Generates a hash for exact matching (for cache keys)
    */

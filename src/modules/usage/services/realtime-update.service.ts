@@ -365,7 +365,9 @@ export class RealtimeUpdateService implements OnModuleDestroy {
   /**
    * Rate limit: at most one proactive suggestion per user per hour
    */
-  private async shouldEmitProactiveSuggestion(userId: string): Promise<boolean> {
+  private async shouldEmitProactiveSuggestion(
+    userId: string,
+  ): Promise<boolean> {
     const key = `proactive_suggestion:${userId}`;
     try {
       const lastEmitted = await this.cacheService.get<string>(key);

@@ -200,7 +200,9 @@ export class TelemetryQueryService implements OnModuleInit {
   }
 
   /**
-   * Query telemetry spans with circuit breaker protection
+   * Query telemetry spans with circuit breaker protection.
+   * When service_dependency has both sourceService and targetService, uses an
+   * aggregation pipeline to trace calls from source to target via parent_span_id.
    */
   async queryTelemetry(query: TelemetryQueryDto): Promise<{
     spans: TelemetrySpan[];
@@ -215,6 +217,21 @@ export class TelemetryQueryService implements OnModuleInit {
       if (this.isDbCircuitBreakerOpen()) {
         throw new ServiceUnavailableException(
           'Database circuit breaker is open',
+        );
+      }
+
+      const sd = query.service_dependency;
+      const sourceService =
+        sd?.sourceService ?? sd?.source_service ?? undefined;
+      const targetService =
+        sd?.targetService ?? sd?.target_service ?? undefined;
+
+      if (sourceService && targetService) {
+        return this.queryTelemetryWithServiceDependency(
+          query,
+          sourceService,
+          targetService,
+          startTime,
         );
       }
 
@@ -275,6 +292,113 @@ export class TelemetryQueryService implements OnModuleInit {
       });
       throw error;
     }
+  }
+
+  /**
+   * Query spans that represent calls from sourceService to targetService
+   * via parent_span_id linkage (distributed trace cross-service).
+   */
+  private async queryTelemetryWithServiceDependency(
+    query: TelemetryQueryDto,
+    sourceService: string,
+    targetService: string,
+    startTime: number,
+  ): Promise<{
+    spans: TelemetrySpan[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const limit = Math.min(query.limit || 100, 1000);
+    const page = query.page || 1;
+    const skip = (page - 1) * limit;
+
+    const sortField = query.sort_by || 'start_time';
+    const sortOrder = query.sort_order === 'asc' ? 1 : -1;
+
+    const pipeline: PipelineStage[] = [
+      {
+        $match: {
+          service_name: targetService,
+          ...(query.tenant_id && { tenant_id: query.tenant_id }),
+          ...(query.workspace_id && { workspace_id: query.workspace_id }),
+          ...(query.user_id && { user_id: query.user_id }),
+          ...(query.start_time && {
+            start_time: { $gte: new Date(query.start_time) },
+          }),
+          ...(query.end_time && {
+            end_time: { $lte: new Date(query.end_time) },
+          }),
+          parent_span_id: { $exists: true, $ne: null, $ne: '' },
+        },
+      },
+      {
+        $lookup: {
+          from: 'telemetries',
+          let: {
+            tid: '$trace_id',
+            pid: '$parent_span_id',
+          },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$trace_id', '$$tid'] },
+                    { $eq: ['$span_id', '$$pid'] },
+                    { $eq: ['$service_name', sourceService] },
+                  ],
+                },
+              },
+            },
+            { $limit: 1 },
+          ],
+          as: 'parentSpan',
+        },
+      },
+      { $match: { 'parentSpan.0': { $exists: true } } },
+      {
+        $facet: {
+          total: [{ $count: 'count' }],
+          docs: [
+            { $sort: { [sortField]: sortOrder } },
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                parentSpan: 0,
+              },
+            },
+          ],
+        },
+      },
+      {
+        $project: {
+          total: { $ifNull: [{ $arrayElemAt: ['$total.count', 0] }, 0] },
+          docs: 1,
+        },
+      },
+    ];
+
+    const result = await this.telemetryModel.aggregate(pipeline).exec();
+    const total = result[0]?.total ?? 0;
+    const docs = result[0]?.docs ?? [];
+
+    this.dbFailureCount = 0;
+    this.logger.debug('Cross-service dependency query executed', {
+      sourceService,
+      targetService,
+      total,
+      returned: docs.length,
+      duration: Date.now() - startTime,
+    });
+
+    return {
+      spans: docs as unknown as TelemetrySpan[],
+      total,
+      page,
+      limit,
+    };
   }
 
   /**
@@ -1826,21 +1950,28 @@ export class TelemetryQueryService implements OnModuleInit {
     this.filterBuilders.set(
       'time_range',
       (range: { start: string; end: string; timezone?: string }) => {
+        let startDate: Date;
+        let endDate: Date;
+
+        if (range.timezone) {
+          const { startUTC, endUTC } = this.applyTimezoneToDateRange(
+            range.start,
+            range.end,
+            range.timezone,
+          );
+          startDate = startUTC;
+          endDate = endUTC;
+        } else {
+          startDate = new Date(range.start);
+          endDate = new Date(range.end);
+        }
+
         const filter: any = {
           start_time: {
-            $gte: new Date(range.start),
-            $lte: new Date(range.end),
+            $gte: startDate,
+            $lte: endDate,
           },
         };
-
-        // Note: For full timezone support, you'd need to convert dates based on timezone
-        // This is a simplified version
-        if (range.timezone) {
-          // Could implement timezone offset logic here
-          this.logger.debug('Timezone specified but not fully implemented', {
-            timezone: range.timezone,
-          });
-        }
 
         return filter;
       },
@@ -1887,37 +2018,35 @@ export class TelemetryQueryService implements OnModuleInit {
       },
     );
 
-    // Service dependency filters
+    // Service dependency filters.
+    // When both sourceService and targetService are provided, queryTelemetry
+    // uses an aggregation pipeline (parent_span_id linkage) instead of this filter.
     this.filterBuilders.set(
       'service_dependency',
       (params: {
         sourceService?: string;
         targetService?: string;
+        source_service?: string;
+        target_service?: string;
         excludeSelf?: boolean;
       }) => {
-        const conditions: any[] = [];
+        const source =
+          params.sourceService ?? params.source_service ?? undefined;
+        const target =
+          params.targetService ?? params.target_service ?? undefined;
 
-        if (params.sourceService) {
-          conditions.push({ service_name: params.sourceService });
+        if (source && target) {
+          return {}; // Handled by aggregation in queryTelemetry
         }
-
-        if (params.targetService) {
-          // Future enhancement: Use aggregation pipeline to trace cross-service calls
-          // For now, filter by service name for basic telemetry queries
-          conditions.push({ service_name: params.targetService });
-        }
-
+        if (source) return { service_name: source };
+        if (target) return { service_name: target };
         if (
           params.excludeSelf &&
-          params.sourceService &&
-          params.targetService
+          (source || target)
         ) {
-          conditions.push({ service_name: { $ne: params.sourceService } });
+          return { service_name: { $ne: source ?? target } };
         }
-
-        return conditions.length > 1
-          ? { $and: conditions }
-          : conditions[0] || {};
+        return {};
       },
     );
 
@@ -1948,13 +2077,34 @@ export class TelemetryQueryService implements OnModuleInit {
         }
 
         if (params.should && params.should.length > 0) {
-          filter.$or = params.should;
-          if (params.minimum_should_match !== undefined) {
-            // Note: MongoDB doesn't have minimum_should_match like Elasticsearch
-            // This would require more complex aggregation logic
-            this.logger.debug(
-              'minimum_should_match specified but not fully implemented',
-            );
+          const minMatch = params.minimum_should_match;
+          if (
+            minMatch !== undefined &&
+            minMatch > 0 &&
+            minMatch <= params.should.length
+          ) {
+            const matchExprs = params.should
+              .map((clause) => this.clauseToMatchExpr(clause))
+              .filter((e): e is object => e !== null);
+            if (matchExprs.length === params.should.length) {
+              filter.$expr = {
+                $gte: [
+                  {
+                    $add: matchExprs.map((expr) => ({
+                      $cond: [expr, 1, 0],
+                    })),
+                  },
+                  minMatch,
+                ],
+              };
+            } else {
+              filter.$or = params.should;
+              this.logger.debug(
+                'minimum_should_match: some clauses could not be converted to $expr, using plain $or',
+              );
+            }
+          } else {
+            filter.$or = params.should;
           }
         }
 
@@ -1965,6 +2115,105 @@ export class TelemetryQueryService implements OnModuleInit {
         return filter;
       },
     );
+  }
+
+  /**
+   * Convert a simple MongoDB query clause to a $expr-compatible match expression.
+   * Supports: { field: value }, { field: { $eq, $ne, $in, $nin, $gt, $gte, $lt, $lte } }
+   * Returns null if the clause cannot be converted.
+   */
+  private clauseToMatchExpr(clause: any): object | null {
+    if (clause == null || typeof clause !== 'object') return null;
+    const keys = Object.keys(clause);
+    if (keys.length === 0) return null;
+    if (keys.length === 1) {
+      const field = keys[0];
+      const val = clause[field];
+      if (field.startsWith('$')) return null;
+      const path = `$${field}`;
+      if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+        const op = Object.keys(val)[0];
+        const opVal = val[op];
+        if (op === '$eq') return { $eq: [path, opVal] } as any;
+        if (op === '$ne') return { $ne: [path, opVal] } as any;
+        if (op === '$in') return { $in: [path, opVal] } as any;
+        if (op === '$nin') return { $nin: [path, opVal] } as any;
+        if (op === '$gt') return { $gt: [path, opVal] } as any;
+        if (op === '$gte') return { $gte: [path, opVal] } as any;
+        if (op === '$lt') return { $lt: [path, opVal] } as any;
+        if (op === '$lte') return { $lte: [path, opVal] } as any;
+        if (op === '$exists')
+          return opVal ? { $ne: [path, null] } : ({ $eq: [path, null] } as any);
+        return null;
+      }
+      return { $eq: [path, val] } as any;
+    }
+    const andParts = keys.map((k) =>
+      this.clauseToMatchExpr({ [k]: clause[k] }),
+    );
+    if (andParts.some((p) => p === null)) return null;
+    return { $and: andParts } as any;
+  }
+
+  /**
+   * Convert date range from IANA timezone-local times to UTC for MongoDB queries.
+   * Interprets range.start and range.end as local times in the specified timezone.
+   */
+  private applyTimezoneToDateRange(
+    startStr: string,
+    endStr: string,
+    ianaTimezone: string,
+  ): { startUTC: Date; endUTC: Date } {
+    const startDate = new Date(startStr);
+    const endDate = new Date(endStr);
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return { startUTC: startDate, endUTC: endDate };
+    }
+
+    const getOffsetMinutes = (utcDate: Date, tz: string): number => {
+      try {
+        const formatted = new Intl.DateTimeFormat('en-CA', {
+          timeZone: tz,
+          timeZoneName: 'shortOffset',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+        }).format(utcDate);
+        const match = formatted.match(/GMT([+-])(\d{1,2})(?::(\d{2})?)?/);
+        if (match) {
+          const sign = match[1] === '+' ? 1 : -1;
+          const h = parseInt(match[2], 10);
+          const m = parseInt(match[3] ?? '0', 10);
+          return sign * (h * 60 + m);
+        }
+      } catch {
+        // Invalid timezone
+      }
+      return 0;
+    };
+
+    const toUTC = (date: Date, tz: string): Date => {
+      const y = date.getUTCFullYear();
+      const mo = date.getUTCMonth();
+      const d = date.getUTCDate();
+      const h = date.getUTCHours();
+      const mi = date.getUTCMinutes();
+      const s = date.getUTCSeconds();
+      const utcGuess = Date.UTC(y, mo, d, h, mi, s);
+      const offsetMin = getOffsetMinutes(new Date(utcGuess), tz);
+      return new Date(utcGuess - offsetMin * 60 * 1000);
+    };
+
+    const startUTC = toUTC(startDate, ianaTimezone);
+    let endUTC = toUTC(endDate, ianaTimezone);
+    if (endUTC.getTime() <= startUTC.getTime()) {
+      endUTC = new Date(startUTC.getTime() + 24 * 60 * 60 * 1000);
+    }
+    return { startUTC, endUTC };
   }
 
   /**
