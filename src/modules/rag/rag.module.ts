@@ -54,13 +54,8 @@ const ragRedisLogger = new Logger('RagModule');
 const RAG_MOCK_REDIS_MAX_ENTRIES = 10_000;
 const RAG_MOCK_REDIS_TTL_MS = 3600_000; // 1 hour
 
-/** In-memory mock Redis for when Redis is unavailable (get/set/del only). Only allowed in test env. */
+/** In-memory mock Redis for when Redis is unavailable (get/set/del only). Used as fallback in all envs when Redis fails. */
 function createMockRagRedis(): Redis {
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'Mock Redis cannot be used in production. Redis is required for RAG memory.',
-    );
-  }
   const map = new Map<string, string>();
   const expiryMap = new Map<string, number>();
 
@@ -125,21 +120,13 @@ function createMockRagRedis(): Redis {
     ]),
   ],
   providers: [
-    // Redis client for MemoryModule (conversation memory). If Redis disabled or config fails, use in-memory mock.
+    // Redis client for MemoryModule (conversation memory). If Redis disabled or connection fails, use in-memory fallback.
     {
       provide: 'REDIS_CLIENT',
       useFactory: async (): Promise<Redis> => {
-        const isProduction = process.env.NODE_ENV === 'production';
-
         if (!isRedisEnabled()) {
-          if (isProduction) {
-            throw new Error(
-              'Redis is required in production for RAG memory. ' +
-                'Set REDIS_ENABLED=true and configure REDIS_HOST, REDIS_URL, or ELASTICACHE_URL.',
-            );
-          }
           ragRedisLogger.log(
-            'Redis disabled - RAG memory using in-memory fallback (dev only)',
+            'Redis disabled - RAG memory using in-memory fallback',
           );
           return createMockRagRedis();
         }
@@ -157,12 +144,6 @@ function createMockRagRedis(): Redis {
           return client;
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
-          if (isProduction) {
-            throw new Error(
-              `Redis is required in production for RAG memory. Connection failed: ${msg}. ` +
-                'Configure REDIS_HOST, REDIS_URL, or ELASTICACHE_URL.',
-            );
-          }
           ragRedisLogger.warn(
             `Redis unavailable for RAG memory, using in-memory fallback: ${msg}`,
           );
