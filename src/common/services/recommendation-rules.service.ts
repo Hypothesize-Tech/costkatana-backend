@@ -6,7 +6,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CacheService } from '../cache/cache.service';
 
-const RECOMMENDATIONS_COUNTER_KEY = 'recommendation_rules:recommendations_generated';
+const RECOMMENDATIONS_COUNTER_KEY =
+  'recommendation_rules:recommendations_generated';
 const COUNTER_TTL_YEARS = 10; // Persistent counter - long TTL
 
 export interface SmartRecommendation {
@@ -133,11 +134,17 @@ export class RecommendationRulesService {
     return sorted;
   }
 
-  private async incrementRecommendationsGenerated(delta: number): Promise<void> {
+  private async incrementRecommendationsGenerated(
+    delta: number,
+  ): Promise<void> {
     const ttl = COUNTER_TTL_YEARS * 365 * 24 * 60 * 60;
     const current =
       (await this.cacheService.get<number>(RECOMMENDATIONS_COUNTER_KEY)) ?? 0;
-    await this.cacheService.set(RECOMMENDATIONS_COUNTER_KEY, current + delta, ttl);
+    await this.cacheService.set(
+      RECOMMENDATIONS_COUNTER_KEY,
+      current + delta,
+      ttl,
+    );
   }
 
   /**

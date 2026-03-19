@@ -63,7 +63,9 @@ export class RoiCalculatorService {
   calculate(input: RoiCalculatorInput): RoiCalculatorOutput {
     const avgSalary = AVG_SALARY_BY_SIZE[input.companySize] ?? 95000;
     const hourlyRate = hourlyRateFromSalary(avgSalary);
-    const monthlyAICost = this.estimateMonthlyAICost(input.implementationBudget);
+    const monthlyAICost = this.estimateMonthlyAICost(
+      input.implementationBudget,
+    );
     const timeHorizon = input.timeHorizonMonths;
     const totalInvestment =
       input.implementationBudget + monthlyAICost * timeHorizon;
@@ -93,20 +95,30 @@ export class RoiCalculatorService {
       const costRedMod = (bench.costReductionPercent / 100) * multMod;
       const costRedOpt = (bench.costReductionPercent / 100) * multOpt;
 
-      const laborSavingsCons = uc.currentHeadcount * avgSalary * efficiencyCons * (timeHorizon / 12);
-      const laborSavingsMod = uc.currentHeadcount * avgSalary * efficiencyMod * (timeHorizon / 12);
-      const laborSavingsOpt = uc.currentHeadcount * avgSalary * efficiencyOpt * (timeHorizon / 12);
+      const laborSavingsCons =
+        uc.currentHeadcount * avgSalary * efficiencyCons * (timeHorizon / 12);
+      const laborSavingsMod =
+        uc.currentHeadcount * avgSalary * efficiencyMod * (timeHorizon / 12);
+      const laborSavingsOpt =
+        uc.currentHeadcount * avgSalary * efficiencyOpt * (timeHorizon / 12);
 
-      const costAvoidanceCons = uc.currentCostPerMonth * costRedCons * timeHorizon;
-      const costAvoidanceMod = uc.currentCostPerMonth * costRedMod * timeHorizon;
-      const costAvoidanceOpt = uc.currentCostPerMonth * costRedOpt * timeHorizon;
+      const costAvoidanceCons =
+        uc.currentCostPerMonth * costRedCons * timeHorizon;
+      const costAvoidanceMod =
+        uc.currentCostPerMonth * costRedMod * timeHorizon;
+      const costAvoidanceOpt =
+        uc.currentCostPerMonth * costRedOpt * timeHorizon;
 
       const hoursPerMonth = (uc.hoursPerWeekSpent * 52) / 12;
-      const productivityGainCons = hoursPerMonth * timeHorizon * hourlyRate * efficiencyCons;
-      const productivityGainMod = hoursPerMonth * timeHorizon * hourlyRate * efficiencyMod;
-      const productivityGainOpt = hoursPerMonth * timeHorizon * hourlyRate * efficiencyOpt;
+      const productivityGainCons =
+        hoursPerMonth * timeHorizon * hourlyRate * efficiencyCons;
+      const productivityGainMod =
+        hoursPerMonth * timeHorizon * hourlyRate * efficiencyMod;
+      const productivityGainOpt =
+        hoursPerMonth * timeHorizon * hourlyRate * efficiencyOpt;
 
-      const totalCons = laborSavingsCons + costAvoidanceCons + productivityGainCons;
+      const totalCons =
+        laborSavingsCons + costAvoidanceCons + productivityGainCons;
       const totalMod = laborSavingsMod + costAvoidanceMod + productivityGainMod;
       const totalOpt = laborSavingsOpt + costAvoidanceOpt + productivityGainOpt;
 
@@ -143,8 +155,13 @@ export class RoiCalculatorService {
           ? ((s.totalBenefit - totalInvestment) / totalInvestment) * 100
           : 0;
       s.paybackPeriodMonths =
-        s.totalBenefit > 0 ? totalInvestment / (s.totalBenefit / timeHorizon) : Infinity;
-      s.threeYearSavings = this.extrapolateToThreeYears(s.totalBenefit, timeHorizon);
+        s.totalBenefit > 0
+          ? totalInvestment / (s.totalBenefit / timeHorizon)
+          : Infinity;
+      s.threeYearSavings = this.extrapolateToThreeYears(
+        s.totalBenefit,
+        timeHorizon,
+      );
       s.productivityHoursSaved = s.productivityGain / hourlyRate;
     }
 
@@ -176,7 +193,10 @@ export class RoiCalculatorService {
     };
   }
 
-  private extrapolateToThreeYears(benefitOverPeriod: number, months: number): number {
+  private extrapolateToThreeYears(
+    benefitOverPeriod: number,
+    months: number,
+  ): number {
     if (months <= 0) return 0;
     const monthlyBenefit = benefitOverPeriod / months;
     return monthlyBenefit * 36;

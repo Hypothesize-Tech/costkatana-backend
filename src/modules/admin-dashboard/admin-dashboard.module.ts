@@ -16,6 +16,10 @@ import {
   Subscription,
   SubscriptionSchema,
 } from '../../schemas/core/subscription.schema';
+import {
+  SubscriptionHistory,
+  SubscriptionHistorySchema,
+} from '../../schemas/billing/subscription-history.schema';
 import { ProxyKey, ProxyKeySchema } from '../../schemas/misc/proxy-key.schema';
 import {
   ScheduledReport,
@@ -86,6 +90,10 @@ import { AdminUserAnalyticsService } from '../analytics/admin-user-analytics.ser
       { name: Project.name, schema: ProjectSchema },
       { name: Workspace.name, schema: WorkspaceSchema },
       { name: Subscription.name, schema: SubscriptionSchema },
+      {
+        name: SubscriptionHistory.name,
+        schema: SubscriptionHistorySchema,
+      },
       { name: ProxyKey.name, schema: ProxyKeySchema },
       { name: ScheduledReport.name, schema: ScheduledReportSchema },
       { name: VectorizationJob.name, schema: VectorizationJobSchema },

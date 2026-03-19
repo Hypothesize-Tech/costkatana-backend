@@ -119,7 +119,10 @@ export class MongoDBMCP extends BaseIntegrationMCP {
     const cached = connectionPool.get(poolKey);
     if (cached && cached.connection.readyState === 1) {
       cached.lastUsed = Date.now();
-      return { connection: cached.connection, databaseName: cached.databaseName };
+      return {
+        connection: cached.connection,
+        databaseName: cached.databaseName,
+      };
     }
 
     if (cached) {
@@ -146,8 +149,7 @@ export class MongoDBMCP extends BaseIntegrationMCP {
       : (conn as any).connectionString;
 
     const databaseName =
-      (conn as any).database ??
-      conn.databaseAccess?.[0]?.name;
+      (conn as any).database ?? conn.databaseAccess?.[0]?.name;
 
     if (!databaseName) {
       throw new Error('Database name is not configured for this connection');

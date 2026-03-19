@@ -105,10 +105,7 @@ export class RagBenchmarkService {
 
         const latency = Date.now() - startTime;
 
-        const evaluationMetrics = await this.evaluateWithService(
-          query,
-          result,
-        );
+        const evaluationMetrics = await this.evaluateWithService(query, result);
 
         const benchmarkResult: BenchmarkResult = {
           pattern,
@@ -308,7 +305,9 @@ export class RagBenchmarkService {
       const evalResult = await this.ragEvaluationService.evaluate(
         query,
         Array.isArray(documents)
-          ? documents.map((d: any) => (typeof d === 'string' ? { pageContent: d } : d))
+          ? documents.map((d: any) =>
+              typeof d === 'string' ? { pageContent: d } : d,
+            )
           : [],
         result.answer,
       );
@@ -338,7 +337,10 @@ export class RagBenchmarkService {
     if (!result.answer) return undefined;
 
     const answer = result.answer.toLowerCase();
-    const queryWords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+    const queryWords = query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 3);
     const contextRelevance =
       queryWords.length > 0
         ? Math.min(

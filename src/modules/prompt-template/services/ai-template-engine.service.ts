@@ -848,9 +848,11 @@ Generate ${count} distinct alternatives as a JSON array.`;
         new HumanMessage(userPrompt),
       ]);
 
-      const text = typeof response.content === 'string'
-        ? response.content
-        : (response.content as any[])?.[0]?.text ?? String(response.content ?? '');
+      const text =
+        typeof response.content === 'string'
+          ? response.content
+          : ((response.content as any[])?.[0]?.text ??
+            String(response.content ?? ''));
       const raw = text.trim();
       let alternatives: any[];
       if (raw.startsWith('[')) {
@@ -1051,9 +1053,7 @@ Generate ${count} distinct alternatives as a JSON array.`;
         (sum, v, i) => sum + v * (queryEmb[i] ?? 0),
         0,
       );
-      const normA = Math.sqrt(
-        templateEmb.reduce((s, v) => s + v * v, 0),
-      );
+      const normA = Math.sqrt(templateEmb.reduce((s, v) => s + v * v, 0));
       const normB = Math.sqrt(queryEmb.reduce((s, v) => s + v * v, 0));
       const similarity = normA && normB ? dot / (normA * normB) : 0;
       return Math.max(0, Math.min(1, (similarity + 1) / 2)); // cosine to [0,1]

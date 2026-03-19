@@ -51,19 +51,54 @@ import {
 
 const ragRedisLogger = new Logger('RagModule');
 
+const RAG_MOCK_REDIS_MAX_ENTRIES = 10_000;
+const RAG_MOCK_REDIS_TTL_MS = 3600_000; // 1 hour
+
 /** In-memory mock Redis for when Redis is unavailable (get/set/del only). */
 function createMockRagRedis(): Redis {
   const map = new Map<string, string>();
+  const expiryMap = new Map<string, number>();
+
+  const evictIfNeeded = () => {
+    const now = Date.now();
+    for (const [k, exp] of Array.from(expiryMap.entries())) {
+      if (exp < now) {
+        map.delete(k);
+        expiryMap.delete(k);
+      }
+    }
+    while (map.size > RAG_MOCK_REDIS_MAX_ENTRIES && map.size > 0) {
+      const first = map.keys().next().value;
+      if (first) {
+        map.delete(first);
+        expiryMap.delete(first);
+      }
+    }
+  };
+
   return {
-    get: (key: string) => Promise.resolve(map.get(key) ?? null),
+    get: (key: string) => {
+      const exp = expiryMap.get(key);
+      if (exp !== undefined && exp < Date.now()) {
+        map.delete(key);
+        expiryMap.delete(key);
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(map.get(key) ?? null);
+    },
     set: (key: string, value: string) => {
       map.set(key, value);
+      expiryMap.set(key, Date.now() + RAG_MOCK_REDIS_TTL_MS);
+      evictIfNeeded();
       return Promise.resolve('OK');
     },
     del: (...keys: string[]) => {
       let n = 0;
       for (const k of keys) {
-        if (map.delete(k)) n++;
+        if (map.delete(k)) {
+          expiryMap.delete(k);
+          n++;
+        }
       }
       return Promise.resolve(n);
     },
@@ -89,9 +124,17 @@ function createMockRagRedis(): Redis {
     {
       provide: 'REDIS_CLIENT',
       useFactory: (): Redis => {
+        const isProduction = process.env.NODE_ENV === 'production';
+
         if (!isRedisEnabled()) {
+          if (isProduction) {
+            throw new Error(
+              'Redis is required in production for RAG memory. ' +
+                'Set REDIS_ENABLED=true and configure REDIS_HOST, REDIS_URL, or ELASTICACHE_URL.',
+            );
+          }
           ragRedisLogger.log(
-            'Redis disabled - RAG memory using in-memory fallback',
+            'Redis disabled - RAG memory using in-memory fallback (dev only)',
           );
           return createMockRagRedis();
         }
@@ -108,6 +151,12 @@ function createMockRagRedis(): Redis {
           return client;
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
+          if (isProduction) {
+            throw new Error(
+              `Redis is required in production for RAG memory. Connection failed: ${msg}. ` +
+                'Configure REDIS_HOST, REDIS_URL, or ELASTICACHE_URL.',
+            );
+          }
           ragRedisLogger.warn(
             `Redis unavailable for RAG memory, using in-memory fallback: ${msg}`,
           );

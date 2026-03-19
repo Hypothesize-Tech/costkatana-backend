@@ -612,9 +612,22 @@ export async function checkTelemetryHealth(): Promise<{
 }
 
 /**
- * Generate telemetry test data
+ * Generate telemetry test data. Synthetic spans are dev-only to avoid polluting production telemetry.
  */
 export async function generateTestTelemetry(): Promise<void> {
+  if (process.env.NODE_ENV === 'production') {
+    loggingService.debug(
+      'Skipping synthetic telemetry generation in production',
+      {
+        component: 'TelemetryValidator',
+        operation: 'generateTestTelemetry',
+        type: 'test_telemetry',
+        reason: 'Synthetic spans disabled in production',
+      },
+    );
+    return;
+  }
+
   const startTime = Date.now();
 
   loggingService.info('=== TEST TELEMETRY GENERATION STARTED ===', {

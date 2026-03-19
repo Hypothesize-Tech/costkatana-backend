@@ -364,10 +364,7 @@ export class RealtimePricingService implements OnModuleInit, OnModuleDestroy {
 
       const response = await ServiceHelper.withRetry(
         () =>
-          BedrockService.invokeModelDirectly(
-            'amazon.nova-lite-v1:0',
-            payload,
-          ),
+          BedrockService.invokeModelDirectly('amazon.nova-lite-v1:0', payload),
         {
           maxRetries: 3,
           delayMs: 1000,

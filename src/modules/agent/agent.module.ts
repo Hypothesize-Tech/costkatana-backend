@@ -16,7 +16,7 @@ import { MultiLlmOrchestratorService } from './services/multi-llm-orchestrator.s
 import { ToolRegistryService } from './services/tool-registry.service';
 import { McpToolSyncerService } from './services/mcp-tool-syncer.service';
 import { VercelToolsService } from './services/vercel-tools.service';
-import { MultiAgentFlowService } from './services/multi-agent-flow.service';
+import { AgentMultiAgentFlowService } from './services/multi-agent-flow.service';
 
 // Tools
 import { KnowledgeBaseToolService } from './tools/knowledge-base.tool';
@@ -118,7 +118,7 @@ import {
     ToolRegistryService,
     McpToolSyncerService,
     VercelToolsService,
-    MultiAgentFlowService,
+    AgentMultiAgentFlowService,
 
     // Agent tools (all 12)
     KnowledgeBaseToolService,

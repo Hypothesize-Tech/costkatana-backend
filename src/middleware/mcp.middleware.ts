@@ -670,28 +670,22 @@ class MCPConnectionMonitor {
         }
       }
 
-      loggingService.debug(
-        'Active MCP connections retrieved from Redis',
-        {
-          component: 'MCPConnectionMonitor',
-          operation: 'getActiveConnections',
-          type: 'mcp_connections_retrieval',
-          step: 'retrieval_completed',
-          count: result.size,
-          totalTime: `${Date.now() - startTime}ms`,
-        },
-      );
+      loggingService.debug('Active MCP connections retrieved from Redis', {
+        component: 'MCPConnectionMonitor',
+        operation: 'getActiveConnections',
+        type: 'mcp_connections_retrieval',
+        step: 'retrieval_completed',
+        count: result.size,
+        totalTime: `${Date.now() - startTime}ms`,
+      });
     } catch (error) {
-      loggingService.warn(
-        'Failed to get active MCP connections from cache',
-        {
-          component: 'MCPConnectionMonitor',
-          operation: 'getActiveConnections',
-          type: 'mcp_connections_retrieval',
-          step: 'error',
-          error: error instanceof Error ? error.message : String(error),
-        },
-      );
+      loggingService.warn('Failed to get active MCP connections from cache', {
+        component: 'MCPConnectionMonitor',
+        operation: 'getActiveConnections',
+        type: 'mcp_connections_retrieval',
+        step: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     return result;

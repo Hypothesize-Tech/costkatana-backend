@@ -388,7 +388,8 @@ export class ErrorBoundaryMiddleware {
     }
 
     for (const [key, entry] of circuitBreakerStore.getAllEntries().entries()) {
-      circuitBreakerStatus[key] = entry.state === 'open' || entry.failureCount >= 50;
+      circuitBreakerStatus[key] =
+        entry.state === 'open' || entry.failureCount >= 50;
     }
 
     return {

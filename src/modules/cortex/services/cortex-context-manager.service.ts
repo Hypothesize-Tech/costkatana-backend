@@ -462,7 +462,8 @@ export class CortexContextManagerService {
     }> = [
       // UUIDs and IDs
       {
-        pattern: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+        pattern:
+          /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
         type: 'uuid',
         extractId: (m) => `uuid_${m[0].toLowerCase()}`,
       },

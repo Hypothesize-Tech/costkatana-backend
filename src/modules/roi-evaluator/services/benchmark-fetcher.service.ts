@@ -85,13 +85,22 @@ export class BenchmarkFetcherService {
       url: r.url,
     }));
 
-    const extracted = await this.extractBenchmarksWithLLM(useCaseName, industry, snippets);
+    const extracted = await this.extractBenchmarksWithLLM(
+      useCaseName,
+      industry,
+      snippets,
+    );
     return {
       useCaseName,
-      efficiencyGainPercent: extracted.efficiencyGainPercent ?? DEFAULT_BENCHMARK.efficiencyGainPercent,
-      costReductionPercent: extracted.costReductionPercent ?? DEFAULT_BENCHMARK.costReductionPercent,
+      efficiencyGainPercent:
+        extracted.efficiencyGainPercent ??
+        DEFAULT_BENCHMARK.efficiencyGainPercent,
+      costReductionPercent:
+        extracted.costReductionPercent ??
+        DEFAULT_BENCHMARK.costReductionPercent,
       implementationTimeWeeks:
-        extracted.implementationTimeWeeks ?? DEFAULT_BENCHMARK.implementationTimeWeeks,
+        extracted.implementationTimeWeeks ??
+        DEFAULT_BENCHMARK.implementationTimeWeeks,
       sources,
     };
   }
@@ -130,9 +139,21 @@ Use conservative, industry-typical values if the search results don't specify. O
       const cleaned = await BedrockService.extractJson(response);
       const obj = JSON.parse(cleaned) as Record<string, unknown>;
       return {
-        efficiencyGainPercent: this.clamp(Number(obj.efficiencyGainPercent), 10, 50),
-        costReductionPercent: this.clamp(Number(obj.costReductionPercent), 10, 60),
-        implementationTimeWeeks: this.clamp(Number(obj.implementationTimeWeeks), 4, 24),
+        efficiencyGainPercent: this.clamp(
+          Number(obj.efficiencyGainPercent),
+          10,
+          50,
+        ),
+        costReductionPercent: this.clamp(
+          Number(obj.costReductionPercent),
+          10,
+          60,
+        ),
+        implementationTimeWeeks: this.clamp(
+          Number(obj.implementationTimeWeeks),
+          4,
+          24,
+        ),
       };
     } catch (error) {
       this.logger.warn('LLM benchmark extraction failed', {

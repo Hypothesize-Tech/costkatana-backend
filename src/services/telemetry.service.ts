@@ -51,8 +51,9 @@ export class TelemetryService {
   private readonly logger = new Logger(TelemetryService.name);
 
   /** Static for legacy Express middleware - set by Nest or no-op */
-  static storeTelemetryData: (data: Partial<TelemetryStoreInput>) => Promise<unknown> =
-    async () => ({});
+  static storeTelemetryData: (
+    data: Partial<TelemetryStoreInput>,
+  ) => Promise<unknown> = async () => ({});
 
   constructor(
     @InjectModel(Telemetry.name)

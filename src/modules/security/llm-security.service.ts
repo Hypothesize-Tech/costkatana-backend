@@ -911,43 +911,48 @@ export class LlmSecurityService implements OnModuleInit, OnModuleDestroy {
       }
 
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+      const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
 
       // Get firewall analytics and ThreatLog data for comprehensive metrics
-      const [firewallAnalytics, threatStats] = await Promise.all([
-        this.promptFirewallService.getFirewallAnalytics(userId, {
-          start: thirtyDaysAgo,
-          end: new Date(),
-        }),
-        // Aggregate threat statistics from ThreatLog
-        this.threatLogModel.aggregate([
-          {
-            $match: {
-              userId: new Types.ObjectId(userId),
-              timestamp: { $gte: thirtyDaysAgo },
-            },
-          },
-          {
-            $group: {
-              _id: null,
-              totalThreatsDetected: { $sum: 1 },
-              totalCostSaved: { $sum: '$costSaved' },
-              averageRiskScore: { $avg: '$confidence' },
-              threatCategories: {
-                $push: '$threatCategory',
+      const [firewallAnalytics, threatStats, previousPeriodThreatCount] =
+        await Promise.all([
+          this.promptFirewallService.getFirewallAnalytics(userId, {
+            start: thirtyDaysAgo,
+            end: new Date(),
+          }),
+          // Aggregate threat statistics from ThreatLog
+          this.threatLogModel.aggregate([
+            {
+              $match: {
+                userId: new Types.ObjectId(userId),
+                timestamp: { $gte: thirtyDaysAgo },
               },
             },
-          },
-          {
-            $project: {
-              totalThreatsDetected: 1,
-              totalCostSaved: 1,
-              averageRiskScore: { $round: ['$averageRiskScore', 3] },
-              threatCategories: 1,
+            {
+              $group: {
+                _id: null,
+                totalThreatsDetected: { $sum: 1 },
+                totalCostSaved: { $sum: '$costSaved' },
+                averageRiskScore: { $avg: '$confidence' },
+                threatCategories: {
+                  $push: '$threatCategory',
+                },
+              },
             },
-          },
-        ]),
-      ]);
+            {
+              $project: {
+                totalThreatsDetected: 1,
+                totalCostSaved: 1,
+                averageRiskScore: { $round: ['$averageRiskScore', 3] },
+                threatCategories: 1,
+              },
+            },
+          ]),
+          this.threatLogModel.countDocuments({
+            userId: new Types.ObjectId(userId),
+            timestamp: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo },
+          }),
+        ]);
 
       // Extract threat statistics
       const threatData = threatStats[0] || {
@@ -976,8 +981,18 @@ export class LlmSecurityService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      // Calculate detection trend (simplified - would need time-based analysis)
-      const detectionTrend: 'increasing' | 'decreasing' | 'stable' = 'stable';
+      // Calculate detection trend by comparing current period vs previous period threat counts
+      const prevCount = previousPeriodThreatCount ?? 0;
+      const currCount = totalThreatsDetected;
+      let detectionTrend: 'increasing' | 'decreasing' | 'stable' = 'stable';
+      if (prevCount > 0) {
+        const changeRatio = Math.abs((currCount - prevCount) / prevCount);
+        if (changeRatio > 0.1) {
+          detectionTrend = currCount > prevCount ? 'increasing' : 'decreasing';
+        }
+      } else if (currCount > 0) {
+        detectionTrend = 'increasing';
+      }
 
       // Reset failure count on success
       this.dbFailureCount = 0;

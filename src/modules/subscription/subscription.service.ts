@@ -2850,9 +2850,58 @@ export class SubscriptionService {
     if (!subscription) {
       throw new NotFoundException('Subscription not found');
     }
-    await this.subscriptionModel.findByIdAndUpdate((subscription as any)._id, {
-      $inc: { 'usage.current.requests': 1 },
-      $set: { 'usage.current.lastActivity': new Date() },
+    await this.subscriptionModel.findByIdAndUpdate(
+      (subscription as unknown as { _id?: unknown })._id,
+      {
+        $inc: { 'usage.current.requests': 1 },
+        $set: { 'usage.current.lastActivity': new Date() },
+      },
+    );
+    await this.checkUsageAlerts(userId);
+  }
+
+  /**
+   * Check agent trace / workflow quota before execution (Express parity).
+   */
+  async checkAgentTraceQuota(userId: string): Promise<void> {
+    const subscription = await this.subscriptionModel
+      .findOne({ userId })
+      .select('plan usage')
+      .lean()
+      .exec();
+    if (!subscription) {
+      throw new NotFoundException('Subscription not found');
+    }
+    const planLimits =
+      SUBSCRIPTION_PLAN_LIMITS[
+        (subscription.plan as keyof typeof SUBSCRIPTION_PLAN_LIMITS) ?? 'free'
+      ];
+    const limit = (planLimits as { agentTraces?: number }).agentTraces ?? 10;
+    if (limit === -1) return;
+    const usage = subscription.usage as
+      | { agentTracesUsed?: number }
+      | undefined;
+    const used = usage?.agentTracesUsed ?? 0;
+    if (used >= limit) {
+      throw new BadRequestException(
+        `Workflow quota exceeded. Limit: ${limit}, Used: ${used}. Please upgrade your plan.`,
+      );
+    }
+  }
+
+  /**
+   * Increment agent trace usage after workflow completion (Express parity).
+   */
+  async incrementAgentTracesUsed(userId: string): Promise<void> {
+    const subscription = await this.subscriptionModel
+      .findOne({ userId })
+      .select('_id')
+      .exec();
+    if (!subscription) {
+      throw new NotFoundException('Subscription not found');
+    }
+    await this.subscriptionModel.findByIdAndUpdate(subscription._id, {
+      $inc: { 'usage.agentTracesUsed': 1 },
     });
     await this.checkUsageAlerts(userId);
   }

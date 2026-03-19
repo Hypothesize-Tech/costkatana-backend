@@ -24,6 +24,10 @@ import {
   UserDataConsentSchema,
 } from '../../schemas/security/user-data-consent.schema';
 import {
+  Telemetry,
+  TelemetrySchema,
+} from '../../schemas/core/telemetry.schema';
+import {
   AuditAnchor,
   AuditAnchorSchema,
 } from '../../schemas/security/audit-anchor.schema';
@@ -44,6 +48,7 @@ import { AIProviderAuditService } from '../security/services/ai-provider-audit.s
       { name: ComprehensiveAudit.name, schema: ComprehensiveAuditSchema },
       { name: AIProviderAudit.name, schema: AIProviderAuditSchema },
       { name: UserDataConsent.name, schema: UserDataConsentSchema },
+      { name: Telemetry.name, schema: TelemetrySchema },
     ]),
   ],
   controllers: [EnterpriseSecurityController],

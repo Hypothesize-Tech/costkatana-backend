@@ -235,51 +235,68 @@ export class TrafficManagementService {
     errorRate: number;
   }> {
     try {
-      const usageStats = await this.usageModel.aggregate([
-        {
-          $match: {
-            createdAt: { $gte: startDate, $lte: endDate },
+      const [usageStats, hourlyLoad] = await Promise.all([
+        this.usageModel.aggregate([
+          {
+            $match: {
+              createdAt: { $gte: startDate, $lte: endDate },
+            },
           },
-        },
-        {
-          $group: {
-            _id: {
-              endpoint: '$endpoint',
-              date: {
-                $dateToString: {
-                  format: '%Y-%m-%d-%H',
-                  date: '$createdAt',
+          {
+            $group: {
+              _id: {
+                endpoint: '$endpoint',
+                date: {
+                  $dateToString: {
+                    format: '%Y-%m-%d-%H',
+                    date: '$createdAt',
+                  },
                 },
               },
-            },
-            requestCount: { $sum: 1 },
-            averageResponseTime: { $avg: '$responseTime' },
-            errorCount: {
-              $sum: { $cond: [{ $eq: ['$errorOccurred', true] }, 1, 0] },
-            },
-          },
-        },
-        {
-          $group: {
-            _id: '$_id.date',
-            endpoints: {
-              $push: {
-                endpoint: '$_id.endpoint',
-                requests: '$requestCount',
-                avgResponseTime: '$averageResponseTime',
-                errors: '$errorCount',
+              requestCount: { $sum: 1 },
+              averageResponseTime: { $avg: '$responseTime' },
+              errorCount: {
+                $sum: { $cond: [{ $eq: ['$errorOccurred', true] }, 1, 0] },
               },
             },
-            totalRequests: { $sum: '$requestCount' },
-            totalErrors: { $sum: '$errorCount' },
           },
-        },
-        {
-          $sort: { totalRequests: -1 },
-        },
-        {
-          $limit: 10,
-        },
+          {
+            $group: {
+              _id: '$_id.date',
+              endpoints: {
+                $push: {
+                  endpoint: '$_id.endpoint',
+                  requests: '$requestCount',
+                  avgResponseTime: '$averageResponseTime',
+                  errors: '$errorCount',
+                },
+              },
+              totalRequests: { $sum: '$requestCount' },
+              totalErrors: { $sum: '$errorCount' },
+            },
+          },
+          {
+            $sort: { totalRequests: -1 },
+          },
+          {
+            $limit: 10,
+          },
+        ]),
+        this.usageModel.aggregate([
+          {
+            $match: {
+              createdAt: { $gte: startDate, $lte: endDate },
+            },
+          },
+          {
+            $group: {
+              _id: { $hour: '$createdAt' },
+              requestCount: { $sum: 1 },
+            },
+          },
+          { $sort: { requestCount: -1 } },
+          { $limit: 5 },
+        ]),
       ]);
 
       const totalRequests = usageStats.reduce(
@@ -315,13 +332,10 @@ export class TrafficManagementService {
         .slice(0, 5)
         .map((endpoint) => endpoint.endpoint);
 
-      // Find peak load times (simplified - would need more complex analysis)
-      const peakLoadTimes = usageStats
-        .filter(
-          (stat) =>
-            stat.totalRequests > (totalRequests / usageStats.length) * 1.5,
-        )
-        .map((stat) => new Date(stat._id));
+      // Peak load times: hours of day with highest traffic (from MongoDB $group by hour)
+      const peakLoadTimes = hourlyLoad.map(
+        (h: { _id: number }) => new Date(2000, 0, 1, h._id, 0, 0, 0),
+      );
 
       return {
         totalRequests,
@@ -491,9 +505,8 @@ export class TrafficManagementService {
     maxLoadFactor: number;
   }> {
     // Try to get dynamic thresholds from historical traffic data
-    const historical = this.trafficPredictionService.getHistoricalAverages(
-      3600000,
-    ); // last hour
+    const historical =
+      this.trafficPredictionService.getHistoricalAverages(3600000); // last hour
     const baseThresholds = {
       maxResponseTime: 5000, // 5 seconds default
       maxErrorRate: 0.1, // 10% default
@@ -501,24 +514,21 @@ export class TrafficManagementService {
       maxLoadFactor: 2.0, // 2x normal load
     };
 
-    let maxResponseTime = parseInt(String(baseThresholds.maxResponseTime),
-      10,
-    );
-    let maxErrorRate = parseFloat(String(baseThresholds.maxErrorRate),
-    );
-    let maxRPM = parseInt( String(baseThresholds.maxRPM),
-      10,
-    );
+    let maxResponseTime = parseInt(String(baseThresholds.maxResponseTime), 10);
+    let maxErrorRate = parseFloat(String(baseThresholds.maxErrorRate));
+    let maxRPM = parseInt(String(baseThresholds.maxRPM), 10);
 
     if (historical && historical.dataPoints >= 5) {
       // Use historical averages as baseline, with 2x headroom for spikes
       maxResponseTime = Math.max(
         baseThresholds.maxResponseTime,
-        Math.ceil(historical.avgResponseTimeMs * 2) || baseThresholds.maxResponseTime,
+        Math.ceil(historical.avgResponseTimeMs * 2) ||
+          baseThresholds.maxResponseTime,
       );
       maxErrorRate = Math.max(
         baseThresholds.maxErrorRate,
-        Math.min(0.5, historical.avgErrorRate * 2) || baseThresholds.maxErrorRate,
+        Math.min(0.5, historical.avgErrorRate * 2) ||
+          baseThresholds.maxErrorRate,
       );
       maxRPM = Math.max(
         baseThresholds.maxRPM,

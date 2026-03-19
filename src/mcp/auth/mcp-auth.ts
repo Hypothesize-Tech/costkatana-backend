@@ -119,7 +119,8 @@ export class MCPAuthService {
       if (checks[3]) integrations.push('mongodb');
 
       // Check standard Integration model for others
-      const { Integration } = await import('../../schemas/integration/integration.schema');
+      const { Integration } =
+        await import('../../schemas/integration/integration.schema');
       const standardIntegrations = await Integration.find({
         userId,
         status: 'active',
@@ -182,7 +183,8 @@ export class MCPAuthService {
           );
         }
         default: {
-          const { Integration } = await import('../../schemas/integration/integration.schema');
+          const { Integration } =
+            await import('../../schemas/integration/integration.schema');
           const typePattern = new RegExp(integration, 'i');
           return (
             (await Integration.exists({
@@ -257,7 +259,8 @@ export class MCPAuthService {
           return conn?._id.toString() || null;
         }
         default: {
-          const { Integration } = await import('../../schemas/integration/integration.schema');
+          const { Integration } =
+            await import('../../schemas/integration/integration.schema');
           const typePattern = new RegExp(integration, 'i');
           const conn = await Integration.findOne({
             userId,

@@ -148,8 +148,6 @@ export class VectorMemoryService {
     }
   }
 
-
-
   /**
    * Hash string to number
    */

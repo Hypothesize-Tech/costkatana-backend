@@ -1826,21 +1826,28 @@ export class TelemetryQueryService implements OnModuleInit {
     this.filterBuilders.set(
       'time_range',
       (range: { start: string; end: string; timezone?: string }) => {
+        let startDate: Date;
+        let endDate: Date;
+
+        if (range.timezone) {
+          const { startUTC, endUTC } = this.applyTimezoneToDateRange(
+            range.start,
+            range.end,
+            range.timezone,
+          );
+          startDate = startUTC;
+          endDate = endUTC;
+        } else {
+          startDate = new Date(range.start);
+          endDate = new Date(range.end);
+        }
+
         const filter: any = {
           start_time: {
-            $gte: new Date(range.start),
-            $lte: new Date(range.end),
+            $gte: startDate,
+            $lte: endDate,
           },
         };
-
-        // Note: For full timezone support, you'd need to convert dates based on timezone
-        // This is a simplified version
-        if (range.timezone) {
-          // Could implement timezone offset logic here
-          this.logger.debug('Timezone specified but not fully implemented', {
-            timezone: range.timezone,
-          });
-        }
 
         return filter;
       },
@@ -1948,13 +1955,34 @@ export class TelemetryQueryService implements OnModuleInit {
         }
 
         if (params.should && params.should.length > 0) {
-          filter.$or = params.should;
-          if (params.minimum_should_match !== undefined) {
-            // Note: MongoDB doesn't have minimum_should_match like Elasticsearch
-            // This would require more complex aggregation logic
-            this.logger.debug(
-              'minimum_should_match specified but not fully implemented',
-            );
+          const minMatch = params.minimum_should_match;
+          if (
+            minMatch !== undefined &&
+            minMatch > 0 &&
+            minMatch <= params.should.length
+          ) {
+            const matchExprs = params.should
+              .map((clause) => this.clauseToMatchExpr(clause))
+              .filter((e): e is object => e !== null);
+            if (matchExprs.length === params.should.length) {
+              filter.$expr = {
+                $gte: [
+                  {
+                    $add: matchExprs.map((expr) => ({
+                      $cond: [expr, 1, 0],
+                    })),
+                  },
+                  minMatch,
+                ],
+              };
+            } else {
+              filter.$or = params.should;
+              this.logger.debug(
+                'minimum_should_match: some clauses could not be converted to $expr, using plain $or',
+              );
+            }
+          } else {
+            filter.$or = params.should;
           }
         }
 
@@ -1965,6 +1993,105 @@ export class TelemetryQueryService implements OnModuleInit {
         return filter;
       },
     );
+  }
+
+  /**
+   * Convert a simple MongoDB query clause to a $expr-compatible match expression.
+   * Supports: { field: value }, { field: { $eq, $ne, $in, $nin, $gt, $gte, $lt, $lte } }
+   * Returns null if the clause cannot be converted.
+   */
+  private clauseToMatchExpr(clause: any): object | null {
+    if (clause == null || typeof clause !== 'object') return null;
+    const keys = Object.keys(clause);
+    if (keys.length === 0) return null;
+    if (keys.length === 1) {
+      const field = keys[0];
+      const val = clause[field];
+      if (field.startsWith('$')) return null;
+      const path = `$${field}`;
+      if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+        const op = Object.keys(val)[0];
+        const opVal = val[op];
+        if (op === '$eq') return { $eq: [path, opVal] } as any;
+        if (op === '$ne') return { $ne: [path, opVal] } as any;
+        if (op === '$in') return { $in: [path, opVal] } as any;
+        if (op === '$nin') return { $nin: [path, opVal] } as any;
+        if (op === '$gt') return { $gt: [path, opVal] } as any;
+        if (op === '$gte') return { $gte: [path, opVal] } as any;
+        if (op === '$lt') return { $lt: [path, opVal] } as any;
+        if (op === '$lte') return { $lte: [path, opVal] } as any;
+        if (op === '$exists')
+          return opVal ? { $ne: [path, null] } : ({ $eq: [path, null] } as any);
+        return null;
+      }
+      return { $eq: [path, val] } as any;
+    }
+    const andParts = keys.map((k) =>
+      this.clauseToMatchExpr({ [k]: clause[k] }),
+    );
+    if (andParts.some((p) => p === null)) return null;
+    return { $and: andParts } as any;
+  }
+
+  /**
+   * Convert date range from IANA timezone-local times to UTC for MongoDB queries.
+   * Interprets range.start and range.end as local times in the specified timezone.
+   */
+  private applyTimezoneToDateRange(
+    startStr: string,
+    endStr: string,
+    ianaTimezone: string,
+  ): { startUTC: Date; endUTC: Date } {
+    const startDate = new Date(startStr);
+    const endDate = new Date(endStr);
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return { startUTC: startDate, endUTC: endDate };
+    }
+
+    const getOffsetMinutes = (utcDate: Date, tz: string): number => {
+      try {
+        const formatted = new Intl.DateTimeFormat('en-CA', {
+          timeZone: tz,
+          timeZoneName: 'shortOffset',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+        }).format(utcDate);
+        const match = formatted.match(/GMT([+-])(\d{1,2})(?::(\d{2})?)?/);
+        if (match) {
+          const sign = match[1] === '+' ? 1 : -1;
+          const h = parseInt(match[2], 10);
+          const m = parseInt(match[3] ?? '0', 10);
+          return sign * (h * 60 + m);
+        }
+      } catch {
+        // Invalid timezone
+      }
+      return 0;
+    };
+
+    const toUTC = (date: Date, tz: string): Date => {
+      const y = date.getUTCFullYear();
+      const mo = date.getUTCMonth();
+      const d = date.getUTCDate();
+      const h = date.getUTCHours();
+      const mi = date.getUTCMinutes();
+      const s = date.getUTCSeconds();
+      const utcGuess = Date.UTC(y, mo, d, h, mi, s);
+      const offsetMin = getOffsetMinutes(new Date(utcGuess), tz);
+      return new Date(utcGuess - offsetMin * 60 * 1000);
+    };
+
+    const startUTC = toUTC(startDate, ianaTimezone);
+    let endUTC = toUTC(endDate, ianaTimezone);
+    if (endUTC.getTime() <= startUTC.getTime()) {
+      endUTC = new Date(startUTC.getTime() + 24 * 60 * 60 * 1000);
+    }
+    return { startUTC, endUTC };
   }
 
   /**

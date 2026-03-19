@@ -368,8 +368,7 @@ export class VectorizationJob {
               (sum: number, a: { learningValue: number }) =>
                 sum + a.learningValue,
               0,
-            ) /
-            (analysisResults.length || 1),
+            ) / (analysisResults.length || 1),
         },
       });
     } catch (error) {

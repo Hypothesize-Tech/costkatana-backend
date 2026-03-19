@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User } from '../../schemas/user/user.schema';
 import { ThreatLog } from '../../schemas/security/threat-log.schema';
+import { Telemetry } from '../../schemas/core/telemetry.schema';
 import { AWSAuditLog } from '../../schemas/security/aws-audit-log.schema';
 import { McpAuditService } from '../../modules/mcp/services/mcp-audit.service';
 import { AuditLoggerService } from '../../modules/aws/services/audit-logger.service';
@@ -33,6 +34,7 @@ export class EnterpriseSecurityService {
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(ThreatLog.name) private threatLogModel: Model<ThreatLog>,
     @InjectModel(AWSAuditLog.name) private awsAuditLogModel: Model<AWSAuditLog>,
+    @InjectModel(Telemetry.name) private telemetryModel: Model<Telemetry>,
     private mcpAuditService: McpAuditService,
     private awsAuditLoggerService: AuditLoggerService,
     private businessEventLogger: BusinessEventLoggingService,
@@ -1318,7 +1320,7 @@ export class EnterpriseSecurityService {
           content: 'Analysis of security events and compliance status.',
           metrics: {
             blockedRequests: auditReport.summary.failedEvents,
-            encryptionRate: 95, // This would need to be calculated from actual data
+            encryptionRate: auditReport.summary.encryptionRate ?? 0,
             accessControlViolations: auditReport.summary.anomalousEvents,
           },
         },
@@ -1824,19 +1826,61 @@ export class EnterpriseSecurityService {
   }
 
   private async getMonitoringStatistics() {
-    // Get real-time monitoring statistics
     try {
       const alerts = await this.getRealtimeAlerts();
       const threatLandscape = await this.getThreatLandscape();
+      const now = Date.now();
+      const last24h = new Date(now - 24 * 60 * 60 * 1000);
+
+      const [avgResponseResult, uptimeResult] = await Promise.all([
+        this.telemetryModel
+          .aggregate([
+            {
+              $match: {
+                timestamp: { $gte: last24h },
+                duration_ms: { $exists: true, $gt: 0 },
+              },
+            },
+            { $group: { _id: null, avg: { $avg: '$duration_ms' } } },
+          ])
+          .exec(),
+        this.telemetryModel
+          .aggregate([
+            { $match: { timestamp: { $gte: last24h } } },
+            {
+              $group: {
+                _id: null,
+                total: { $sum: 1 },
+                success: {
+                  $sum: { $cond: [{ $eq: ['$status', 'success'] }, 1, 0] },
+                },
+              },
+            },
+          ])
+          .exec(),
+      ]);
+
+      const averageResponseTime = Math.round(avgResponseResult[0]?.avg ?? 0);
+      const totalReq = uptimeResult[0]?.total ?? 0;
+      const successReq = uptimeResult[0]?.success ?? 0;
+      const monitoringUptime =
+        totalReq > 0 ? Math.round((successReq / totalReq) * 1000) / 10 : 100;
 
       return {
         activeAlerts: alerts.length,
         threatLevel: threatLandscape.current_threat_level,
-        monitoringUptime: 99.5,
-        averageResponseTime: 150,
+        monitoringUptime,
+        averageResponseTime,
         _meta: {
-          estimatedFields: ['monitoringUptime', 'averageResponseTime'] as const,
-          note: 'monitoringUptime and averageResponseTime are estimates; integrate with APM (DataDog/New Relic) for real values',
+          ...(totalReq === 0 && {
+            estimatedFields: [
+              'monitoringUptime',
+              'averageResponseTime',
+            ] as const,
+          }),
+          ...(totalReq > 0 && {
+            note: 'Values computed from telemetry. For APM-grade metrics, integrate with DataDog/New Relic.',
+          }),
         },
       };
     } catch (error) {

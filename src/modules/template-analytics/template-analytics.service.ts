@@ -458,52 +458,74 @@ export class TemplateAnalyticsService {
           break;
       }
 
-      const [savings] = await this.usageModel.aggregate([
-        {
-          $match: {
-            userId: new mongoose.Types.ObjectId(userId),
-            'templateUsage.templateId': { $exists: true },
-            createdAt: { $gte: startDate },
+      const endDate = new Date();
+      const previousStartDate = new Date(startDate);
+      previousStartDate.setDate(previousStartDate.getDate() - days);
+
+      const [savings, previousPeriodResult] = await Promise.all([
+        this.usageModel.aggregate([
+          {
+            $match: {
+              userId: new mongoose.Types.ObjectId(userId),
+              'templateUsage.templateId': { $exists: true },
+              createdAt: { $gte: startDate, $lte: endDate },
+            },
           },
-        },
-        {
-          $facet: {
-            byTemplate: [
-              {
-                $group: {
-                  _id: '$templateUsage.templateId',
-                  templateName: { $first: '$templateUsage.templateName' },
-                  totalCost: { $sum: '$cost' },
-                  usageCount: { $sum: 1 },
+          {
+            $facet: {
+              byTemplate: [
+                {
+                  $group: {
+                    _id: '$templateUsage.templateId',
+                    templateName: { $first: '$templateUsage.templateName' },
+                    totalCost: { $sum: '$cost' },
+                    usageCount: { $sum: 1 },
+                  },
                 },
-              },
-              { $sort: { totalCost: -1 } },
-            ],
-            byContext: [
-              {
-                $group: {
-                  _id: '$templateUsage.context',
-                  totalCost: { $sum: '$cost' },
+                { $sort: { totalCost: -1 } },
+              ],
+              byContext: [
+                {
+                  $group: {
+                    _id: '$templateUsage.context',
+                    totalCost: { $sum: '$cost' },
+                  },
                 },
-              },
-            ],
-            overall: [
-              {
-                $group: {
-                  _id: null,
-                  totalCost: { $sum: '$cost' },
+              ],
+              overall: [
+                {
+                  $group: {
+                    _id: null,
+                    totalCost: { $sum: '$cost' },
+                  },
                 },
-              },
-            ],
+              ],
+            },
           },
-        },
+        ]),
+        this.usageModel.aggregate([
+          {
+            $match: {
+              userId: new mongoose.Types.ObjectId(userId),
+              'templateUsage.templateId': { $exists: true },
+              createdAt: {
+                $gte: previousStartDate,
+                $lt: startDate,
+              },
+            },
+          },
+          { $group: { _id: null, totalCost: { $sum: '$cost' } } },
+        ]),
       ]);
 
-      const estimatedSavingsRate = 0.1; // 10% savings estimate
-      const totalCost = savings.overall[0]?.totalCost || 0;
-      const totalSavings = totalCost * estimatedSavingsRate;
+      const [savingsData] = savings;
 
-      const savingsByTemplate = savings.byTemplate.map((t: any) => ({
+      const estimatedSavingsRate = 0.1; // 10% savings estimate
+      const totalCost = savingsData.overall[0]?.totalCost || 0;
+      const totalSavings = totalCost * estimatedSavingsRate;
+      const previousTotalCost = previousPeriodResult[0]?.totalCost || 0;
+
+      const savingsByTemplate = savingsData.byTemplate.map((t: any) => ({
         templateId: t._id.toString(),
         templateName: t.templateName,
         savings: t.totalCost * estimatedSavingsRate,
@@ -512,11 +534,11 @@ export class TemplateAnalyticsService {
           (t.totalCost * estimatedSavingsRate) / t.usageCount,
       }));
 
-      const totalContextCost = savings.byContext.reduce(
+      const totalContextCost = savingsData.byContext.reduce(
         (sum: number, ctx: any) => sum + ctx.totalCost,
         0,
       );
-      const savingsByContext = savings.byContext.map((ctx: any) => ({
+      const savingsByContext = savingsData.byContext.map((ctx: any) => ({
         context: ctx._id || 'unknown',
         savings: ctx.totalCost * estimatedSavingsRate,
         percentage:
@@ -526,8 +548,17 @@ export class TemplateAnalyticsService {
       // Calculate monthly projection
       const projectedMonthlySavings = (totalSavings / days) * 30;
 
-      // Determine trend (simplified - would need historical data for accurate trend)
-      const trend: 'increasing' | 'decreasing' | 'stable' = 'stable';
+      // Determine trend by comparing current period cost vs previous period cost
+      const diff = totalCost - previousTotalCost;
+      let trend: 'increasing' | 'decreasing' | 'stable' = 'stable';
+      if (previousTotalCost > 0) {
+        const changeRatio = Math.abs(diff / previousTotalCost);
+        if (changeRatio > 0.05) {
+          trend = diff > 0 ? 'increasing' : 'decreasing';
+        }
+      } else if (totalCost > 0) {
+        trend = 'increasing';
+      }
 
       return {
         totalSavings,

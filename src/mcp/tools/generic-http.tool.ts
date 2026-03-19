@@ -127,11 +127,15 @@ export class GenericHTTPTool {
     try {
       const { getRealtimeUpdateService } =
         await import('../../modules/usage/services/realtime-update.service');
-      await getRealtimeUpdateService().broadcastToUser(userId, 'mcp_approval_request', {
-        message: `Approve HTTP ${method} request to ${url}?`,
-        approvalId,
-        requestType: 'http_request',
-      });
+      await getRealtimeUpdateService().broadcastToUser(
+        userId,
+        'mcp_approval_request',
+        {
+          message: `Approve HTTP ${method} request to ${url}?`,
+          approvalId,
+          requestType: 'http_request',
+        },
+      );
     } catch {
       // RealtimeUpdateService may not be initialized; approval flow continues via polling
     }
@@ -144,7 +148,9 @@ export class GenericHTTPTool {
     for (let i = 0; i < maxPolls; i++) {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
-      const updated = await UserApprovalRequestModel.findById(approvalRequest._id);
+      const updated = await UserApprovalRequestModel.findById(
+        approvalRequest._id,
+      );
       if (!updated) {
         break;
       }

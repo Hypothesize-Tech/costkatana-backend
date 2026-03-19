@@ -776,19 +776,26 @@ export class CortexVocabularyService {
   }
 
   /** Jaccard similarity on tag sets: domain ∪ synonyms. */
-  private jaccardTagOverlap(p1: SemanticPrimitive, p2: SemanticPrimitive): number {
-    const tags1 = new Set([
-      ...(p1.context.domain ?? []),
-      ...(p1.synonyms ?? []),
-      p1.name,
-      p1.id,
-    ].map((s) => String(s).toLowerCase()));
-    const tags2 = new Set([
-      ...(p2.context.domain ?? []),
-      ...(p2.synonyms ?? []),
-      p2.name,
-      p2.id,
-    ].map((s) => String(s).toLowerCase()));
+  private jaccardTagOverlap(
+    p1: SemanticPrimitive,
+    p2: SemanticPrimitive,
+  ): number {
+    const tags1 = new Set(
+      [
+        ...(p1.context.domain ?? []),
+        ...(p1.synonyms ?? []),
+        p1.name,
+        p1.id,
+      ].map((s) => String(s).toLowerCase()),
+    );
+    const tags2 = new Set(
+      [
+        ...(p2.context.domain ?? []),
+        ...(p2.synonyms ?? []),
+        p2.name,
+        p2.id,
+      ].map((s) => String(s).toLowerCase()),
+    );
     if (tags1.size === 0 && tags2.size === 0) return 1;
     const intersection = new Set([...tags1].filter((t) => tags2.has(t)));
     const union = new Set([...tags1, ...tags2]);

@@ -5,11 +5,7 @@
  * Handles model comparisons, what-if scenarios, fine-tuning analysis, and real-time experiments.
  */
 
-import {
-  Injectable,
-  Logger,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
 import { Model } from 'mongoose';
@@ -712,10 +708,10 @@ export class ExperimentationService {
       ai21: {
         'j2-ultra': 'ai21.j2-ultra-v1',
         'j2-mid': 'ai21.j2-mid-v1',
-        'jamba': 'ai21.jamba-instruct-v1:0',
+        jamba: 'ai21.jamba-instruct-v1:0',
       },
       cohere: {
-        'command': 'command',
+        command: 'command',
         'command-r7b': 'command-r7b-12-2024',
         'command-r-plus': 'command-r-plus-04-2024',
         'command-r': 'command-r-08-2024',
@@ -733,9 +729,7 @@ export class ExperimentationService {
       (provider.toLowerCase() === 'aws' ? modelMappings.amazon : undefined);
     const normalizedModel = modelName.toLowerCase().replace(/\s+/g, '-');
     return (
-      providerMap?.[modelName] ??
-      providerMap?.[normalizedModel] ??
-      modelName
+      providerMap?.[modelName] ?? providerMap?.[normalizedModel] ?? modelName
     );
   }
 
@@ -2462,8 +2456,7 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
       const variance =
         costs.length > 0
           ? costs.reduce(
-              (sum, c) =>
-                sum + Math.pow(c - totalCost / usageData.length, 2),
+              (sum, c) => sum + Math.pow(c - totalCost / usageData.length, 2),
               0,
             ) / costs.length
           : 0;
@@ -2482,7 +2475,7 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
             (usageData[0]?.cost || 0)
             ? 'increasing'
             : (usageData[usageData.length - 1]?.cost || 0) <
-              (usageData[0]?.cost || 0)
+                (usageData[0]?.cost || 0)
               ? 'decreasing'
               : 'stable'
           : 'insufficient_data';
@@ -2591,18 +2584,18 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
     prompt: string,
     model: string,
     trimPercentage: number,
-    ): Promise<
-      Array<{
-        type: 'context_trimming';
-        originalLength: number;
-        trimmedLength: number;
-        trimPercentage: number;
-        originalCost: number;
-        trimmedCost: number;
-        savings: number;
-        description: string;
-      }>
-    > {
+  ): Promise<
+    Array<{
+      type: 'context_trimming';
+      originalLength: number;
+      trimmedLength: number;
+      trimPercentage: number;
+      originalCost: number;
+      trimmedCost: number;
+      savings: number;
+      description: string;
+    }>
+  > {
     const originalCost = await this.calculatePromptCost(prompt, model);
     const originalTokens = this.tokenCounterService.countTokens(prompt, {
       model,
@@ -2776,7 +2769,10 @@ Return your analysis in JSON format with the following structure:
       );
 
       // Extract and parse JSON response
-      const responseStr = typeof analysisResponse === 'string' ? analysisResponse : (analysisResponse as { response?: string })?.response ?? '';
+      const responseStr =
+        typeof analysisResponse === 'string'
+          ? analysisResponse
+          : ((analysisResponse as { response?: string })?.response ?? '');
       const extractedJson = await BedrockService.extractJson(responseStr);
 
       try {

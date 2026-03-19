@@ -51,8 +51,7 @@ export const trackUserSessionActivity = (
             userSessionId,
             error: error instanceof Error ? error.message : String(error),
           });
-        },
-      );
+        });
     }
 
     next();

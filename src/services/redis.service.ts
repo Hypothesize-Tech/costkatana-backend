@@ -135,7 +135,10 @@ export class RedisService {
       this.embeddingModel = createSafeBedrockEmbeddings({
         model:
           process.env.RAG_EMBEDDING_MODEL || 'amazon.titan-embed-text-v2:0',
-        region: process.env.AWS_REGION || process.env.AWS_BEDROCK_REGION || 'us-east-1',
+        region:
+          process.env.AWS_REGION ||
+          process.env.AWS_BEDROCK_REGION ||
+          'us-east-1',
       });
     } catch {
       this.embeddingModel = null;
@@ -366,13 +369,11 @@ export class RedisService {
           this.client.removeAllListeners();
 
           if (typeof this.client.quit === 'function') {
-            this.client
-              .quit()
-              .catch((err) =>
-                loggingService.debug('Error while closing Redis client:', {
-                  error: err instanceof Error ? err.message : String(err),
-                }),
-              );
+            this.client.quit().catch((err) =>
+              loggingService.debug('Error while closing Redis client:', {
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            );
           }
         }
 
@@ -563,7 +564,9 @@ export class RedisService {
             throw new Error('Empty embedding returned from Bedrock');
           }
         } else {
-          throw new Error('AWS Bedrock not available (missing embedding model or credentials)');
+          throw new Error(
+            'AWS Bedrock not available (missing embedding model or credentials)',
+          );
         }
       } catch (awsError) {
         loggingService.warn('AWS Bedrock embedding failed, using fallback:', {

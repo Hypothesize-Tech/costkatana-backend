@@ -66,14 +66,11 @@ export class AdminDashboardController {
       // Real averageProcessingTime from Usage aggregation
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
       const avgResult = await this.usageModel
-        .aggregate<{ avgResponseTime: number }>([
-          { $match: { createdAt: { $gte: thirtyDaysAgo } } },
-          { $match: { responseTime: { $gt: 0, $ne: null } } },
-          { $group: { _id: null, avgResponseTime: { $avg: '$responseTime' } } },
-        ])
+        .aggregate<{
+          avgResponseTime: number;
+        }>([{ $match: { createdAt: { $gte: thirtyDaysAgo } } }, { $match: { responseTime: { $gt: 0, $ne: null } } }, { $group: { _id: null, avgResponseTime: { $avg: '$responseTime' } } }])
         .exec();
-      const averageProcessingTime =
-        avgResult?.[0]?.avgResponseTime ?? 0;
+      const averageProcessingTime = avgResult?.[0]?.avgResponseTime ?? 0;
 
       // Prepare dashboard data
       const dashboardData = {

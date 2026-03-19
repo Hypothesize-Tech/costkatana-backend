@@ -377,9 +377,8 @@ export const authenticate = async (
 
             // Validate session is active (for session-based auth)
             try {
-              const isSessionValid = await getUserSessionService().validateSession(
-                payload.jti,
-              );
+              const isSessionValid =
+                await getUserSessionService().validateSession(payload.jti);
 
               if (!isSessionValid) {
                 loggingService.warn('Session has been revoked or is invalid', {

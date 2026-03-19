@@ -196,7 +196,9 @@ export class PreemptiveThrottlingService
   constructor(
     private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
-    @Optional() @InjectConnection() private readonly mongooseConnection?: Connection,
+    @Optional()
+    @InjectConnection()
+    private readonly mongooseConnection?: Connection,
     @Optional() private readonly cacheService?: CacheService,
   ) {
     this.initializeConfig();
@@ -323,11 +325,8 @@ export class PreemptiveThrottlingService
       : 0;
 
     // Real connection pool and cache metrics when available
-    const {
-      active_connections,
-      database_connections,
-      cache_hit_rate,
-    } = await this.getConnectionAndCacheMetrics();
+    const { active_connections, database_connections, cache_hit_rate } =
+      await this.getConnectionAndCacheMetrics();
 
     return {
       cpu_usage,
@@ -359,7 +358,8 @@ export class PreemptiveThrottlingService
     if (this.mongooseConnection?.readyState === 1) {
       try {
         const client = (this.mongooseConnection as any).client;
-        const pool = client?.topology?.s?.connectionPool ?? client?.topology?.pool;
+        const pool =
+          client?.topology?.s?.connectionPool ?? client?.topology?.pool;
         if (pool?.totalConnectionCount != null) {
           database_connections = pool.totalConnectionCount;
         }

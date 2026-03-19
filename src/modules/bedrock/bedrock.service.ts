@@ -731,7 +731,9 @@ export class BedrockService {
 
         if (stream) {
           for await (const event of stream) {
-            const ev = event as { contentBlockDelta?: { delta?: { text?: string } } };
+            const ev = event as {
+              contentBlockDelta?: { delta?: { text?: string } };
+            };
             const chunk = ev.contentBlockDelta?.delta?.text;
             if (chunk) {
               fullResponse += chunk;
@@ -767,10 +769,13 @@ export class BedrockService {
           cost,
         };
       } catch (error) {
-        loggingService.warn('ConverseStream failed, falling back to invokeModel', {
-          model: modelId,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        loggingService.warn(
+          'ConverseStream failed, falling back to invokeModel',
+          {
+            model: modelId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
       }
     }
 

@@ -211,9 +211,15 @@ export class EnterpriseTrafficManagementMiddleware implements NestMiddleware {
     try {
       const now = Date.now();
       const userId = (req as any).user?.id;
-      const userKey = userId ? `u:${userId}` : `ip:${req.ip || (req.headers['x-forwarded-for'] as string) || 'unknown'}`;
+      const userKey = userId
+        ? `u:${userId}`
+        : `ip:${req.ip || (req.headers['x-forwarded-for'] as string) || 'unknown'}`;
 
-      await this.cacheService.zadd(TRAFFIC_RPS_KEY, now, `${now}:${randomUUID()}`);
+      await this.cacheService.zadd(
+        TRAFFIC_RPS_KEY,
+        now,
+        `${now}:${randomUUID()}`,
+      );
       await this.cacheService.zadd(TRAFFIC_USERS_KEY, now, userKey);
       await this.cacheService.zremrangebyscore(
         TRAFFIC_RPS_KEY,

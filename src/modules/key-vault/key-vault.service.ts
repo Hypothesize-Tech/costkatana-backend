@@ -44,7 +44,9 @@ let keyVaultServiceInstance: KeyVaultService | null = null;
 
 export function getKeyVaultService(): KeyVaultService {
   if (!keyVaultServiceInstance) {
-    throw new Error('KeyVaultService not initialized. Ensure KeyVaultModule is imported.');
+    throw new Error(
+      'KeyVaultService not initialized. Ensure KeyVaultModule is imported.',
+    );
   }
   return keyVaultServiceInstance;
 }

@@ -33,7 +33,10 @@ class CircuitBreakerStoreImpl {
       windowMs?: number;
     } = {},
   ): void {
-    const { maxFailures = DEFAULT_MAX_FAILURES, resetTimeoutMs = DEFAULT_RESET_TIMEOUT_MS } = options;
+    const {
+      maxFailures = DEFAULT_MAX_FAILURES,
+      resetTimeoutMs = DEFAULT_RESET_TIMEOUT_MS,
+    } = options;
     const now = Date.now();
     let entry = this.store.get(component);
 
@@ -47,13 +50,20 @@ class CircuitBreakerStoreImpl {
     }
 
     // Reset if half-open and enough time has passed
-    if (entry.state === 'half-open' && now - entry.lastFailureTime > resetTimeoutMs) {
+    if (
+      entry.state === 'half-open' &&
+      now - entry.lastFailureTime > resetTimeoutMs
+    ) {
       entry.state = 'closed';
       entry.failureCount = 0;
     }
 
     // Reset closed state if it's been long enough since last failure
-    if (entry.state === 'closed' && entry.failureCount > 0 && now - entry.lastFailureTime > resetTimeoutMs) {
+    if (
+      entry.state === 'closed' &&
+      entry.failureCount > 0 &&
+      now - entry.lastFailureTime > resetTimeoutMs
+    ) {
       entry.failureCount = 0;
     }
 
@@ -75,7 +85,10 @@ class CircuitBreakerStoreImpl {
     }
   }
 
-  transitionToHalfOpen(component: string, resetTimeoutMs: number = DEFAULT_RESET_TIMEOUT_MS): void {
+  transitionToHalfOpen(
+    component: string,
+    resetTimeoutMs: number = DEFAULT_RESET_TIMEOUT_MS,
+  ): void {
     const entry = this.store.get(component);
     if (entry && entry.state === 'open') {
       const now = Date.now();
@@ -89,7 +102,10 @@ class CircuitBreakerStoreImpl {
   /**
    * Check if circuit is open for a component (BaseService-compatible logic).
    */
-  isOpen(component: string, resetTimeoutMs: number = DEFAULT_RESET_TIMEOUT_MS): boolean {
+  isOpen(
+    component: string,
+    resetTimeoutMs: number = DEFAULT_RESET_TIMEOUT_MS,
+  ): boolean {
     const entry = this.store.get(component);
     if (!entry) return false;
     if (entry.state === 'closed' || entry.state === 'half-open') return false;

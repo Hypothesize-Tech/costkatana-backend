@@ -268,9 +268,7 @@ Refined Answer:`;
         'amazon.nova-pro-v1:0',
         { useSystemPrompt: false },
       );
-      return typeof response === 'string'
-        ? response.trim()
-        : previousAnswer;
+      return typeof response === 'string' ? response.trim() : previousAnswer;
     } catch (error) {
       return previousAnswer;
     }
@@ -324,9 +322,7 @@ Follow-up question for more information:`;
         { useSystemPrompt: false },
       );
       const refinement =
-        typeof response === 'string'
-          ? response.trim()
-          : originalQuery;
+        typeof response === 'string' ? response.trim() : originalQuery;
 
       return refinement || originalQuery;
     } catch (error) {
@@ -356,9 +352,7 @@ Final Synthesized Answer (comprehensive and well-structured):`;
         'amazon.nova-pro-v1:0',
         { useSystemPrompt: false },
       );
-      return typeof response === 'string'
-        ? response.trim()
-        : iterativeAnswer;
+      return typeof response === 'string' ? response.trim() : iterativeAnswer;
     } catch (error) {
       return iterativeAnswer;
     }

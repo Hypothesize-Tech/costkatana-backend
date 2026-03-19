@@ -96,6 +96,9 @@ export class ChatSecurityHandlerService {
   private readonly RATE_LIMIT_WINDOW = 60000; // 1 minute
   private readonly RATE_LIMIT_MAX = 100; // requests per minute
 
+  /** Tracks number of requests blocked by security checks (for getSecurityStats) */
+  private blockedRequestsCount = 0;
+
   constructor(
     private readonly configService: ConfigService,
     private readonly llmSecurityService: LlmSecurityService,
@@ -282,12 +285,14 @@ export class ChatSecurityHandlerService {
       // Stage 1: Input validation
       const validationResult = this.validateInput(message);
       if (!validationResult.passed) {
+        this.recordBlockedRequest();
         return validationResult;
       }
 
       // Stage 2: Threat detection (regex-based)
       const threatResult = this.detectThreats(message);
       if (!threatResult.passed) {
+        this.recordBlockedRequest();
         return threatResult;
       }
 
@@ -302,12 +307,14 @@ export class ChatSecurityHandlerService {
         userId,
       );
       if (!rateLimitResult.passed) {
+        this.recordBlockedRequest();
         return rateLimitResult;
       }
 
       // Stage 4: Content analysis
       const contentResult = await this.analyzeContent(message, securityContext);
       if (!contentResult.passed) {
+        this.recordBlockedRequest();
         return contentResult;
       }
 
@@ -327,6 +334,7 @@ export class ChatSecurityHandlerService {
         );
 
       if (aiSecurityResult.result.isBlocked) {
+        this.recordBlockedRequest();
         this.logger.warn('Chat message blocked by AI security check', {
           requestId: securityContext.requestId,
           userId,
@@ -389,10 +397,12 @@ export class ChatSecurityHandlerService {
   ): Promise<SecurityCheckResult> {
     const validationResult = this.validateInput(message);
     if (!validationResult.passed) {
+      this.recordBlockedRequest();
       return Promise.resolve(validationResult);
     }
     const threatResult = this.detectThreats(message);
     if (!threatResult.passed) {
+      this.recordBlockedRequest();
       return Promise.resolve(threatResult);
     }
     const rateLimitResult = this.checkRateLimit(
@@ -400,6 +410,7 @@ export class ChatSecurityHandlerService {
       userId,
     );
     if (!rateLimitResult.passed) {
+      this.recordBlockedRequest();
       return Promise.resolve(rateLimitResult);
     }
     return Promise.resolve({ passed: true, isBlocked: false });
@@ -603,16 +614,18 @@ export class ChatSecurityHandlerService {
     threatCategories: Record<string, number>;
   } {
     const activeRateLimits = this.requestCounts.size;
-
-    // This would need to be tracked separately in a real implementation
-    const blockedRequests = 0;
     const threatCategories: Record<string, number> = {};
 
     return {
       activeRateLimits,
-      blockedRequests,
+      blockedRequests: this.blockedRequestsCount,
       threatCategories,
     };
+  }
+
+  /** Increment blocked request counter when a request is blocked by security checks */
+  private recordBlockedRequest(): void {
+    this.blockedRequestsCount += 1;
   }
 
   /**

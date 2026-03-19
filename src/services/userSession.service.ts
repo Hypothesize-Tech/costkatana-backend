@@ -8,5 +8,8 @@ export { NestUserSessionService as UserSessionService };
 
 // Compat: legacy middleware calls UserSessionService.updateUserSessionActivity (instance method in Nest)
 // Add static no-op for Express middleware without DI context
-(NestUserSessionService as unknown as { updateUserSessionActivity: (id: string) => Promise<void> })
-  .updateUserSessionActivity = async () => {};
+(
+  NestUserSessionService as unknown as {
+    updateUserSessionActivity: (id: string) => Promise<void>;
+  }
+).updateUserSessionActivity = async () => {};

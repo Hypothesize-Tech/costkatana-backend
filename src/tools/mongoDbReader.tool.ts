@@ -184,8 +184,14 @@ export class MongoDbReaderTool extends Tool {
                   const val = cleanDoc._id[key];
                   if (val?.constructor?.name === 'ObjectId') {
                     cleanDoc._id[key] = val.toString();
-                  } else if (val && typeof val === 'object' && val.constructor?.name === 'ObjectId') {
-                    cleanDoc._id[key] = (val as { toString: () => string }).toString();
+                  } else if (
+                    val &&
+                    typeof val === 'object' &&
+                    val.constructor?.name === 'ObjectId'
+                  ) {
+                    cleanDoc._id[key] = (
+                      val as { toString: () => string }
+                    ).toString();
                   }
                 });
               }

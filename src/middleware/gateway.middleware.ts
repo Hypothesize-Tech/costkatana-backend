@@ -1398,12 +1398,8 @@ export const processGatewayHeaders = async (
 
   // Apply guardrails checking if user is authenticated
   if (context.userId) {
-    getGuardrailsService().checkRequestGuardrails(
-      context.userId,
-      'request',
-      1,
-      req.body?.model,
-    )
+    getGuardrailsService()
+      .checkRequestGuardrails(context.userId, 'request', 1, req.body?.model)
       .then((violation) => {
         if (violation && violation.action === 'block') {
           res.status(429).json({

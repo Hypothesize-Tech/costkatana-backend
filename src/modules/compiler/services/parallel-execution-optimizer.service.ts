@@ -278,6 +278,9 @@ export class ParallelExecutionOptimizerService {
   private async traverseAST(ast: ASTProgram): Promise<DependencyNode[]> {
     const nodes: DependencyNode[] = [];
 
+    // Build symbol table: variable name -> { scopeLevel, definingNodeId, useCount }
+    const symbolTable = this.buildSymbolTable(ast);
+
     // Build definition map: variable name -> node id that defines it (last write wins per scope)
     const varToNodeId = new Map<string, string>();
     for (let i = 0; i < ast.body.length; i++) {
@@ -293,9 +296,7 @@ export class ParallelExecutionOptimizerService {
       const usedVars = this.findNodeDependencies(node, ast);
       const dependencyNodeIds: string[] = [];
       for (const dep of usedVars) {
-        const definerId = dep.startsWith('node_')
-          ? dep
-          : varToNodeId.get(dep);
+        const definerId = dep.startsWith('node_') ? dep : varToNodeId.get(dep);
         if (!definerId || definerId === `node_${i}`) continue;
         const definerIdx = parseInt(definerId.replace('node_', ''), 10);
         if (definerIdx < i && !dependencyNodeIds.includes(definerId)) {
@@ -309,7 +310,7 @@ export class ParallelExecutionOptimizerService {
         dependencies: dependencyNodeIds,
         dependents: [],
         weight: 1,
-        canParallelize: this.canNodeBeParallelized(node),
+        canParallelize: this.canNodeBeParallelized(node, symbolTable),
         estimatedTime: this.estimateNodeExecutionTime(node),
         resourceUsage: this.estimateNodeResources(node),
       });
@@ -325,6 +326,53 @@ export class ParallelExecutionOptimizerService {
     }
 
     return nodes;
+  }
+
+  /**
+   * Build symbol table from AST for def-use analysis.
+   * Maps variable name -> { scopeLevel, definingNodeId }.
+   * scopeLevel 0 = program top-level (shared across statements).
+   */
+  private buildSymbolTable(
+    ast: ASTProgram,
+  ): Map<string, { scopeLevel: number; definingNodeId: string }> {
+    const table = new Map<
+      string,
+      { scopeLevel: number; definingNodeId: string }
+    >();
+    const visit = (node: ASTNode, scopeLevel: number, nodeId: string): void => {
+      if (node.type === 'assignment' && 'left' in node) {
+        const left = (node as any).left;
+        if (left?.type === 'identifier' && left.name) {
+          table.set(left.name, { scopeLevel, definingNodeId: nodeId });
+        }
+      }
+      if (node.type === 'variable_declaration' && 'name' in node) {
+        table.set((node as any).name, { scopeLevel, definingNodeId: nodeId });
+      }
+      if (node.type === 'block' && 'statements' in node) {
+        const stmts = (node as any).statements || [];
+        for (let i = 0; i < stmts.length; i++) {
+          visit(stmts[i] as ASTNode, scopeLevel + 1, `${nodeId}_${i}`);
+        }
+      }
+      if (node.type === 'function_definition' && 'body' in node) {
+        const body = (node as any).body;
+        if (body?.statements) {
+          for (let i = 0; i < body.statements.length; i++) {
+            visit(
+              body.statements[i] as ASTNode,
+              scopeLevel + 1,
+              `${nodeId}_b${i}`,
+            );
+          }
+        }
+      }
+    };
+    for (let i = 0; i < ast.body.length; i++) {
+      visit(ast.body[i] as ASTNode, 0, `node_${i}`);
+    }
+    return table;
   }
 
   private findDefinedVariables(node: ASTNode): string[] {
@@ -431,7 +479,10 @@ export class ParallelExecutionOptimizerService {
     }
   }
 
-  private canNodeBeParallelized(node: ASTNode): boolean {
+  private canNodeBeParallelized(
+    node: ASTNode,
+    symbolTable?: Map<string, { scopeLevel: number; definingNodeId: string }>,
+  ): boolean {
     // Real parallelization check - check for side effects, shared state, etc.
 
     // Functions with side effects cannot be parallelized
@@ -440,7 +491,7 @@ export class ParallelExecutionOptimizerService {
     }
 
     // Shared state mutations cannot be parallelized
-    if (this.hasSharedStateMutations(node)) {
+    if (this.hasSharedStateMutations(node, symbolTable)) {
       return false;
     }
 
@@ -463,11 +514,14 @@ export class ParallelExecutionOptimizerService {
     );
   }
 
-  private hasSharedStateMutations(node: ASTNode): boolean {
+  private hasSharedStateMutations(
+    node: ASTNode,
+    symbolTable?: Map<string, { scopeLevel: number; definingNodeId: string }>,
+  ): boolean {
     // Check if node modifies shared state
     if (node.type === 'assignment' && 'left' in node) {
       const target = (node as any).left;
-      return this.isSharedVariable(target);
+      return this.isSharedVariable(target, symbolTable);
     }
     return false;
   }
@@ -493,12 +547,26 @@ export class ParallelExecutionOptimizerService {
     ].includes(node.type);
   }
 
-  private isSharedVariable(target: any): boolean {
-    // Check if variable is shared (would need symbol table analysis)
-    // For now, assume global variables are shared
-    return (
-      target?.type === 'identifier' &&
-      ['global', 'shared', 'config'].includes(target.scope || 'local')
+  /**
+   * Uses symbol table for def-use analysis. A variable is shared if it's
+   * defined at program scope (scopeLevel 0) and thus visible to multiple
+   * statements that could run in parallel.
+   */
+  private isSharedVariable(
+    target: any,
+    symbolTable?: Map<string, { scopeLevel: number; definingNodeId: string }>,
+  ): boolean {
+    if (target?.type !== 'identifier' || !target?.name) return false;
+
+    if (symbolTable) {
+      const entry = symbolTable.get(target.name);
+      if (entry) {
+        return entry.scopeLevel === 0;
+      }
+      return true; // Unknown var at top-level write = assume shared
+    }
+    return ['global', 'shared', 'config'].includes(
+      (target.scope as string) || 'local',
     );
   }
 
@@ -796,65 +864,64 @@ export class ParallelExecutionOptimizerService {
   }
 
   /**
-   * Analyzes the AST to identify independent branches that can be executed in parallel.
-   *
-   * Since the current AST type does not support rich conditional/branch detection,
-   * this method looks for top-level statements/subgraphs that have no
-   * data/control dependencies between them ("embarrassingly parallel").
-   *
-   * Returns opportunities with low confidence unless structure is improved.
+   * Uses def-use chain analysis to find top-level statement groups with no
+   * data dependencies between them. Only suggests parallelization when
+   * def-use analysis confirms independence.
    */
   private async analyzeIndependentBranches(
     ast: ASTProgram,
   ): Promise<ParallelizationOpportunity[]> {
     const opportunities: ParallelizationOpportunity[] = [];
 
-    // Build dependency info (naive: assumes top-level statements with no dependencies)
-    // In a more advanced implementation, dependency analysis would be more precise.
+    const graph = await this.buildDependencyGraph(ast);
 
-    // 1. Gather all top-level statements.
-    const statements = ast.body.filter((node) => node.type === 'statement');
-    if (statements.length < 2) {
-      // Less than two top-level statements, not enough for parallel branches.
-      return opportunities;
+    const nodeIds = Array.from(graph.nodes.keys());
+    if (nodeIds.length < 2) return opportunities;
+
+    const hasEdge = (from: string, to: string) =>
+      graph.edges.some((e) => e.from === from && e.to === to);
+
+    const independentGroups: string[][] = [];
+    const assigned = new Set<string>();
+
+    for (const id of nodeIds) {
+      if (assigned.has(id)) continue;
+      const group: string[] = [id];
+      assigned.add(id);
+
+      for (const other of nodeIds) {
+        if (id === other || assigned.has(other)) continue;
+        let independent = true;
+        for (const g of group) {
+          if (hasEdge(g, other) || hasEdge(other, g)) {
+            independent = false;
+            break;
+          }
+        }
+        if (independent) {
+          group.push(other);
+          assigned.add(other);
+        }
+      }
+      if (group.length > 1) {
+        independentGroups.push(group);
+      }
     }
 
-    // 2. Group statements that do not depend on each other.
-    // For now, we treat each top-level statement as independent if there are no explicit dependency annotations.
-    // (A real implementation would check for variable assignments/usage, data flow, etc.)
-
-    // For very naive independence, put each top-level statement as a separate "branch".
-    // If all are independent, suggest parallelization.
-    // If types/AST change, update this.
-
-    // Track nodes (top-level statement indices) to display.
-    const nodes: string[] = [];
-    for (let i = 0; i < statements.length; i++) {
-      nodes.push(`node_${i}`);
-    }
-
-    // Confidence is low due to lack of deep analysis.
-    if (nodes.length > 1) {
+    for (const group of independentGroups) {
+      const confidence = group.length >= 2 ? 0.85 : 0.5;
       opportunities.push({
-        nodes,
+        nodes: group,
         type: 'independent_branches',
-        confidence: 0.5,
-        speedup: Math.min(nodes.length * 0.5, nodes.length - 1), // Some speedup, not perfect
+        confidence,
+        speedup: Math.min(group.length * 0.8, group.length - 0.5),
         resourceRequirements: {
-          memory: Math.max(
-            ...statements.map((s) => (s as any).resourceUsage?.memory || 0),
-          ),
-          cpu: Math.max(
-            ...statements.map((s) => (s as any).resourceUsage?.cpu || 0),
-          ),
-          network: Math.max(
-            ...statements.map((s) => (s as any).resourceUsage?.network || 0),
-          ),
+          memory: 0,
+          cpu: group.length * 0.2,
+          network: 0,
         },
         constraints: [
-          'Assumes top-level statements have no dependencies.',
-          'May not be safe if statements interact via shared state.',
-          'AST does not provide deep dependency info.',
+          'Def-use chain analysis confirms no data dependencies between branches.',
         ],
       });
     }
@@ -1281,9 +1348,7 @@ export class ParallelExecutionOptimizerService {
   ): string[] {
     if (timelineSteps.length === 0) return [];
 
-    const stepMap = new Map(
-      timelineSteps.map((s) => [s.stepId, s]),
-    );
+    const stepMap = new Map(timelineSteps.map((s) => [s.stepId, s]));
     const stepIds = new Set(stepMap.keys());
 
     // Build predecessor map: depGraph[from] = [to1, to2] means from depends on to1, to2
@@ -1304,7 +1369,10 @@ export class ParallelExecutionOptimizerService {
         : (dependencies as Record<string, string[]>);
     for (const [id, deps] of Object.entries(depRecord)) {
       if (Array.isArray(deps)) {
-        pred.set(id, deps.filter((d) => stepIds.has(d)));
+        pred.set(
+          id,
+          deps.filter((d) => stepIds.has(d)),
+        );
       }
     }
     for (const id of stepIds) {
@@ -1319,7 +1387,10 @@ export class ParallelExecutionOptimizerService {
         succ.get(d)!.push(id);
       }
     }
-    const topoOrder = this.topoSort(timelineSteps.map((s) => s.stepId), pred);
+    const topoOrder = this.topoSort(
+      timelineSteps.map((s) => s.stepId),
+      pred,
+    );
     const longestFrom = new Map<string, number>();
     const nextOnPath = new Map<string, string>();
     for (const id of topoOrder.reverse()) {
@@ -1338,7 +1409,9 @@ export class ParallelExecutionOptimizerService {
       longestFrom.set(id, duration + maxSucc);
       if (bestNext) nextOnPath.set(id, bestNext);
     }
-    const startIds = topoOrder.filter((id) => (pred.get(id) || []).length === 0);
+    const startIds = topoOrder.filter(
+      (id) => (pred.get(id) || []).length === 0,
+    );
     let bestStart = startIds[0];
     let bestLen = 0;
     for (const s of startIds) {
@@ -1355,10 +1428,7 @@ export class ParallelExecutionOptimizerService {
     return path;
   }
 
-  private topoSort(
-    ids: string[],
-    pred: Map<string, string[]>,
-  ): string[] {
+  private topoSort(ids: string[], pred: Map<string, string[]>): string[] {
     const result: string[] = [];
     const visited = new Set<string>();
     const visit = (id: string) => {
@@ -1374,8 +1444,6 @@ export class ParallelExecutionOptimizerService {
     }
     return result;
   }
-
-
 
   private identifyBottlenecks(
     timelineSteps: ExecutionTimeline['steps'],

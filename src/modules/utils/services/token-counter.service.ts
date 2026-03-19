@@ -503,7 +503,6 @@ export class TokenCounterService {
     text: string,
     tokenArray: number[],
   ): TokenCountResult['breakdown'] {
-
     const codePatterns = [
       /```[\s\S]*?```/g,
       /`[^`\n]+`/g,

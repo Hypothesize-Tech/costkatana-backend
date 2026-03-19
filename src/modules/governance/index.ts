@@ -35,6 +35,7 @@ import { Logger } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { AgentIdentityService } from './services/agent-identity.service';
 import { AgentDecisionAuditService } from './services/agent-decision-audit.service';
+import { GovernancePolicyStoreService } from './services/governance-policy-store.service';
 
 let moduleRef: ModuleRef | null = null;
 const logger = new Logger('Governance');
@@ -239,24 +240,30 @@ async function loadGovernancePolicies(): Promise<{
       throw new Error('ModuleRef not available for policy loading');
     }
 
-    // In a real implementation, this would load from database or configuration files
-    // For now, we'll create dynamic policies based on current system state
+    const policyStore = moduleRef.get(GovernancePolicyStoreService);
+
+    const stored = await policyStore.loadPolicies();
+    if (
+      stored &&
+      (stored.agentPolicies.length > 0 || stored.auditRules.length > 0)
+    ) {
+      logger.log(
+        `Loaded ${stored.agentPolicies.length} agent policies and ${stored.auditRules.length} audit rules from policy store`,
+      );
+      return stored;
+    }
 
     const agentIdentityService = moduleRef.get(AgentIdentityService);
-    const auditService = moduleRef.get(AgentDecisionAuditService);
 
-    // Load existing identities to create appropriate policies
     const identities = await agentIdentityService.getAllIdentities();
-
-    // Create agent policies based on identity types
     const agentPolicies = createAgentPoliciesFromIdentities(identities);
-
-    // Create audit rules based on system configuration
     const auditRules = createAuditRulesFromConfiguration();
 
     logger.log(
-      `Loaded ${agentPolicies.length} agent policies and ${auditRules.length} audit rules`,
+      `Policy store empty - generated ${agentPolicies.length} agent policies and ${auditRules.length} audit rules dynamically; persisting to store`,
     );
+
+    await policyStore.savePolicies({ agentPolicies, auditRules });
 
     return {
       agentPolicies,
@@ -264,7 +271,6 @@ async function loadGovernancePolicies(): Promise<{
     };
   } catch (error) {
     logger.error('Failed to load governance policies', { error });
-    // Return default policies as fallback
     return {
       agentPolicies: [
         {

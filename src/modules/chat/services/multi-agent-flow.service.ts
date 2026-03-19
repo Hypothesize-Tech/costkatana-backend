@@ -537,7 +537,8 @@ Provide a concise summary highlighting the most relevant and current information
         return await BedrockService.invokeModel(prompt, 'amazon.nova-pro-v1:0');
       });
 
-      const summary = typeof response === 'string' ? response : String(response ?? '');
+      const summary =
+        typeof response === 'string' ? response : String(response ?? '');
       const cost =
         typeof response === 'object' && response && 'cost' in response
           ? (response as any).cost

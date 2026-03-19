@@ -37,7 +37,8 @@ export class JiraMCP extends BaseIntegrationMCP {
    * Get Jira Cloud domain from connection
    */
   private async getJiraDomain(connectionId: string): Promise<string> {
-    const { Integration } = await import('../../schemas/integration/integration.schema');
+    const { Integration } =
+      await import('../../schemas/integration/integration.schema');
     const conn = await Integration.findById(connectionId);
 
     if (!conn) {

@@ -7,6 +7,10 @@ import {
   SubscriptionDocument,
 } from '../../../schemas/core/subscription.schema';
 import {
+  SubscriptionHistory,
+  SubscriptionHistoryDocument,
+} from '../../../schemas/billing/subscription-history.schema';
+import {
   RevenueMetrics,
   SubscriptionMetrics,
   ConversionMetrics,
@@ -28,6 +32,8 @@ export class AdminRevenueAnalyticsService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(Subscription.name)
     private subscriptionModel: Model<SubscriptionDocument>,
+    @InjectModel(SubscriptionHistory.name)
+    private subscriptionHistoryModel: Model<SubscriptionHistoryDocument>,
   ) {}
 
   /**
@@ -435,7 +441,19 @@ export class AdminRevenueAnalyticsService {
         startDate: dateFilter,
       });
 
-      const plusToPro = 0; // Would require plan-change tracking (e.g. previousPlan on Subscription or separate events)
+      const plusToProDateFilter =
+        startDate || endDate
+          ? {
+              ...(startDate && { $gte: startDate }),
+              ...(endDate && { $lte: endDate }),
+            }
+          : { $gte: periodStart, $lte: now };
+      const plusToPro = await this.subscriptionHistoryModel.countDocuments({
+        oldPlan: 'plus',
+        newPlan: 'pro',
+        changeType: 'upgrade',
+        createdAt: plusToProDateFilter,
+      });
 
       const freeToPlus = plusUsers;
       const freeToPro = proUsers;

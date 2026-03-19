@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ScheduleModule } from '@nestjs/schedule';
 import {
@@ -18,7 +18,6 @@ import { PricingRealtimeController } from './pricing-realtime.controller';
 import { PricingRegistryService } from './services/pricing-registry.service';
 import { RealtimePricingService } from './services/realtime-pricing.service';
 import { WebScraperService } from './services/web-scraper.service';
-import { UtilsModule } from '../utils/utils.module';
 
 /**
  * Pricing Module
@@ -35,7 +34,7 @@ import { UtilsModule } from '../utils/utils.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
-    UtilsModule,
+    forwardRef(() => require('../utils/utils.module').UtilsModule), // Lazy require breaks cycle
     // Register AIModelPricing schema for MongoDB operations
     MongooseModule.forFeature([
       { name: AIModelPricing.name, schema: AIModelPricingSchema },

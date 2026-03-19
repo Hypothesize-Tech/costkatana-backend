@@ -1056,11 +1056,24 @@ export class VectorMaintenanceJob {
    */
   private async getCachedIndexStats(): Promise<VectorIndexStats | null> {
     try {
-      // Try to get from Redis cache first
       const cacheKey = 'vector-maintenance:index-stats';
 
-      // Redis caching would be implemented here if available
-      // For now, we rely on database caching
+      const cached = await this.cacheService.get<VectorIndexStats>(cacheKey);
+      if (cached && typeof cached === 'object') {
+        const stats = cached as VectorIndexStats;
+        if (
+          typeof stats.totalDocuments === 'number' &&
+          typeof stats.vectorizedDocuments === 'number'
+        ) {
+          return {
+            ...stats,
+            lastMaintenance:
+              stats.lastMaintenance instanceof Date
+                ? stats.lastMaintenance
+                : new Date(stats.lastMaintenance),
+          };
+        }
+      }
 
       // Fall back to database cache
       const statsCollection =
@@ -1090,7 +1103,7 @@ export class VectorMaintenanceJob {
   private async updateCachedIndexStats(stats: VectorIndexStats): Promise<void> {
     try {
       const cacheKey = 'vector-maintenance:index-stats';
-      const cacheTtl = 3600; // 1 hour TTL
+      const cacheTtl = 300; // 5 min TTL for index stats (frequently refreshed)
 
       // Try Redis caching first (primary)
       try {

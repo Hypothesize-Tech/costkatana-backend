@@ -1198,7 +1198,7 @@ export class OptimizationManagerTool extends Tool {
       'content-generation': ['creative-writing', 'text-generation'],
       'api-integration': ['text-generation', 'efficient'],
       'data-analysis': ['analysis', 'reasoning'],
-      'chatbot': ['text-generation', 'efficient'],
+      chatbot: ['text-generation', 'efficient'],
     };
     const needed = useCaseFeatures[useCase] || ['text-generation'];
     const matchCount = needed.filter((f) =>
@@ -1317,15 +1317,15 @@ export class OptimizationManagerTool extends Tool {
 
     let confidence = 60;
     const priceDelta = Math.abs(
-      currentP.inputPrice + currentP.outputPrice - altP.inputPrice - altP.outputPrice,
+      currentP.inputPrice +
+        currentP.outputPrice -
+        altP.inputPrice -
+        altP.outputPrice,
     );
     const avgPrice = (currentP.inputPrice + altP.inputPrice) / 2;
     if (avgPrice > 0 && priceDelta / avgPrice > 0.2) confidence += 15;
     if (currentP.category === altP.category) confidence += 10;
-    if (
-      currentP.contextWindow >= 100000 &&
-      altP.contextWindow >= 100000
-    )
+    if (currentP.contextWindow >= 100000 && altP.contextWindow >= 100000)
       confidence += 5;
 
     return Math.min(95, confidence);

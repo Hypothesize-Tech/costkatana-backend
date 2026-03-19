@@ -7,6 +7,10 @@ import {
   BestPractice,
 } from '../../../schemas/ai/global-benchmark.schema';
 import { ModelPerformanceFingerprint } from '../../../schemas/ai/model-performance-fingerprint.schema';
+import {
+  OptimizationOutcome,
+  OptimizationOutcomeDocument,
+} from '../../../schemas/analytics/optimization-outcome.schema';
 import { Telemetry } from '../../../schemas/core/telemetry.schema';
 import { Usage } from '../../../schemas/core/usage.schema';
 import { InjectModel } from '@nestjs/mongoose';
@@ -49,6 +53,8 @@ export class GlobalBenchmarksService {
     private telemetryModel: Model<any>,
     @InjectModel(Usage.name)
     private usageModel: Model<any>,
+    @InjectModel(OptimizationOutcome.name)
+    private optimizationOutcomeModel: Model<OptimizationOutcomeDocument>,
   ) {}
 
   /**
@@ -360,10 +366,16 @@ export class GlobalBenchmarksService {
       rawData.outputTokens.push(u.completionTokens || 0);
       rawData.totalTokens.push(u.totalTokens || 0);
 
-      const cacheHits = (u as any).promptCaching?.cacheHits ?? (u as any).metadata?.cacheHits ?? 0;
+      const cacheHits =
+        (u as any).promptCaching?.cacheHits ??
+        (u as any).metadata?.cacheHits ??
+        0;
       rawData.cacheHits += cacheHits;
 
-      const retryCount = (u as any).metadata?.retryCount ?? (u as any).metadata?.retryAttempts ?? 0;
+      const retryCount =
+        (u as any).metadata?.retryCount ??
+        (u as any).metadata?.retryAttempts ??
+        0;
       rawData.retryCounts.push(typeof retryCount === 'number' ? retryCount : 0);
 
       if (!u.errorOccurred) rawData.successCount++;
@@ -443,10 +455,16 @@ export class GlobalBenchmarksService {
       rawData.outputTokens.push(u.completionTokens || 0);
       rawData.totalTokens.push(u.totalTokens || 0);
 
-      const cacheHits = (u as any).promptCaching?.cacheHits ?? (u as any).metadata?.cacheHits ?? 0;
+      const cacheHits =
+        (u as any).promptCaching?.cacheHits ??
+        (u as any).metadata?.cacheHits ??
+        0;
       rawData.cacheHits += cacheHits;
 
-      const retryCount = (u as any).metadata?.retryCount ?? (u as any).metadata?.retryAttempts ?? 0;
+      const retryCount =
+        (u as any).metadata?.retryCount ??
+        (u as any).metadata?.retryAttempts ??
+        0;
       rawData.retryCounts.push(typeof retryCount === 'number' ? retryCount : 0);
 
       if (!u.errorOccurred) rawData.successCount++;
@@ -681,6 +699,34 @@ export class GlobalBenchmarksService {
   }
 
   /**
+   * Compute adoption rate from OptimizationOutcome: applied / total in date range
+   */
+  private async getAdoptionRate(
+    startDate: Date,
+    endDate: Date,
+    optimizationType?: string,
+  ): Promise<number> {
+    try {
+      const match: Record<string, unknown> = {
+        timestamp: { $gte: startDate, $lte: endDate },
+      };
+      if (optimizationType) {
+        match.optimizationType = optimizationType;
+      }
+      const [total, applied] = await Promise.all([
+        this.optimizationOutcomeModel.countDocuments(match),
+        this.optimizationOutcomeModel.countDocuments({
+          ...match,
+          'outcome.applied': true,
+        }),
+      ]);
+      return total > 0 ? applied / total : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
    * Derive best practices
    */
   private async deriveBestPractices(
@@ -701,6 +747,21 @@ export class GlobalBenchmarksService {
           (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24),
         ) || 1;
 
+      const adoptionRateModel = await this.getAdoptionRate(
+        startDate,
+        endDate,
+        'model_switch',
+      );
+      const adoptionRateCaching = await this.getAdoptionRate(
+        startDate,
+        endDate,
+        'caching',
+      );
+      const adoptionRateGeneral = await this.getAdoptionRate(
+        startDate,
+        endDate,
+      );
+
       // Example: Incorporate analysis window into descriptions for more context
       // Model selection practice
       if (
@@ -711,7 +772,8 @@ export class GlobalBenchmarksService {
         bestPractices.push({
           practiceType: 'model_selection',
           description: `From ${startDate.toDateString()} to ${endDate.toDateString()}, use ${bestModel.modelId} for optimal balance of cost and performance`,
-          adoptionRate: 0.3, // Would need real adoption data
+          adoptionRate:
+            adoptionRateModel > 0 ? adoptionRateModel : adoptionRateGeneral,
           avgCostSavings:
             latestBenchmark.metrics.avgCostPerRequest *
             0.2 *
@@ -727,7 +789,8 @@ export class GlobalBenchmarksService {
         bestPractices.push({
           practiceType: 'caching_strategy',
           description: `Between ${startDate.toDateString()} and ${endDate.toDateString()}, implement intelligent response caching to reduce costs and latency`,
-          adoptionRate: 0.6,
+          adoptionRate:
+            adoptionRateCaching > 0 ? adoptionRateCaching : adoptionRateGeneral,
           avgCostSavings:
             latestBenchmark.metrics.avgCostPerRequest *
             latestBenchmark.metrics.avgCacheHitRate *
@@ -743,7 +806,7 @@ export class GlobalBenchmarksService {
         bestPractices.push({
           practiceType: 'rate_limiting',
           description: `During ${analysisPeriodDays} day period, implement user-level rate limiting to prevent API abuse`,
-          adoptionRate: 0.4,
+          adoptionRate: adoptionRateGeneral,
           avgCostSavings:
             latestBenchmark.metrics.avgCostPerRequest *
             0.1 *

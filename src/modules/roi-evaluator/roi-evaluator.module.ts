@@ -15,7 +15,11 @@ import { EmailModule } from '../email/email.module';
     EmailModule,
   ],
   controllers: [RoiEvaluatorController],
-  providers: [RoiEvaluatorService, BenchmarkFetcherService, RoiCalculatorService],
+  providers: [
+    RoiEvaluatorService,
+    BenchmarkFetcherService,
+    RoiCalculatorService,
+  ],
   exports: [RoiEvaluatorService],
 })
 export class RoiEvaluatorModule {}

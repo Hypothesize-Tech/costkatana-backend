@@ -501,10 +501,7 @@ export class AgentTraceService {
   ): Promise<{ throughputValues: number[]; errorRateCurrent: number }> {
     const windowEnd = toDate;
     const windowStart = new Date(
-      Math.max(
-        fromDate.getTime(),
-        windowEnd.getTime() - 24 * 3600 * 1000,
-      ),
+      Math.max(fromDate.getTime(), windowEnd.getTime() - 24 * 3600 * 1000),
     );
 
     const pipeline = [
@@ -523,10 +520,7 @@ export class AgentTraceService {
         $group: {
           _id: {
             $floor: {
-              $divide: [
-                { $subtract: ['$createdAt', windowStart] },
-                3600000,
-              ],
+              $divide: [{ $subtract: ['$createdAt', windowStart] }, 3600000],
             },
           },
           count: { $sum: 1 },
@@ -535,9 +529,8 @@ export class AgentTraceService {
       },
     ];
 
-    const results = await this.usageModel.aggregate<
-      { _id: number; count: number; errors: number }
-    >(pipeline)
+    const results = await this.usageModel
+      .aggregate<{ _id: number; count: number; errors: number }>(pipeline)
       .exec();
 
     const throughputValues = Array.from({ length: 24 }, () => 0);

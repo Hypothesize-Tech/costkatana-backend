@@ -34,14 +34,10 @@ export {
 } from '../modules/governance/services/agent-identity.service';
 export type { AgentTokenPayload } from '../modules/governance/services/agent-identity.service';
 
-export {
-  AgentDecisionAuditService,
-} from '../modules/governance/services/agent-decision-audit.service';
+export { AgentDecisionAuditService } from '../modules/governance/services/agent-decision-audit.service';
 export type { RecordDecisionOptions } from '../modules/governance/services/agent-decision-audit.service';
 
-export {
-  AgentRateLimitService,
-} from '../modules/governance/services/agent-rate-limit.service';
+export { AgentRateLimitService } from '../modules/governance/services/agent-rate-limit.service';
 export type {
   RateLimitLevel,
   RateLimitResult,

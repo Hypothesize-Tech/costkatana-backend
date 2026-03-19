@@ -311,6 +311,9 @@ export class User implements IUserMethods {
   @Prop({ enum: ['email', 'google', 'github'] })
   lastLoginMethod?: 'email' | 'google' | 'github';
 
+  @Prop({ type: MongooseSchema.Types.Mixed })
+  optimizationConfig?: Record<string, any>;
+
   @Prop({ uppercase: true, trim: true, maxlength: 2 })
   country?: string;
 

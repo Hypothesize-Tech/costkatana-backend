@@ -48,7 +48,10 @@ export class FileSystemTool extends Tool {
           if (!filePath || !params.content) {
             return "Error: 'path' and 'content' are required for write operation.";
           }
-          await getContextFileManagerService().writeFile(filePath, params.content);
+          await getContextFileManagerService().writeFile(
+            filePath,
+            params.content,
+          );
           return `Successfully wrote to ${filePath}`;
 
         case 'read':
@@ -58,16 +61,20 @@ export class FileSystemTool extends Tool {
         case 'search':
           if (!filePath || !params.pattern)
             return "Error: 'path' and 'pattern' required.";
-          const results = await getContextFileManagerService().searchInContextFile(
-            filePath,
-            params.pattern,
-          );
+          const results =
+            await getContextFileManagerService().searchInContextFile(
+              filePath,
+              params.pattern,
+            );
           return JSON.stringify(results, null, 2);
 
         case 'tail':
           if (!filePath) return "Error: 'path' is required.";
           const lines = params.lines || 50;
-          return await getContextFileManagerService().tailContextFile(filePath, lines);
+          return await getContextFileManagerService().tailContextFile(
+            filePath,
+            lines,
+          );
 
         case 'list':
           const subDir = params.path || '';

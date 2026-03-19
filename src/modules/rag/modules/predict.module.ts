@@ -103,8 +103,7 @@ Predicted answer:`;
         'amazon.nova-pro-v1:0',
         { useSystemPrompt: false },
       );
-      const prediction =
-        typeof response === 'string' ? response.trim() : null;
+      const prediction = typeof response === 'string' ? response.trim() : null;
 
       if (prediction) {
         return [prediction];

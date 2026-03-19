@@ -175,7 +175,8 @@ export abstract class BaseIntegrationMCP {
         }
 
         case 'aws': {
-          const { AWSConnection } = await import('../../schemas/integration/aws-connection.schema');
+          const { AWSConnection } =
+            await import('../../schemas/integration/aws-connection.schema');
           const connection = await AWSConnection.findById(
             new Types.ObjectId(connectionId),
           );
@@ -192,7 +193,8 @@ export abstract class BaseIntegrationMCP {
 
         default: {
           // For generic integrations (Slack, Discord, Jira, Linear)
-          const { Integration } = await import('../../schemas/integration/integration.schema');
+          const { Integration } =
+            await import('../../schemas/integration/integration.schema');
           const connection = await Integration.findById(
             new Types.ObjectId(connectionId),
           );

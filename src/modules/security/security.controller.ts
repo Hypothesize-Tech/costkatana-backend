@@ -11,12 +11,12 @@ import {
   NotFoundException,
   BadRequestException,
   ServiceUnavailableException,
-  HttpException,
-  HttpStatus,
   Res,
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { Response } from 'express';
 import { Types } from 'mongoose';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -33,6 +33,10 @@ import {
   TopRiskyPromptsQueryDto,
   ExportReportQueryDto,
 } from './dto';
+import {
+  UserFirewallConfig,
+  UserFirewallConfigDocument,
+} from '../../schemas/security/user-firewall-config.schema';
 
 @Controller('api/security')
 @UseGuards(JwtAuthGuard)
@@ -57,6 +61,8 @@ export class SecurityController implements OnModuleInit, OnModuleDestroy {
     private readonly llmSecurityService: LlmSecurityService,
     private readonly promptFirewallService: PromptFirewallService,
     private readonly preTransmissionFilterService: PreTransmissionFilterService,
+    @InjectModel(UserFirewallConfig.name)
+    private readonly userFirewallConfigModel: Model<UserFirewallConfigDocument>,
   ) {}
 
   onModuleInit() {
@@ -395,10 +401,25 @@ export class SecurityController implements OnModuleInit, OnModuleDestroy {
     const userId = user.id;
     this.logger.log(`updateFirewallConfig started for user ${userId}`);
 
-    // Validate configuration
-    const validConfig = this.promptFirewallService.parseConfigFromHeaders(
-      dto as any,
+    const defaultConfig = this.promptFirewallService.getDefaultConfig();
+    const validConfig = {
+      ...defaultConfig,
+      ...(dto as Partial<typeof defaultConfig>),
+    };
+
+    await this.userFirewallConfigModel.findOneAndUpdate(
+      { userId: new Types.ObjectId(userId) },
+      {
+        $set: {
+          ...validConfig,
+          userId: new Types.ObjectId(userId),
+          updatedAt: new Date(),
+        },
+      },
+      { upsert: true, new: true },
     );
+
+    this.setCachedFirewallConfig(userId, validConfig);
 
     const duration = Date.now() - startTime;
     this.logger.log(`updateFirewallConfig completed for user ${userId}`, {
@@ -407,7 +428,6 @@ export class SecurityController implements OnModuleInit, OnModuleDestroy {
       duration,
     });
 
-    // Log business event
     this.logger.log('Firewall config updated', {
       event: 'firewall_config_updated',
       category: 'security',
@@ -436,11 +456,36 @@ export class SecurityController implements OnModuleInit, OnModuleDestroy {
     const userId = user.id;
     this.logger.log(`getFirewallConfig started for user ${userId}`);
 
-    // In a real implementation, you'd fetch user-specific config from database
-    const config = this.promptFirewallService.getDefaultConfig();
+    const cached = this.getCachedFirewallConfig(userId);
+    if (cached) {
+      return { success: true, data: cached };
+    }
+
+    const stored = await this.userFirewallConfigModel
+      .findOne({ userId: new Types.ObjectId(userId) })
+      .lean();
+
+    const defaultConfig = this.promptFirewallService.getDefaultConfig();
+    const config = stored
+      ? {
+          enableBasicFirewall: stored.enableBasicFirewall,
+          enableAdvancedFirewall: stored.enableAdvancedFirewall,
+          enableRAGSecurity: stored.enableRAGSecurity,
+          enableToolSecurity: stored.enableToolSecurity,
+          promptGuardThreshold: stored.promptGuardThreshold,
+          openaiSafeguardThreshold: stored.openaiSafeguardThreshold,
+          ragSecurityThreshold: stored.ragSecurityThreshold,
+          toolSecurityThreshold: stored.toolSecurityThreshold,
+          sandboxHighRisk: stored.sandboxHighRisk,
+          requireHumanApproval: stored.requireHumanApproval,
+        }
+      : defaultConfig;
+
+    this.setCachedFirewallConfig(userId, config);
 
     this.logger.log(`getFirewallConfig completed for user ${userId}`, {
       hasConfig: !!config,
+      fromDb: !!stored,
       configKeys: Object.keys(config || {}),
       duration: Date.now() - startTime,
     });

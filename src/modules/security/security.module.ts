@@ -1,5 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { CommonModule } from '../../common/common.module';
 import {
   ThreatLog,
   ThreatLogSchema,
@@ -24,7 +25,13 @@ import {
   SecurityAlert,
   SecurityAlertSchema,
 } from '../../schemas/security/security-alert.schema';
+import {
+  UserFirewallConfig,
+  UserFirewallConfigSchema,
+} from '../../schemas/security/user-firewall-config.schema';
 import { AuthModule } from '../auth/auth.module';
+import { EmailModule } from '../email/email.module';
+import { IntegrationModule } from '../integration/integration.module';
 import { HtmlSecurityService } from './html-security.service';
 import { PromptFirewallService } from './prompt-firewall.service';
 import { LlmSecurityService } from './llm-security.service';
@@ -38,7 +45,10 @@ import { SecurityController } from './security.controller';
 
 @Module({
   imports: [
+    forwardRef(() => CommonModule),
     AuthModule,
+    EmailModule,
+    forwardRef(() => IntegrationModule),
     MongooseModule.forFeature([
       { name: ThreatLog.name, schema: ThreatLogSchema },
       { name: TraceSpan.name, schema: TraceSpanSchema },
@@ -46,6 +56,10 @@ import { SecurityController } from './security.controller';
       { name: UserDataConsent.name, schema: UserDataConsentSchema },
       { name: ComprehensiveAudit.name, schema: ComprehensiveAuditSchema },
       { name: SecurityAlert.name, schema: SecurityAlertSchema },
+      {
+        name: UserFirewallConfig.name,
+        schema: UserFirewallConfigSchema,
+      },
     ]),
   ],
   controllers: [SecurityController],

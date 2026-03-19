@@ -361,13 +361,13 @@ export class CortexLongHandshakeService {
     session: HandshakeSession,
     request: any,
   ): Promise<any> {
-    const promptText =
-      typeof request.prompt === 'string' ? request.prompt : '';
-    const estimatedTokens = promptText
-      ? estimateTokenCount(promptText)
-      : 100;
+    const promptText = typeof request.prompt === 'string' ? request.prompt : '';
+    const estimatedTokens = promptText ? estimateTokenCount(promptText) : 100;
 
-    const complexity = this.computeRequestComplexity(promptText, estimatedTokens);
+    const complexity = this.computeRequestComplexity(
+      promptText,
+      estimatedTokens,
+    );
 
     return {
       complexity,
@@ -393,8 +393,7 @@ export class CortexLongHandshakeService {
     else if (estimatedTokens > 500) score += 1;
     if (prompt && /```[\s\S]*?```/g.test(prompt)) score += 1;
     if (prompt && (prompt.match(/\n/g) ?? []).length > 10) score += 1;
-    if (prompt && (prompt.match(/\?/g) ?? []).length > 2)
-      score += 1;
+    if (prompt && (prompt.match(/\?/g) ?? []).length > 2) score += 1;
     if (score >= 3) return 'high';
     if (score >= 1) return 'medium';
     return 'low';

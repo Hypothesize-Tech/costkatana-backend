@@ -372,13 +372,13 @@ export const auditMongoDBMCPOperation = async (
         },
         timestamp: new Date(),
       }).catch((error: unknown) => {
-          // Log but don't fail the request
-          loggingService.error('Failed to create MongoDB MCP audit log', {
-            component: 'mongodbMcpMiddleware',
-            operation: 'auditMongoDBMCPOperation',
-            error: error instanceof Error ? error.message : String(error),
-          });
+        // Log but don't fail the request
+        loggingService.error('Failed to create MongoDB MCP audit log', {
+          component: 'mongodbMcpMiddleware',
+          operation: 'auditMongoDBMCPOperation',
+          error: error instanceof Error ? error.message : String(error),
         });
+      });
     }
 
     return originalSend.call(this, data);

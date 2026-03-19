@@ -714,13 +714,21 @@ export class UsageService implements OnModuleDestroy {
         { $limit: 10 },
       ]);
 
-      // Get project usage
+      // Get project usage with $lookup for project name
       const projectStats = await this.usageModel.aggregate([
         { $match: { ...matchQuery, projectId: { $exists: true } } },
         {
           $group: {
             _id: '$projectId',
             usage: { $sum: 1 },
+          },
+        },
+        {
+          $lookup: {
+            from: 'projects',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'projectDoc',
           },
         },
         { $sort: { usage: -1 } },
@@ -755,7 +763,7 @@ export class UsageService implements OnModuleDestroy {
         })),
         projects: projectStats.map((p) => ({
           id: p._id,
-          name: p._id, // Would need to join with project collection for name
+          name: (Array.isArray(p.projectDoc) && p.projectDoc[0]?.name) ?? p._id,
           usage: p.usage,
         })),
         services: serviceStats.map((s) => ({

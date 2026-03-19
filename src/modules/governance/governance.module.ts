@@ -9,9 +9,14 @@ import {
   AgentDecisionAudit,
   AgentDecisionAuditSchema,
 } from './schemas/agent-decision-audit.schema';
+import {
+  GovernancePolicy,
+  GovernancePolicySchema,
+} from './schemas/governance-policy.schema';
 import { AgentIdentityService } from './services/agent-identity.service';
 import { AgentDecisionAuditService } from './services/agent-decision-audit.service';
 import { AgentRateLimitService } from './services/agent-rate-limit.service';
+import { GovernancePolicyStoreService } from './services/governance-policy-store.service';
 import { setGovernanceModuleRef } from './index';
 
 /**
@@ -24,17 +29,20 @@ import { setGovernanceModuleRef } from './index';
     MongooseModule.forFeature([
       { name: AgentIdentity.name, schema: AgentIdentitySchema },
       { name: AgentDecisionAudit.name, schema: AgentDecisionAuditSchema },
+      { name: GovernancePolicy.name, schema: GovernancePolicySchema },
     ]),
   ],
   providers: [
     AgentIdentityService,
     AgentDecisionAuditService,
     AgentRateLimitService,
+    GovernancePolicyStoreService,
   ],
   exports: [
     AgentIdentityService,
     AgentDecisionAuditService,
     AgentRateLimitService,
+    GovernancePolicyStoreService,
   ],
 })
 export class GovernanceModule implements OnModuleInit {

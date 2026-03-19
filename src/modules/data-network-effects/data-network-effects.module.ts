@@ -34,6 +34,10 @@ import {
   GlobalBenchmark,
   GlobalBenchmarkSchema,
 } from '../../schemas/ai/global-benchmark.schema';
+import {
+  OptimizationOutcome,
+  OptimizationOutcomeSchema,
+} from '../../schemas/analytics/optimization-outcome.schema';
 
 // Import related models
 import {
@@ -69,6 +73,10 @@ import { AILog, AILogSchema } from '../../schemas/ai/ai-log.schema';
       {
         name: GlobalBenchmark.name,
         schema: GlobalBenchmarkSchema,
+      },
+      {
+        name: OptimizationOutcome.name,
+        schema: OptimizationOutcomeSchema,
       },
       {
         name: Telemetry.name,

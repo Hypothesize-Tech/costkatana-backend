@@ -113,9 +113,7 @@ const CONTROL_FLOW_TYPES = [
  * Executes control flow logic within Cortex expressions
  */
 export class ControlFlowProcessor {
-  constructor(
-    private readonly expressionExecutor?: ExpressionExecutor,
-  ) {}
+  constructor(private readonly expressionExecutor?: ExpressionExecutor) {}
 
   /**
    * Process a control flow frame
@@ -394,10 +392,7 @@ export class ControlFlowProcessor {
     }
 
     // Expression with simple value - resolve via context
-    if (
-      'value' in expression &&
-      expression.value !== undefined
-    ) {
+    if ('value' in expression && expression.value !== undefined) {
       return this.evaluateValue(expression.value, context);
     }
 

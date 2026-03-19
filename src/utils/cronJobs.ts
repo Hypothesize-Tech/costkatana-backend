@@ -292,7 +292,8 @@ export const initializeCronJobs = () => {
       schedule: '0 */4 * * *',
     });
     try {
-      const { Subscription } = await import('../schemas/core/subscription.schema');
+      const { Subscription } =
+        await import('../schemas/core/subscription.schema');
       const subscriptions = await Subscription.find({
         status: { $in: ['active', 'trialing'] },
       }).select('userId');

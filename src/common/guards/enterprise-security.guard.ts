@@ -288,11 +288,7 @@ export class EnterpriseSecurityGuard implements CanActivate {
 
           // For AI processing, check actual user consent records from DB
           let consentObtained = true;
-          if (
-            isAIProcessing &&
-            this.aiProviderAuditService &&
-            content
-          ) {
+          if (isAIProcessing && this.aiProviderAuditService && content) {
             const aiCompliance =
               await this.aiProviderAuditService.checkCompliance(content, {
                 userId: context.userId,

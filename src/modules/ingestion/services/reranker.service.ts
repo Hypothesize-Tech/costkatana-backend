@@ -104,8 +104,7 @@ Return ONLY the JSON array, no other text.`;
       );
 
       let scores: number[] = [];
-      const responseText =
-        typeof response === 'string' ? response.trim() : '';
+      const responseText = typeof response === 'string' ? response.trim() : '';
       if (responseText) {
         const jsonMatch = responseText.match(/\[[\d.,\s]+\]/);
         if (jsonMatch) {
@@ -193,8 +192,19 @@ Return ONLY the JSON array, no other text.`;
         });
       }
 
-      // Boost recent chunks (if we have indexedAt in metadata)
-      // This would require adding indexedAt to HybridSearchResult metadata
+      // Recency boost: newer chunks get a small score boost (time-decay over 90 days)
+      if (candidate.metadata?.indexedAt) {
+        const indexedAt =
+          typeof candidate.metadata.indexedAt === 'number'
+            ? candidate.metadata.indexedAt
+            : new Date(candidate.metadata.indexedAt).getTime();
+        const ageMs = Date.now() - indexedAt;
+        const ageDays = ageMs / (24 * 60 * 60 * 1000);
+        const halfLifeDays = 90;
+        const recencyBoost =
+          0.15 * Math.max(0, Math.exp(-ageDays / halfLifeDays));
+        score += recencyBoost;
+      }
 
       return {
         ...candidate,

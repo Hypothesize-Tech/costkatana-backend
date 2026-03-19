@@ -60,10 +60,7 @@ export class OrganizationController {
   }
 
   @Get(':id')
-  async getOne(
-    @CurrentUser('id') userId: string,
-    @Param('id') id: string,
-  ) {
+  async getOne(@CurrentUser('id') userId: string, @Param('id') id: string) {
     const organization = await this.organizationService.getOrganizationById(id);
     if (!organization) {
       throw new NotFoundException('Organization not found');
@@ -91,10 +88,7 @@ export class OrganizationController {
   }
 
   @Delete(':id')
-  async delete(
-    @CurrentUser('id') userId: string,
-    @Param('id') id: string,
-  ) {
+  async delete(@CurrentUser('id') userId: string, @Param('id') id: string) {
     await this.organizationService.delete(id, userId);
     return {
       success: true,

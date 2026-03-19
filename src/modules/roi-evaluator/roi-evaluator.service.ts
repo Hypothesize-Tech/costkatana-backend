@@ -75,7 +75,9 @@ export class RoiEvaluatorService {
       email: email.toLowerCase().trim(),
       companyName: companyName?.trim(),
       roiResultId: roiResult?.resultId,
-      roiResultSnapshot: roiResult ? this.sanitizeForStorage(roiResult) : undefined,
+      roiResultSnapshot: roiResult
+        ? this.sanitizeForStorage(roiResult)
+        : undefined,
     });
 
     if (skipEmail) {
@@ -100,7 +102,8 @@ export class RoiEvaluatorService {
       this.logger.warn('Email delivery failed for ROI lead (lead saved)', {
         email,
         leadId: lead._id,
-        error: emailError instanceof Error ? emailError.message : String(emailError),
+        error:
+          emailError instanceof Error ? emailError.message : String(emailError),
       });
       return {
         success: true,

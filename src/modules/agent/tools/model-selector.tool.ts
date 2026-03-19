@@ -607,7 +607,9 @@ Input should be a JSON string with:
       successRate: providerData.reliability,
       totalRequests: 0,
       hasRealData: false,
-      _meta: { note: 'totalRequests requires usage analytics integration; 0 indicates no real data' },
+      _meta: {
+        note: 'totalRequests requires usage analytics integration; 0 indicates no real data',
+      },
     };
   }
 
@@ -771,9 +773,6 @@ Input should be a JSON string with:
     scenario: string,
     modelInfo: any,
   ): Promise<string> {
-    // This would implement actual API calls to different providers
-    // For now, this is a simplified implementation
-
     const provider = modelInfo.provider.toLowerCase();
 
     switch (provider) {
@@ -896,7 +895,9 @@ Input should be a JSON string with:
         modelInfo.model,
       );
 
-      return typeof result === 'string' ? result : (result as { response?: string })?.response ?? '';
+      return typeof result === 'string'
+        ? result
+        : ((result as { response?: string })?.response ?? '');
     } catch (error) {
       this.logger.error('Bedrock API call failed', {
         model: modelInfo.model,
@@ -1084,7 +1085,9 @@ Input should be a JSON string with:
         const scenarioTime = Date.now() - scenarioStartTime;
         totalTime += scenarioTime;
         const inputTokens = Math.ceil(scenario.prompt.length / 4);
-        const outputTokens = Math.ceil((typeof responseText === 'string' ? responseText : '').length / 4);
+        const outputTokens = Math.ceil(
+          (typeof responseText === 'string' ? responseText : '').length / 4,
+        );
         totalTokens += inputTokens + outputTokens;
         totalCost += 0; // Cost not returned by invokeModel; use 0 or calculate via pricing util
 

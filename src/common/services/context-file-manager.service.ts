@@ -458,7 +458,8 @@ export class ContextFileManagerService {
     const lines = content.split('\n');
     const results: Array<{ line: number; content: string }> = [];
     lines.forEach((line, i) => {
-      if (new RegExp(pattern, 'gi').test(line)) results.push({ line: i + 1, content: line });
+      if (new RegExp(pattern, 'gi').test(line))
+        results.push({ line: i + 1, content: line });
     });
     return results;
   }

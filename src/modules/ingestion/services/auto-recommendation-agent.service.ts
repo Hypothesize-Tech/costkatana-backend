@@ -338,7 +338,11 @@ export class AutoRecommendationAgentService {
       ]);
 
       const costsByDay =
-        (monthlyStats.usageOverTime as Array<{ date: string; cost: number; requests: number }>) || [];
+        (monthlyStats.usageOverTime as Array<{
+          date: string;
+          cost: number;
+          requests: number;
+        }>) || [];
       const costTrend = this.calculateCostTrend(
         costsByDay.map((d) => ({ date: d.date, cost: d.cost })),
       );
@@ -365,7 +369,12 @@ export class AutoRecommendationAgentService {
         error: error instanceof Error ? error.message : String(error),
       });
       return {
-        last7Days: { totalRequests: 0, totalCost: 0, modelsUsed: [], peakHours: [] },
+        last7Days: {
+          totalRequests: 0,
+          totalCost: 0,
+          modelsUsed: [],
+          peakHours: [],
+        },
         last30Days: { totalRequests: 0, totalCost: 0, modelsUsed: [] },
         costTrend: 'stable',
       };

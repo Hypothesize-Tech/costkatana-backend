@@ -189,14 +189,15 @@ export function enterpriseTrafficManagementMiddleware(
                 : (requestMetadata.priority as 'high' | 'medium' | 'low'),
         };
 
-        const rateLimitDecision = await getAdaptiveRateLimitService().checkRateLimit(
-          generateRateLimitKey(req),
-          {
-            baseLimit: calculateBaseLimit(userTier, priority),
-            scalingFactor: 0.8,
-          },
-          rateLimitMetadata,
-        );
+        const rateLimitDecision =
+          await getAdaptiveRateLimitService().checkRateLimit(
+            generateRateLimitKey(req),
+            {
+              baseLimit: calculateBaseLimit(userTier, priority),
+              scalingFactor: 0.8,
+            },
+            rateLimitMetadata,
+          );
 
         if (!rateLimitDecision.allowed) {
           if (customRateLimitHandler) {
@@ -474,9 +475,8 @@ export function enterpriseTrafficManagementMiddleware(
  */
 async function recordTrafficData(req: any, systemStatus: any): Promise<void> {
   try {
-    const { recordTrafficDataLegacy } = await import(
-      '../services/traffic-prediction-bridge'
-    );
+    const { recordTrafficDataLegacy } =
+      await import('../services/traffic-prediction-bridge');
     await recordTrafficDataLegacy(req, systemStatus);
   } catch {
     // Non-critical; bridge may not be wired if legacy middleware used standalone

@@ -3,6 +3,7 @@
  * Uses AWS Bedrock LLMs to convert natural language into optimized Cortex expressions
  */
 
+import * as zlib from 'zlib';
 import {
   BedrockRuntimeClient,
   InvokeModelCommand,
@@ -512,21 +513,23 @@ Your output must be a valid JSON object representing the Cortex expression.`;
    */
   public async compressToBinary(query: CortexQuery): Promise<CompressedQuery> {
     const jsonString = JSON.stringify(query);
-    const encoder = new TextEncoder();
-    const data = encoder.encode(jsonString);
+    const originalBuffer = Buffer.from(jsonString, 'utf8');
+    const compressedBuffer = zlib.gzipSync(originalBuffer);
 
-    // In a real implementation, this would use actual compression algorithms
     const metadata: CompressionMetadata = {
-      originalSize: jsonString.length,
-      compressedSize: data.length,
-      compressionRatio: jsonString.length / data.length,
-      algorithm: 'utf8-encoding',
+      originalSize: originalBuffer.length,
+      compressedSize: compressedBuffer.length,
+      compressionRatio:
+        compressedBuffer.length > 0
+          ? originalBuffer.length / compressedBuffer.length
+          : 1,
+      algorithm: 'gzip',
       timestamp: Date.now(),
     };
 
     return {
       format: 'binary',
-      data: data,
+      data: new Uint8Array(compressedBuffer),
       metadata,
     };
   }

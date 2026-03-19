@@ -64,10 +64,13 @@ export const agentSandboxMiddleware = (
         return;
       }
 
-      loggingService.info('Agent token detected - validating via AgentIdentityService', {
-        component: 'AgentSandboxMiddleware',
-        operation: 'agentSandboxMiddleware',
-      });
+      loggingService.info(
+        'Agent token detected - validating via AgentIdentityService',
+        {
+          component: 'AgentSandboxMiddleware',
+          operation: 'agentSandboxMiddleware',
+        },
+      );
 
       let agentIdentityService;
       try {
@@ -75,7 +78,8 @@ export const agentSandboxMiddleware = (
       } catch (initError) {
         loggingService.error('AgentIdentityService not available', {
           component: 'AgentSandboxMiddleware',
-          error: initError instanceof Error ? initError.message : String(initError),
+          error:
+            initError instanceof Error ? initError.message : String(initError),
         });
         res.status(503).json({
           error: 'Service unavailable',
@@ -111,7 +115,9 @@ export const agentSandboxMiddleware = (
         });
         res.status(403).json({
           error: 'Agent action not allowed',
-          message: permissionResult.reason ?? 'Agent does not have permission for this action',
+          message:
+            permissionResult.reason ??
+            'Agent does not have permission for this action',
         });
         return;
       }

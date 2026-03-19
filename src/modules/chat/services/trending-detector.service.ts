@@ -785,10 +785,9 @@ export class TrendingDetectorService {
 
       return trends;
     } catch (error) {
-      this.logger.error(
-        'Twitter API failed, cannot return fabricated trends',
-        { error: error instanceof Error ? error.message : String(error) },
-      );
+      this.logger.error('Twitter API failed, cannot return fabricated trends', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw new InternalServerErrorException(
         'Twitter trends API is temporarily unavailable. Please try again later.',
         { cause: error instanceof Error ? error : undefined },
@@ -1097,9 +1096,12 @@ Example: {"intent":"cost_analysis","confidence":0.9,"requiresWebSearch":false}`;
         };
       }
     } catch (error) {
-      this.logger.warn('Bedrock classification failed, using heuristic fallback', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      this.logger.warn(
+        'Bedrock classification failed, using heuristic fallback',
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
     }
 
     // Fallback to heuristic when Bedrock fails or returns unparseable JSON

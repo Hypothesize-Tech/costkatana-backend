@@ -138,9 +138,8 @@ async function bootstrap() {
   const trafficPredictionService = app.get(TrafficPredictionService);
   const cacheService = app.get(CacheService);
   try {
-    const { setTrafficPredictionBridge } = await import(
-      './services/traffic-prediction-bridge'
-    );
+    const { setTrafficPredictionBridge } =
+      await import('./services/traffic-prediction-bridge');
     setTrafficPredictionBridge(trafficPredictionService, cacheService);
     logger.log('Traffic prediction bridge wired successfully');
   } catch (e) {
@@ -173,12 +172,10 @@ async function bootstrap() {
 
   // Wire legacy bridges to real NestJS services
   try {
-    const { setPermissionServiceInstance } = await import(
-      './services/permission.service'
-    );
-    const { PermissionService } = await import(
-      './modules/team/services/permission.service'
-    );
+    const { setPermissionServiceInstance } =
+      await import('./services/permission.service');
+    const { PermissionService } =
+      await import('./modules/team/services/permission.service');
     setPermissionServiceInstance(app.get(PermissionService));
     logger.log('Permission service bridge wired successfully');
   } catch (e) {
@@ -189,9 +186,8 @@ async function bootstrap() {
   }
 
   try {
-    const { setPriorityQueueServiceInstance } = await import(
-      './services/priorityQueue.service'
-    );
+    const { setPriorityQueueServiceInstance } =
+      await import('./services/priorityQueue.service');
     setPriorityQueueServiceInstance(app.get(PriorityQueueService));
     logger.log('Priority queue service bridge wired successfully');
   } catch (e) {
@@ -202,26 +198,22 @@ async function bootstrap() {
   }
 
   try {
-    const { setPreemptiveThrottlingInstance } = await import(
-      './services/preemptiveThrottling.service'
-    );
-    const { PreemptiveThrottlingService } = await import(
-      './common/services/preemptive-throttling.service'
-    );
+    const { setPreemptiveThrottlingInstance } =
+      await import('./services/preemptiveThrottling.service');
+    const { PreemptiveThrottlingService } =
+      await import('./common/services/preemptive-throttling.service');
     setPreemptiveThrottlingInstance(app.get(PreemptiveThrottlingService));
     logger.log('Preemptive throttling bridge wired successfully');
   } catch (e) {
-    logger.warn(
-      'Preemptive throttling bridge wiring skipped',
-      { error: e instanceof Error ? e.message : String(e) },
-    );
+    logger.warn('Preemptive throttling bridge wiring skipped', {
+      error: e instanceof Error ? e.message : String(e),
+    });
   }
 
   try {
     const { setAiLoggerInstance } = await import('./services/aiLogger.service');
-    const { AILoggerService } = await import(
-      './common/services/ai-logger.service'
-    );
+    const { AILoggerService } =
+      await import('./common/services/ai-logger.service');
     setAiLoggerInstance(app.get(AILoggerService));
     logger.log('AI logger bridge wired successfully');
   } catch (e) {
@@ -231,12 +223,9 @@ async function bootstrap() {
   }
 
   try {
-    const { setMixpanelInstance } = await import(
-      './services/mixpanel.service'
-    );
-    const { MixpanelService } = await import(
-      './common/services/mixpanel.service'
-    );
+    const { setMixpanelInstance } = await import('./services/mixpanel.service');
+    const { MixpanelService } =
+      await import('./common/services/mixpanel.service');
     setMixpanelInstance(app.get(MixpanelService));
     logger.log('Mixpanel bridge wired successfully');
   } catch (e) {

@@ -88,7 +88,9 @@ let cacheServiceInstance: CacheService | null = null;
 /** Get singleton for use outside DI (e.g. cortex, middleware). */
 export function getCacheService(): CacheService {
   if (!cacheServiceInstance) {
-    throw new Error('CacheService not initialized. Ensure CacheModule is imported.');
+    throw new Error(
+      'CacheService not initialized. Ensure CacheModule is imported.',
+    );
   }
   return cacheServiceInstance;
 }

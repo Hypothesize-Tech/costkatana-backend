@@ -169,7 +169,9 @@ export class AuditLogger {
         this.auditLogs = this.auditLogs.slice(-this.MAX_LOGS);
       }
 
-      const MongodbMcpAuditLogModel = (await import('../../common/utils/get-mongoose-models')).getMongodbMcpAuditLogModel();
+      const MongodbMcpAuditLogModel = (
+        await import('../../common/utils/get-mongoose-models')
+      ).getMongodbMcpAuditLogModel();
       await MongodbMcpAuditLogModel.create({
         ...entry,
         context: {
@@ -201,7 +203,8 @@ export class AuditLogger {
 
       const doc = {
         eventType: 'confirmation',
-        timestamp: entry.timestamp instanceof Date ? entry.timestamp : new Date(),
+        timestamp:
+          entry.timestamp instanceof Date ? entry.timestamp : new Date(),
         userId: new mongoose.Types.ObjectId(String(entry.userId)),
         integration: entry.integration,
         toolName: entry.toolName,
@@ -237,7 +240,8 @@ export class AuditLogger {
 
       const doc = {
         eventType: 'permission_denial',
-        timestamp: entry.timestamp instanceof Date ? entry.timestamp : new Date(),
+        timestamp:
+          entry.timestamp instanceof Date ? entry.timestamp : new Date(),
         userId: new mongoose.Types.ObjectId(String(entry.userId)),
         integration: entry.integration,
         toolName: entry.toolName,

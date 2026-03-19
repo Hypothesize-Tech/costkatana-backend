@@ -674,11 +674,7 @@ export class PredictiveCostIntelligenceService {
     userId: string,
     scopeId: string | undefined,
   ): Promise<number> {
-    const historical = await this.getTokenHistoricalData(
-      userId,
-      scopeId,
-      90,
-    );
+    const historical = await this.getTokenHistoricalData(userId, scopeId, 90);
     if (historical.length < 4) return 1.0;
     const costs = historical.map((h) => h.cost);
     const rate = this.calculateGrowthRate(costs);
@@ -708,8 +704,10 @@ export class PredictiveCostIntelligenceService {
 
     const avgPromptTokens =
       tokenHistorical.length > 0
-        ? tokenHistorical.reduce((s, d) => s + (d.averagePromptTokens ?? 0), 0) /
-          tokenHistorical.length
+        ? tokenHistorical.reduce(
+            (s, d) => s + (d.averagePromptTokens ?? 0),
+            0,
+          ) / tokenHistorical.length
         : 500;
     const promptComplexity = Math.min(
       1.4,
@@ -737,7 +735,8 @@ export class PredictiveCostIntelligenceService {
     );
 
     const potentialSavings = promptGrowth.impactOnCosts.potentialSavings ?? 0;
-    const currentMonthly = promptGrowth.impactOnCosts.currentMonthly || currentCost || 1;
+    const currentMonthly =
+      promptGrowth.impactOnCosts.currentMonthly || currentCost || 1;
     const rawRate =
       currentMonthly > 0 ? potentialSavings / currentMonthly : 0.2;
     const optimizationSavingsRate = Math.min(
@@ -759,17 +758,13 @@ export class PredictiveCostIntelligenceService {
     timeHorizon: number,
   ): Promise<ScenarioSimulation[]> {
     try {
-      const [
-        currentCost,
-        actualModelMix,
-        usageGrowthRate,
-        derivedVars,
-      ] = await Promise.all([
-        this.getCurrentMonthlyCost(userId, scopeId),
-        this.getActualModelMix(userId, scopeId),
-        this.getUsageGrowthRate(userId, scopeId),
-        this.getDerivedScenarioVariables(userId, scopeId),
-      ]);
+      const [currentCost, actualModelMix, usageGrowthRate, derivedVars] =
+        await Promise.all([
+          this.getCurrentMonthlyCost(userId, scopeId),
+          this.getActualModelMix(userId, scopeId),
+          this.getUsageGrowthRate(userId, scopeId),
+          this.getDerivedScenarioVariables(userId, scopeId),
+        ]);
       const timeFrameLabel =
         timeHorizon <= 30
           ? '1_month'
@@ -817,7 +812,10 @@ export class PredictiveCostIntelligenceService {
           ],
           probabilityOfSuccess: Math.min(
             0.95,
-            Math.max(0.6, 0.7 + (Object.keys(actualModelMix).length - 1) * 0.05),
+            Math.max(
+              0.6,
+              0.7 + (Object.keys(actualModelMix).length - 1) * 0.05,
+            ),
           ),
         },
         {
@@ -848,13 +846,17 @@ export class PredictiveCostIntelligenceService {
           ],
           probabilityOfSuccess: Math.min(
             0.9,
-            Math.max(0.6, 0.75 + (Object.keys(diversifiedMix).length - 1) * 0.03),
+            Math.max(
+              0.6,
+              0.75 + (Object.keys(diversifiedMix).length - 1) * 0.03,
+            ),
           ),
         },
         {
           scenarioId: `price_changes_${this.deterministicScenarioId(userId, scopeId, 'price_changes')}`,
           name: 'Model Price Increase Scenario',
-          description: 'Price increases across providers; diversification mitigates risk',
+          description:
+            'Price increases across providers; diversification mitigates risk',
           timeframe: '1_year',
           variables: {
             usageGrowth: usageGrowthRate,
@@ -1240,8 +1242,10 @@ export class PredictiveCostIntelligenceService {
     if (current <= 0) return 0;
     const avgPromptTokens =
       tokenHistorical.length > 0
-        ? tokenHistorical.reduce((s, d) => s + (d.averagePromptTokens ?? 0), 0) /
-          tokenHistorical.length
+        ? tokenHistorical.reduce(
+            (s, d) => s + (d.averagePromptTokens ?? 0),
+            0,
+          ) / tokenHistorical.length
         : 400;
     const savingsRate =
       avgPromptTokens > 1000

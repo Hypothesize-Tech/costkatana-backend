@@ -41,7 +41,9 @@ let otelEnricherServiceInstance: OTelEnricherService | null = null;
 /** Get singleton for use outside DI (e.g. observability). */
 export function getOtelEnricherService(): OTelEnricherService {
   if (!otelEnricherServiceInstance) {
-    throw new Error('OTelEnricherService not initialized. Ensure CommonModule is imported.');
+    throw new Error(
+      'OTelEnricherService not initialized. Ensure CommonModule is imported.',
+    );
   }
   return otelEnricherServiceInstance;
 }

@@ -234,6 +234,7 @@ import { LangchainOrchestratorService } from './langchain/langchain-orchestrator
     ChatEventsEmitterService,
     ChatEventsRedisService,
     ConversationalFlowService,
+    MultiAgentFlowService, // Full 15-node LangGraph implementation for agent/chat flows
   ],
 })
 export class ChatModule implements NestModule {

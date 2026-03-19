@@ -1,4 +1,10 @@
-import { IsString, IsEmail, IsOptional, IsObject, IsBoolean } from 'class-validator';
+import {
+  IsString,
+  IsEmail,
+  IsOptional,
+  IsObject,
+  IsBoolean,
+} from 'class-validator';
 
 export class RoiLeadDto {
   @IsEmail()

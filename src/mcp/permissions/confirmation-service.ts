@@ -226,12 +226,13 @@ export class ConfirmationService {
       const { getUserApprovalRequestModel } =
         await import('../../schemas/user/user-approval-request.schema');
 
-      const approvals = await getUserApprovalRequestModel().find({
-        userId,
-        requestType: 'dangerous_operation',
-        status: 'pending',
-        expiresAt: { $gt: new Date() },
-      })
+      const approvals = await getUserApprovalRequestModel()
+        .find({
+          userId,
+          requestType: 'dangerous_operation',
+          status: 'pending',
+          expiresAt: { $gt: new Date() },
+        })
         .sort({ createdAt: -1 })
         .limit(10)
         .lean();
