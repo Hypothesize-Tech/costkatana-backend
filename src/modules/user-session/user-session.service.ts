@@ -44,12 +44,17 @@ export class UserSessionService {
   }
 
   /**
-   * Create a new user session
+   * Create a new user session.
+   * @param userId - User ID
+   * @param deviceInfo - Device metadata
+   * @param refreshToken - The actual refresh token (never a placeholder). It is hashed before storage.
+   * @param options - Optional pre-generated userSessionId when caller has generated tokens first.
    */
   async createUserSession(
     userId: string,
     deviceInfo: DeviceInfo,
     refreshToken: string,
+    options?: { userSessionId?: string },
   ): Promise<{ userSession: UserSession; isNewDevice: boolean }> {
     try {
       // Parse device information
@@ -61,8 +66,8 @@ export class UserSessionService {
       // Get location from IP
       const location = await this.getLocationFromIP(deviceInfo.ipAddress);
 
-      // Generate session ID
-      const userSessionId = generateToken(32);
+      // Use provided session ID or generate one
+      const userSessionId = options?.userSessionId ?? generateToken(32);
 
       // Hash refresh token for revocation
       const refreshTokenHash = crypto

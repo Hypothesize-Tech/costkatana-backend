@@ -322,9 +322,11 @@ export class GuardrailsController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: SimulateUsageDto,
   ) {
-    if (process.env.NODE_ENV === 'production') {
+    const env = process.env.NODE_ENV?.toLowerCase();
+    const isNonDev = ['production', 'staging', 'qa', 'preview'].includes(env ?? '');
+    if (isNonDev) {
       throw new ForbiddenException(
-        'Usage simulation is disabled in production. This endpoint is for development and testing only.',
+        'Usage simulation is disabled in production, staging, and QA. This endpoint is for local development and testing only.',
       );
     }
     const userId = req.user?.id ?? req.user?._id ?? req.userId;
@@ -348,10 +350,12 @@ export class GuardrailsController {
       typeof limits.requestsPerMonth === 'number'
         ? limits.requestsPerMonth
         : 10000;
+    const monthlyCost =
+      typeof sub?.billing?.amount === 'number' ? sub.billing.amount : 0;
     const simulatedUsage = {
       tokens: Math.floor(tokensPerMonth * (dto.percentage / 100)),
       requests: Math.floor(requestsPerMonth * (dto.percentage / 100)),
-      cost: Math.floor(100 * (dto.percentage / 100)),
+      cost: Math.floor(monthlyCost * (dto.percentage / 100)),
     };
     await this.guardrailsService.trackUsage(targetUserId, simulatedUsage);
     return {

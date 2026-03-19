@@ -8,7 +8,7 @@
 
 // Registry Services
 export { ModelRegistryService } from '../services/modelRegistry.service';
-export { PricingRegistryService } from '../services/pricingRegistry.service';
+export { PricingRegistryService } from '../modules/pricing/services/pricing-registry.service';
 
 // Routing Services
 export { IntelligentRouterService } from '../services/intelligentRouter.service';
@@ -76,7 +76,7 @@ export type {
 } from '../services/intelligentFailover.service';
 
 import { ModelRegistryService } from '../services/modelRegistry.service';
-import { PricingRegistryService } from '../services/pricingRegistry.service';
+import { PricingRegistryService } from '../modules/pricing/services/pricing-registry.service';
 import { IntelligentRouterService } from '../services/intelligentRouter.service';
 import { IntelligentFailoverService } from '../services/intelligentFailover.service';
 

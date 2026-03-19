@@ -1,7 +1,9 @@
 /**
  * Hardcoded pricing fallback used when pricing registry and DB lookup fail.
  * Last verified: 2026-03. Update periodically against provider docs.
+ * When fallback is used, a warning should be logged and pricing may be stale.
  */
+export const PRICING_FALLBACK_LAST_UPDATED = '2026-03';
 
 export interface FallbackPriceEntry {
   inputCostPer1K: number;
@@ -270,18 +272,23 @@ const DEFAULT_FALLBACK: FallbackPriceEntry = {
 
 /**
  * Look up hardcoded fallback pricing for a provider/model.
+ * Returns pricing with lastUpdated for staleness tracking.
  */
 export function getHardcodedFallbackPricing(
   provider: string,
   model: string,
-): FallbackPriceEntry {
+): FallbackPriceEntry & { lastUpdated: string } {
   for (const rule of PRICING_RULES) {
     if (rule.match(provider, model)) {
       return {
         inputCostPer1K: rule.inputCostPer1K,
         outputCostPer1K: rule.outputCostPer1K,
-      };
+        lastUpdated: PRICING_FALLBACK_LAST_UPDATED,
+      } as FallbackPriceEntry & { lastUpdated: string };
     }
   }
-  return DEFAULT_FALLBACK;
+  return {
+    ...DEFAULT_FALLBACK,
+    lastUpdated: PRICING_FALLBACK_LAST_UPDATED,
+  } as FallbackPriceEntry & { lastUpdated: string };
 }

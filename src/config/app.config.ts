@@ -155,7 +155,7 @@ export default (): AppConfig => ({
     filePath: process.env.LOG_FILE_PATH ?? './logs',
   },
   encryption: {
-    key: process.env.ENCRYPTION_KEY ?? 'default-encryption-key-change-this',
+    key: process.env.ENCRYPTION_KEY!, // Validated at startup via validateEnv
   },
   redis: {
     host: process.env.REDIS_HOST ?? '127.0.0.1',

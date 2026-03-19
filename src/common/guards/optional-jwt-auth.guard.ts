@@ -119,9 +119,13 @@ export class OptionalJwtAuthGuard implements CanActivate {
 
   private async authenticateJwt(token: string): Promise<AuthenticatedUser> {
     try {
-      const payload = this.jwtService.verify(token, {
-        secret: this.configService.get('JWT_SECRET') || 'default-secret',
-      });
+      const secret = this.configService.get<string>('JWT_SECRET');
+      if (!secret) {
+        throw new Error(
+          'JWT_SECRET is required. Application should have validated this at startup.',
+        );
+      }
+      const payload = this.jwtService.verify(token, { secret });
 
       // Check if token is expired
       if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
@@ -242,7 +246,9 @@ export class OptionalJwtAuthGuard implements CanActivate {
     apiKey: string,
   ): { userId: string; keyId: string; secret: string } | null {
     const parts = apiKey.split('_');
-    if (parts.length !== 4 || parts[0] !== 'dak') return null;
+    // Support both dak_ (Dashboard API Key) and ck_ (Cost Katana key) formats.
+    // Both use format: prefix_userId_keyId_secret (4 parts).
+    if (parts.length !== 4 || !['dak', 'ck'].includes(parts[0])) return null;
     return { userId: parts[1], keyId: parts[2], secret: parts[3] };
   }
 }

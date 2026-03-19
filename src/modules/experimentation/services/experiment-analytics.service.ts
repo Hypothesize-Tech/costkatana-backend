@@ -188,20 +188,30 @@ Return only the numeric score, no explanation.`;
       },
     };
 
-    // Calculate quality analysis
-    const qualities = results.map((r) => r.metrics.qualityScore);
+    // Calculate quality analysis (exclude null = pending evaluation)
+    const qualities = results
+      .map((r) => r.metrics.qualityScore)
+      .filter((q): q is number => q != null);
     const qualityAnalysis = {
       highest:
-        results.find((r) => r.metrics.qualityScore === Math.max(...qualities))
-          ?.model || '',
+        qualities.length > 0
+          ? results.find(
+              (r) => r.metrics.qualityScore === Math.max(...qualities),
+            )?.model || ''
+          : '',
       lowest:
-        results.find((r) => r.metrics.qualityScore === Math.min(...qualities))
-          ?.model || '',
+        qualities.length > 0
+          ? results.find(
+              (r) => r.metrics.qualityScore === Math.min(...qualities),
+            )?.model || ''
+          : '',
       averageQuality:
-        qualities.reduce((sum, q) => sum + q, 0) / qualities.length,
+        qualities.length > 0
+          ? qualities.reduce((sum, q) => sum + q, 0) / qualities.length
+          : 0,
       qualityRange: {
-        min: Math.min(...qualities),
-        max: Math.max(...qualities),
+        min: qualities.length > 0 ? Math.min(...qualities) : 0,
+        max: qualities.length > 0 ? Math.max(...qualities) : 0,
       },
     };
 
@@ -439,14 +449,24 @@ Return only the numeric score, no explanation.`;
         weaknesses.push('Slower response times');
       }
 
-      // Analyze quality
+      // Analyze quality (exclude null = pending evaluation)
+      const scoresWithQuality = results.filter(
+        (r) => r.metrics.qualityScore != null,
+      );
       const avgQuality =
-        results.reduce((sum, r) => sum + r.metrics.qualityScore, 0) /
-        results.length;
-      if (result.metrics.qualityScore > avgQuality * 1.1) {
-        strengths.push('High-quality responses');
-      } else if (result.metrics.qualityScore < avgQuality * 0.9) {
-        weaknesses.push('Lower quality responses');
+        scoresWithQuality.length > 0
+          ? scoresWithQuality.reduce(
+              (sum, r) => sum + (r.metrics.qualityScore ?? 0),
+              0,
+            ) / scoresWithQuality.length
+          : 0;
+      const q = result.metrics.qualityScore;
+      if (q != null) {
+        if (q > avgQuality * 1.1) {
+          strengths.push('High-quality responses');
+        } else if (q < avgQuality * 0.9) {
+          weaknesses.push('Lower quality responses');
+        }
       }
 
       return {
@@ -457,18 +477,7 @@ Return only the numeric score, no explanation.`;
     });
   }
 
-  /**
-   * Estimate cost based on model and token count (used when AI router not used or for fallback)
-   */
-  private estimateCost(modelName: string, tokenCount: number): number {
-    const estimate = this.pricingService.estimateCost(
-      modelName,
-      Math.ceil(tokenCount / 2),
-      Math.ceil(tokenCount / 2),
-      0.95,
-    );
-    return estimate?.totalCost ?? 0;
-  }
+
 
   /**
    * Generate hash for caching

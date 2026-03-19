@@ -19,11 +19,10 @@ This tool can:
 - 🧑‍⚕️ Health guidance: Symptom analysis + latest health articles
 - ✈️ Travel planning: Live flight/bus/train data + itinerary builder
 - 💸 Price tracking: Monitor product prices and notify on drops
-- 🔍 Reverse search: Identify objects from descriptions (future feature)
 
 Input should be a JSON string with:
 {
-  "operation": "weather_advice|health_guidance|travel_plan|price_track|reverse_search",
+  "operation": "weather_advice|health_guidance|travel_plan|price_track",
   "data": {
     // Operation-specific data
   }
@@ -107,9 +106,6 @@ Price Tracking:
 
         case 'price_track':
           return await this.handlePriceTrack(data);
-
-        case 'reverse_search':
-          return await this.handleReverseSearch(data);
 
         default:
           return this.createErrorResponse(
@@ -213,38 +209,6 @@ Price Tracking:
       return this.createErrorResponse(
         'price_track',
         `Price tracking failed: ${error.message}`,
-      );
-    }
-  }
-
-  private async handleReverseSearch(data: any): Promise<any> {
-    try {
-      const description = data.description || data.query || '';
-      const category = data.category || 'general';
-
-      if (!description) {
-        return this.createErrorResponse(
-          'reverse_search',
-          'Please provide a description of the object you want to identify',
-        );
-      }
-
-      this.logger.log(`Processing reverse search for: ${description}`);
-
-      const result = await this.lifeUtilityService.reverseSearch(
-        description,
-        category,
-      );
-
-      return this.createSuccessResponse('reverse_search', {
-        result,
-        description,
-        category,
-      });
-    } catch (error: any) {
-      return this.createErrorResponse(
-        'reverse_search',
-        `Reverse search failed: ${error.message}`,
       );
     }
   }

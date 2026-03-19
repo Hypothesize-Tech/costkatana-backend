@@ -200,16 +200,10 @@ export class UserSessionController {
       });
 
       // Redirect to frontend with success message
-      const frontendUrl = this.configService.get(
-        'FRONTEND_URL',
-        'http://localhost:3000',
-      );
+      const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
       response.redirect(`${frontendUrl}/settings/security?sessionRevoked=true`);
     } catch (error) {
-      const frontendUrl = this.configService.get(
-        'FRONTEND_URL',
-        'http://localhost:3000',
-      );
+      const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
 
       if (error instanceof BadRequestException) {
         this.logger.warn('Invalid revoke token attempt', {

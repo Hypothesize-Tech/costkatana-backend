@@ -387,36 +387,6 @@ export class ChatSecurityHandlerService {
   }
 
   /**
-   * Check message security (validation + threat detection + rate limit) without ExecutionContext or AI checks.
-   * Use when only message and userId are available and AI security checks are not needed.
-   * @deprecated Use checkMessageSecurity with Request object for full security coverage
-   */
-  checkMessageSecurityLegacy(
-    message: string,
-    userId?: string,
-  ): Promise<SecurityCheckResult> {
-    const validationResult = this.validateInput(message);
-    if (!validationResult.passed) {
-      this.recordBlockedRequest();
-      return Promise.resolve(validationResult);
-    }
-    const threatResult = this.detectThreats(message);
-    if (!threatResult.passed) {
-      this.recordBlockedRequest();
-      return Promise.resolve(threatResult);
-    }
-    const rateLimitResult = this.checkRateLimit(
-      userId ? `user:${userId}` : 'anonymous',
-      userId,
-    );
-    if (!rateLimitResult.passed) {
-      this.recordBlockedRequest();
-      return Promise.resolve(rateLimitResult);
-    }
-    return Promise.resolve({ passed: true, isBlocked: false });
-  }
-
-  /**
    * Validate input parameters
    */
   private validateInput(message: string): SecurityCheckResult {

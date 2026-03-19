@@ -12,8 +12,12 @@ export class EncryptionService {
 
   private getKey(): Buffer {
     const encryption = this.configService.get<{ key: string }>('encryption');
-    const keyString =
-      encryption?.key ?? process.env.ENCRYPTION_KEY ?? 'default-key-change-me';
+    const keyString = encryption?.key ?? process.env.ENCRYPTION_KEY;
+    if (!keyString) {
+      throw new Error(
+        'ENCRYPTION_KEY is required. Application should have validated this at startup.',
+      );
+    }
     return Buffer.from(keyString.padEnd(KEY_LENGTH, '0').slice(0, KEY_LENGTH));
   }
 

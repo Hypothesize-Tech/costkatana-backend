@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage } from 'mongoose';
 import * as crypto from 'crypto';
@@ -55,6 +56,7 @@ export class SessionReplayService {
     private readonly sessionModel: Model<SessionReplayDocument>,
     @InjectModel(Telemetry.name)
     private readonly telemetryModel: Model<TelemetryDocument>,
+    private readonly configService: ConfigService,
   ) {
     const envTimeout = parseInt(process.env.SESSION_REPLAY_TIMEOUT || '30', 10);
     this.sessionTimeoutMs = envTimeout * 60 * 1000;
@@ -659,7 +661,7 @@ export class SessionReplayService {
         },
       );
       this.dbFailureCount = 0;
-      const baseUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+      const baseUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
       return {
         shareToken,
         shareUrl: `${baseUrl}/session-replay/shared/${shareToken}`,

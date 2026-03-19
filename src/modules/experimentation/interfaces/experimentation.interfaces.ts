@@ -42,7 +42,7 @@ export interface ModelComparisonResult {
     cost: number;
     latency: number;
     tokenCount: number;
-    qualityScore: number;
+    qualityScore: number | null; // null = pending AI evaluation
     errorRate: number;
   };
   performance: {

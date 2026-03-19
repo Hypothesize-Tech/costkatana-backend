@@ -639,8 +639,12 @@ class DatabaseTool implements ToolExecutor {
       const connectionString =
         parameters.connectionString ||
         process.env.DATABASE_URL ||
-        process.env.MONGO_URI ||
-        'mongodb://localhost:27017/cortex';
+        process.env.MONGO_URI;
+      if (!connectionString) {
+        throw new Error(
+          'Database connection required. Provide connectionString in parameters, or set DATABASE_URL or MONGO_URI.',
+        );
+      }
 
       const dbName = parameters.database || 'cortex';
       const collectionName = parameters.collection || 'data';

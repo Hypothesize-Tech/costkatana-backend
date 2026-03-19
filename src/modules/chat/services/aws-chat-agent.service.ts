@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import * as AdmZip from 'adm-zip';
 import {
   AWSConnection,
   AWSConnectionDocument,
@@ -1649,21 +1650,43 @@ export class AWSChatAgentService {
           message = `✅ **RDS Database Created Successfully**\n\n🗄️ **${result.dbInstanceIdentifier}**\nStatus: ${result.status}\n\n⚠️ **Save your master password securely** — it was set during creation and cannot be retrieved later.\n\n⏱️ Database is initializing. This typically takes 5-10 minutes.`;
           break;
 
-        case 'lambda':
-          // Minimal valid ZIP (empty index.js) for Lambda placeholder
-          const minimalZipBase64 =
-            'UEsDBBQACAAIAAAAIQAAAAAAAAAAAAAAAAAKABwAaW5kZXguanNVVAkAA0xYbFzMWGxcdXgLAAEE6AMAAAToAwAAUEsBAh4AFAAAAAgAAAAhAAAAAAAAAAAAAAAAAAoAGAAAAAAAAAAAAAAAdAAAAABpbmRleC5qc1VUBQADTFhsXHV4CwABBOgDAAAE6AMAAA==';
+        case 'lambda': {
+          const userProvidedCode = plan.steps[plan.steps.length - 1].parameters
+            ?.code as string | undefined;
+          let deploymentPackage: string;
+
+          if (userProvidedCode && userProvidedCode.length > 0) {
+            deploymentPackage = userProvidedCode;
+          } else {
+            // Create minimal but functional Lambda handler (not empty placeholder)
+            const minimalHandler = `exports.handler = async (event, context) => ({
+  statusCode: 200,
+  body: JSON.stringify({
+    message: 'Cost Katana bootstrap - replace with your function code',
+    requestId: context.awsRequestId,
+  }),
+});`;
+            const zip = new AdmZip();
+            zip.addFile('index.js', Buffer.from(minimalHandler, 'utf8'));
+            deploymentPackage = zip.toBuffer().toString('base64');
+          }
+
           result = await this.lambdaService.createFunction(connection, {
             functionName: plan.resourceName,
             runtime: plan.steps[plan.steps.length - 1].parameters.runtime,
-            handler: plan.steps[plan.steps.length - 1].parameters.handler,
-            code: minimalZipBase64,
+            handler:
+              plan.steps[plan.steps.length - 1].parameters.handler ||
+              'index.handler',
+            code: deploymentPackage,
             memorySize: plan.steps[plan.steps.length - 1].parameters.memorySize,
             timeout: plan.steps[plan.steps.length - 1].parameters.timeout,
             region: plan.steps[plan.steps.length - 1].parameters.region,
           });
-          message = `✅ **Lambda Function Created Successfully**\n\n⚡ **${result.functionName}**\nARN: ${result.functionArn}\n\n⚠️ **Placeholder deployment package** — This Lambda was created with a minimal empty deployment package. Upload your actual function code via the [AWS Console](https://console.aws.amazon.com/lambda) or AWS CLI (\`aws lambda update-function-code\`) before using it in production.`;
+          message = userProvidedCode
+            ? `✅ **Lambda Function Created Successfully**\n\n⚡ **${result.functionName}**\nARN: ${result.functionArn}\n\n🚀 Function is ready to use!`
+            : `✅ **Lambda Function Created Successfully**\n\n⚡ **${result.functionName}**\nARN: ${result.functionArn}\n\n⚠️ **Bootstrap handler deployed** — A minimal working handler was used. Replace with your function code via [AWS Console](https://console.aws.amazon.com/lambda) or \`aws lambda update-function-code\` before production use.`;
           break;
+        }
 
         case 'dynamodb':
           result = await this.dynamoDbService.createTable(connection, {

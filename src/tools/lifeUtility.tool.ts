@@ -7,8 +7,7 @@ export interface LifeUtilityRequest {
     | 'weather_advice'
     | 'health_guidance'
     | 'travel_plan'
-    | 'price_track'
-    | 'reverse_search';
+    | 'price_track';
   data: any;
 }
 
@@ -21,11 +20,10 @@ export class LifeUtilityTool extends Tool {
     - 🧑‍⚕️ Health guidance: Symptom analysis + latest health articles
     - ✈️ Travel planning: Live flight/bus/train data + itinerary builder
     - 💸 Price tracking: Monitor product prices and notify on drops
-    - 🔍 Reverse search: Identify objects from descriptions (future feature)
     
     Input should be a JSON string with:
     {
-        "operation": "weather_advice|health_guidance|travel_plan|price_track|reverse_search",
+        "operation": "weather_advice|health_guidance|travel_plan|price_track",
         "data": {
             // Operation-specific data
         }
@@ -117,9 +115,6 @@ export class LifeUtilityTool extends Tool {
         case 'price_track':
           return await this.handlePriceTrack(request.data);
 
-        case 'reverse_search':
-          return await this.handleReverseSearch(request.data);
-
         default:
           return JSON.stringify({
             success: false,
@@ -129,7 +124,6 @@ export class LifeUtilityTool extends Tool {
               'health_guidance',
               'travel_plan',
               'price_track',
-              'reverse_search',
             ],
           });
       }
@@ -256,117 +250,6 @@ export class LifeUtilityTool extends Tool {
         success: false,
         operation: 'price_track',
         error: error instanceof Error ? error.message : 'Price tracking failed',
-      });
-    }
-  }
-
-  private async handleReverseSearch(data: any): Promise<string> {
-    try {
-      // For now, implement text-based reverse search using description
-      // Future: Add image processing capabilities
-      const description = data.description || data.query || '';
-      const category = data.category || 'general';
-
-      if (!description) {
-        return JSON.stringify({
-          success: false,
-          operation: 'reverse_search',
-          error:
-            'Please provide a description of the object you want to identify',
-          suggestion:
-            'Example: "A red smartphone with dual cameras" or "A black laptop with silver logo"',
-        });
-      }
-
-      loggingService.info(`🔍 Processing reverse search for: ${description}`);
-
-      // Use web scraping to search for similar products/objects
-      const searchSources = [
-        `https://www.google.com/search?q=${encodeURIComponent(description + ' product')}`,
-        `https://www.amazon.in/s?k=${encodeURIComponent(description)}`,
-        `https://www.flipkart.com/search?q=${encodeURIComponent(description)}`,
-        `https://images.google.com/search?q=${encodeURIComponent(description)}`,
-      ];
-
-      // Scrape search results to identify the object
-      const results = [];
-      for (const source of searchSources.slice(0, 2)) {
-        try {
-          const scrapingRequest = {
-            operation: 'scrape' as const,
-            url: source,
-            selectors: {
-              title: '.product-title, .item-title, h1, h2, h3',
-              content: '.product-info, .item-details, .description',
-              prices: '.price, .cost, .amount',
-            },
-            options: {
-              timeout: 30000,
-              javascript: true,
-              extractText: true,
-            },
-          };
-
-          const result = await this.lifeUtilityService.webSearch._call(
-            JSON.stringify(scrapingRequest),
-          );
-          const parsedResult = JSON.parse(result);
-
-          if (parsedResult.success && parsedResult.data?.extractedText) {
-            results.push(parsedResult.data.extractedText.substring(0, 1000));
-          }
-        } catch (error) {
-          loggingService.warn('Failed to scrape reverse search from source', {
-            component: 'lifeUtilityTool',
-            operation: 'handleReverseSearch',
-            step: 'error',
-            source,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-
-      const searchData =
-        results.join('\n---\n') || 'No search results available';
-
-      // Use AI to analyze and identify the object
-      const identificationPrompt = `You are an object identification assistant. Based on the description and search results, help identify what the object might be.
-
-User Description: "${description}"
-Category: ${category}
-
-Search Results:
-${searchData}
-
-Provide:
-1. Most likely identification of the object
-2. Key characteristics and features
-3. Possible brands or models
-4. Price range (if available)
-5. Where to buy or find more information
-
-Be specific and helpful in your identification.`;
-
-      const response = await this.lifeUtilityService.priceAgent.invoke([
-        { role: 'user', content: identificationPrompt },
-      ]);
-
-      return JSON.stringify({
-        success: true,
-        operation: 'reverse_search',
-        result: response.content.toString(),
-        description,
-        category,
-        searchSources: searchSources.slice(0, 2),
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      return JSON.stringify({
-        success: false,
-        operation: 'reverse_search',
-        error: error instanceof Error ? error.message : 'Reverse search failed',
-        suggestion:
-          'Please provide a clear description of the object you want to identify.',
       });
     }
   }

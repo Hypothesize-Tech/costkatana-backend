@@ -4,6 +4,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { randomBytes } from 'crypto';
@@ -26,6 +27,7 @@ export class MagicLinkService {
     private userModel: Model<User>,
     private emailService: EmailService,
     private onboardingService: OnboardingService,
+    private configService: ConfigService,
   ) {}
 
   /**
@@ -182,7 +184,7 @@ export class MagicLinkService {
     redirectUrl?: string,
   ): Promise<void> {
     try {
-      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const baseUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
       // Use redirectUrl as a query parameter if provided, otherwise build normal magic link
       const url = new URL(`${baseUrl}/magic-link/verify/${token}`);
       if (redirectUrl) {

@@ -8,6 +8,8 @@ import { LRUCache } from 'lru-cache';
 import { LoggerService } from '../../../common/logger/logger.service';
 import { BusinessEventLoggingService } from '../../../common/services/business-event-logging.service';
 import { CacheService } from '../../../common/cache/cache.service';
+import { VectorMemoryService } from './vector-memory.service';
+import { UserPreferenceService } from './user-preference.service';
 import {
   UserMemory,
   UserMemoryDocument,
@@ -62,8 +64,6 @@ export interface SimilarConversation {
 export class MemoryService {
   private static readonly logger = new Logger(MemoryService.name);
   private memoryAgent: ChatBedrockConverse;
-  private vectorMemoryService: any; // Will be injected via constructor
-  private userPreferenceService: any; // Will be injected via constructor
 
   // LRU caches for performance with proper size limits
   private userSessionCache: LRUCache<string, any>;
@@ -96,6 +96,8 @@ export class MemoryService {
     private readonly loggerService: LoggerService,
     private readonly businessEventLoggingService: BusinessEventLoggingService,
     private readonly cacheService: CacheService,
+    private readonly vectorMemoryService: VectorMemoryService,
+    private readonly userPreferenceService: UserPreferenceService,
   ) {
     this.memoryAgent = new ChatBedrockConverse({
       model: 'amazon.nova-pro-v1:0',

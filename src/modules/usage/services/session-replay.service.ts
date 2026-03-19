@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
@@ -76,6 +77,7 @@ export class SessionReplayService {
     @InjectModel(Session.name) private sessionModel: Model<SessionDocument>,
     @InjectModel(SharedSession.name)
     private sharedSessionModel: Model<SharedSessionDocument>,
+    private configService: ConfigService,
   ) {}
 
   /**
@@ -715,7 +717,7 @@ export class SessionReplayService {
 
       if (existingShare) {
         // Return existing share if it's still valid
-        const shareUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/shared/session/${existingShare.shareId}`;
+        const shareUrl = `${this.configService.getOrThrow<string>('FRONTEND_URL')}/shared/session/${existingShare.shareId}`;
         return {
           shareId: existingShare.shareId,
           shareUrl,
@@ -762,7 +764,7 @@ export class SessionReplayService {
 
       await sharedSession.save();
 
-      const shareUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/shared/session/${shareId}`;
+      const shareUrl = `${this.configService.getOrThrow<string>('FRONTEND_URL')}/shared/session/${shareId}`;
 
       this.logger.log(
         `Created shareable link for session ${sessionId} with shareId ${shareId}`,

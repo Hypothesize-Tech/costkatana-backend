@@ -523,26 +523,20 @@ export class AuthService {
 
       if (deviceInfo) {
         try {
+          // Generate session ID and tokens first so we never persist a placeholder refresh token
+          const preGeneratedSessionId = crypto.randomBytes(32).toString('hex');
+          const tokens = this.generateTokens(user, preGeneratedSessionId);
+
           const { userSession, isNewDevice: newDevice } =
             await this.userSessionService.createUserSession(
               user._id.toString(),
               deviceInfo,
-              'temp_refresh_token', // Will be updated after token generation
+              tokens.refreshToken,
+              { userSessionId: preGeneratedSessionId },
             );
 
           userSessionId = userSession.userSessionId;
           isNewDevice = newDevice;
-
-          // Update session with actual refresh token hash
-          const tokens = this.generateTokens(user, userSessionId);
-          const refreshTokenHash = crypto
-            .createHash('sha256')
-            .update(tokens.refreshToken)
-            .digest('hex');
-          await this.userSessionModel.updateOne(
-            { userSessionId },
-            { refreshTokenHash },
-          );
 
           // Send new device email notification
           if (isNewDevice) {
@@ -767,7 +761,7 @@ export class AuthService {
 
     // Send password reset email
     try {
-      const resetUrl = `${this.configService.get('FRONTEND_URL', 'http://localhost:3000')}/reset-password/${resetToken}`;
+      const resetUrl = `${this.configService.getOrThrow<string>('FRONTEND_URL')}/reset-password/${resetToken}`;
       await this.emailService.sendPasswordResetEmail(
         { name: user.name, email: user.email },
         resetUrl,

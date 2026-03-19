@@ -87,12 +87,6 @@ export class AddPaymentMethodDto {
   @IsString()
   razorpayTokenId?: string;
 
-  /** @deprecated PCI: Do not send. Use paymentMethodId (Stripe) or razorpayTokenId (Razorpay) instead. */
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => CardDetailsDto)
-  cardDetails?: CardDetailsDto;
-
   @IsOptional()
   @ValidateNested()
   @Type(() => UpiDetailsDto)
