@@ -1,8 +1,9 @@
 import { IsObject, IsString, IsNotEmpty } from 'class-validator';
+import type { ExecutionPlan } from '../types/aws-dsl.types';
 
 export class SimulatePlanDto {
   @IsObject()
-  plan: any; // Would be properly typed with ExecutionPlan
+  plan: ExecutionPlan;
 
   @IsString()
   @IsNotEmpty()

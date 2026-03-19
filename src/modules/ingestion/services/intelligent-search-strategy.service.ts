@@ -10,6 +10,9 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { BedrockService } from '../../bedrock/bedrock.service';
+import { StructuredQueryDetectorService } from './structured-query-detector.service';
+import { StructuredQueryHandlerService } from './structured-query-handler.service';
+import type { RAGDocument } from '../../rag/types/rag.types';
 
 /**
  * Search Strategy Types
@@ -51,13 +54,79 @@ export interface SearchConfig {
   threshold?: number;
 }
 
+/**
+ * Result of routeQuery — either structured (direct DB) or semantic (needs vector search)
+ */
+export type RouteQueryResult =
+  | { source: 'structured_db'; documents: RAGDocument[]; metadata: { totalDocuments: number; retrievalTimeMs: number } }
+  | { source: 'semantic'; analysis: QueryAnalysis };
+
+export interface RouteQueryOptions {
+  userId?: string;
+  projectId?: string;
+  limit?: number;
+  /** Min confidence (0-1) to treat as structured. Default 0.6 */
+  structuredConfidenceThreshold?: number;
+}
+
 @Injectable()
 export class IntelligentSearchStrategyService {
   private readonly logger = new Logger(IntelligentSearchStrategyService.name);
   private static readonly FAST_MODEL_ID =
     'anthropic.claude-3-5-sonnet-20241022-v2:0';
+  private static readonly DEFAULT_STRUCTURED_CONFIDENCE = 0.6;
 
-  constructor(private readonly bedrockService: BedrockService) {}
+  constructor(
+    private readonly bedrockService: BedrockService,
+    private readonly structuredQueryDetector: StructuredQueryDetectorService,
+    private readonly structuredQueryHandler: StructuredQueryHandlerService,
+  ) {}
+
+  /**
+   * Route query to structured (direct MongoDB) or semantic (vector) path.
+   * Structured path: precision-first cost/usage queries — no embedding, sub-10ms.
+   * Semantic path: runs existing analyzeQuery() for MMR/Cosine/Hybrid strategy.
+   */
+  async routeQuery(
+    query: string,
+    options: RouteQueryOptions = {},
+  ): Promise<RouteQueryResult> {
+    const threshold =
+      options.structuredConfidenceThreshold ??
+      IntelligentSearchStrategyService.DEFAULT_STRUCTURED_CONFIDENCE;
+
+    const detection = this.structuredQueryDetector.detect(query);
+
+    if (detection.isStructured && detection.confidence >= threshold) {
+      this.logger.log('Routing to structured retrieval', {
+        queryType: detection.queryType,
+        confidence: detection.confidence.toFixed(2),
+      });
+
+      const result = await this.structuredQueryHandler.handle(
+        query,
+        detection,
+        {
+          userId: options.userId,
+          projectId: options.projectId,
+          limit: options.limit,
+        },
+      );
+
+      return {
+        source: 'structured_db',
+        documents: result.documents,
+        metadata: {
+          totalDocuments: result.metadata.totalDocuments,
+          retrievalTimeMs: result.metadata.retrievalTimeMs,
+        },
+      };
+    }
+
+    this.logger.debug('Routing to semantic retrieval (AI analysis)');
+    const analysis = await this.analyzeQuery(query);
+    return { source: 'semantic', analysis };
+  }
 
   /**
    * Analyze query using AI (AWS Bedrock) to determine optimal search strategy

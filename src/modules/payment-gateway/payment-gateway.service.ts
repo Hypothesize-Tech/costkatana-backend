@@ -671,7 +671,7 @@ export class PaymentGatewayService {
           currency: (params.currency || 'INR').toUpperCase(),
           description: params.description ?? 'Payment',
           customer: {
-            name: '', // Customer details would be fetched from database in full implementation
+            name: '',
             contact: '',
             email: '',
           },

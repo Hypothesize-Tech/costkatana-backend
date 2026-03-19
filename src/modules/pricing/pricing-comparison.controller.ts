@@ -256,11 +256,11 @@ export class PricingComparisonController {
         model2Id,
       );
 
-      // Get real performance metrics from Bedrock
-      const performanceMetrics = await this.getBedrockPerformanceMetrics(
-        model1Pricing,
-        model2Pricing,
-      );
+      // Get real performance metrics and benchmarks from Bedrock
+      const [performanceMetrics, benchmarks] = await Promise.all([
+        this.getBedrockPerformanceMetrics(model1Pricing, model2Pricing),
+        this.getBedrockBenchmarks(model1Pricing, model2Pricing),
+      ]);
 
       // Determine which is cheaper
       const cheaperModel =
@@ -347,15 +347,14 @@ export class PricingComparisonController {
           },
         },
         performanceMetrics,
-        benchmarks: await this.getBedrockBenchmarks(
-          model1Pricing,
-          model2Pricing,
-        ),
+        benchmarks,
         recommendations: this.getModelRecommendations(
           model1Pricing,
           model2Pricing,
           model1Cost,
           model2Cost,
+          performanceMetrics,
+          benchmarks,
         ),
         lastUpdated: new Date(),
       };
@@ -529,7 +528,51 @@ export class PricingComparisonController {
     model2: any,
     cost1: any,
     cost2: any,
+    performanceMetrics?: { model1?: any; model2?: any },
+    benchmarks?: Record<string, { model1Score?: number; model2Score?: number }>,
   ): any {
+    const costWinner = cost1.totalCost <= cost2.totalCost ? 'model1' : 'model2';
+
+    let performanceWinner: 'model1' | 'model2' = 'model1';
+    if (performanceMetrics?.model1 && performanceMetrics?.model2) {
+      const p1 = performanceMetrics.model1;
+      const p2 = performanceMetrics.model2;
+      const score1 =
+        (p1.successRate ?? 0) * 0.4 - ((p1.averageLatency ?? 0) / 5000) * 0.6;
+      const score2 =
+        (p2.successRate ?? 0) * 0.4 - ((p2.averageLatency ?? 0) / 5000) * 0.6;
+      performanceWinner = score1 >= score2 ? 'model1' : 'model2';
+    } else if (benchmarks && Object.keys(benchmarks).length > 0) {
+      let model1BenchWins = 0;
+      let model2BenchWins = 0;
+      for (const b of Object.values(benchmarks)) {
+        if ((b.model1Score ?? 0) > (b.model2Score ?? 0)) model1BenchWins++;
+        else if ((b.model2Score ?? 0) > (b.model1Score ?? 0)) model2BenchWins++;
+      }
+      performanceWinner =
+        model1BenchWins >= model2BenchWins ? 'model1' : 'model2';
+    }
+
+    const costScore1 = cost1.totalCost <= cost2.totalCost ? 1 : 0;
+    const costScore2 = cost2.totalCost <= cost1.totalCost ? 1 : 0;
+    const perfScore1 = performanceWinner === 'model1' ? 1 : 0;
+    const perfScore2 = performanceWinner === 'model2' ? 1 : 0;
+    const capScore1 =
+      Array.isArray(model1.capabilities) && Array.isArray(model2.capabilities)
+        ? model1.capabilities.length >= model2.capabilities.length
+          ? 1
+          : 0
+        : 0.5;
+    const capScore2 =
+      Array.isArray(model1.capabilities) && Array.isArray(model2.capabilities)
+        ? model2.capabilities.length >= model1.capabilities.length
+          ? 1
+          : 0
+        : 0.5;
+    const overallScore1 = costScore1 * 0.4 + perfScore1 * 0.4 + capScore1 * 0.2;
+    const overallScore2 = costScore2 * 0.4 + perfScore2 * 0.4 + capScore2 * 0.2;
+    const overallWinner = overallScore1 >= overallScore2 ? 'model1' : 'model2';
+
     const recommendations = {
       bestFor: {
         model1: [] as string[],
@@ -537,9 +580,9 @@ export class PricingComparisonController {
       },
       summary: '',
       winner: {
-        cost: cost1.totalCost <= cost2.totalCost ? 'model1' : 'model2',
-        performance: 'model1', // Would be determined by actual benchmarks
-        overall: 'model1', // Would be determined by weighted scoring
+        cost: costWinner,
+        performance: performanceWinner,
+        overall: overallWinner,
       },
     };
 
@@ -577,8 +620,9 @@ export class PricingComparisonController {
     }
 
     // Generate summary
-    const cheaperModel =
-      cost1.totalCost <= cost2.totalCost ? model1.modelName : model2.modelName;
+    const cheaperModel = cost1.totalCost <= cost2.totalCost
+      ? model1.modelName
+      : model2.modelName;
     const costDiff = Math.abs(cost1.totalCost - cost2.totalCost);
     const costSavings = Math.round(
       (costDiff / Math.max(cost1.totalCost, cost2.totalCost)) * 100,

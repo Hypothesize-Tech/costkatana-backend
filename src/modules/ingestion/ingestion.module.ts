@@ -56,6 +56,9 @@ import { VectorRecoveryService } from './services/vector-recovery.service';
 // Search and retrieval services
 import { HybridSearchService } from './services/hybrid-search.service';
 import { IntelligentSearchStrategyService } from './services/intelligent-search-strategy.service';
+import { StructuredQueryDetectorService } from './services/structured-query-detector.service';
+import { MongoQueryBuilderService } from './services/mongo-query-builder.service';
+import { StructuredQueryHandlerService } from './services/structured-query-handler.service';
 import { ExactSearchService } from './services/exact-search.service';
 import { SparseSearchService } from './services/sparse-search.service';
 import { FallbackVectorStoreService } from './services/fallback-vector-store.service';
@@ -109,6 +112,9 @@ import { IntelligentRouterService } from './services/intelligent-router.service'
     // Search and retrieval services
     HybridSearchService,
     IntelligentSearchStrategyService,
+    StructuredQueryDetectorService,
+    MongoQueryBuilderService,
+    StructuredQueryHandlerService,
     ExactSearchService,
     SparseSearchService,
     FallbackVectorStoreService,
@@ -125,6 +131,7 @@ import { IntelligentRouterService } from './services/intelligent-router.service'
     // Export services that other modules might need
     IngestionService,
     DocumentProcessorService,
+    SafeBedrockEmbeddingsService,
     VectorStrategyService,
     LangchainVectorStoreService,
     FaissVectorService,
@@ -136,6 +143,9 @@ import { IntelligentRouterService } from './services/intelligent-router.service'
     // Export search and retrieval services
     HybridSearchService,
     IntelligentSearchStrategyService,
+    StructuredQueryDetectorService,
+    MongoQueryBuilderService,
+    StructuredQueryHandlerService,
     ExactSearchService,
     SparseSearchService,
     FallbackVectorStoreService,

@@ -40,6 +40,7 @@ import { ChatModule } from '../chat/chat.module';
 import { SharedPreferencesModule } from '../shared-preferences/shared-preferences.module';
 import { VercelModule } from '../vercel/vercel.module';
 import { RagModule } from '../rag/rag.module';
+import { IngestionModule } from '../ingestion/ingestion.module';
 import { GatewayModule } from '../gateway/gateway.module';
 import { UtilsModule } from '../utils/utils.module';
 import { McpModule } from '../mcp/mcp.module';
@@ -85,6 +86,7 @@ import {
     SharedPreferencesModule,
     VercelModule,
     forwardRef(() => RagModule), // For retrieval-augmented generation – forwardRef breaks AgentModule ↔ RagModule cycle
+    IngestionModule, // SafeBedrockEmbeddingsService for generateContextEmbeddings
     GatewayModule,
     UtilsModule, // For latency router service
     McpModule, // For MongoDbMcpService, VercelMcpService, AwsMcpService (McpToolSyncerService)

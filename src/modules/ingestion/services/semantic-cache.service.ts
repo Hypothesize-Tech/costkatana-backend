@@ -422,10 +422,6 @@ export class SemanticCacheService {
   }
 
   /**
-   * Generates a hash for a prompt to enable similarity matching.
-   * In a production system, this would use embeddings and vector similarity.
-   */
-  /**
    * Generates embeddings for a prompt to enable semantic similarity matching.
    * Uses vector embeddings for production-grade semantic caching.
    */

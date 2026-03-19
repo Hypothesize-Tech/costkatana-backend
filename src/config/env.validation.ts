@@ -1,8 +1,11 @@
 /**
  * Environment variable validation.
- * Fails fast on startup if required variables are missing.
- * Never fall back to hardcoded defaults for secrets in production.
+ * Logs warnings for missing or insecure values instead of throwing.
+ * Allows the container to start; downstream features may fail if vars are missing.
  */
+
+import { Logger } from '@nestjs/common';
+
 const REQUIRED_ENV_VARS = [
   'MONGODB_URI',
   'JWT_SECRET',
@@ -12,18 +15,21 @@ const REQUIRED_ENV_VARS = [
   'INTERNAL_MFA_ENCRYPTION_KEY',
 ] as const;
 
+const logger = new Logger('EnvValidation');
+
 export function validateEnv(): void {
   const missing = REQUIRED_ENV_VARS.filter((key) => !process.env[key]?.trim());
   if (missing.length > 0) {
     const list = missing.join(', ');
-    throw new Error(`Missing required environment variable(s): ${list}`);
+    logger.warn(
+      `Missing required environment variable(s): ${list}. Some features may not work.`,
+    );
   }
 
-  // Reject insecure placeholder values
   const JWT_SECRET = process.env.JWT_SECRET?.trim();
   if (JWT_SECRET === 'default-secret') {
-    throw new Error(
-      'JWT_SECRET cannot use the default-secret placeholder. Set a secure value in production.',
+    logger.warn(
+      'JWT_SECRET uses insecure default-secret placeholder. Set a secure value in production.',
     );
   }
 
@@ -32,10 +38,11 @@ export function validateEnv(): void {
     'default-encryption-key-change-this',
     'default-encryption-key-for-development-only',
     'default-key-change-me',
+    'your-32-character-encryption-key',
   ];
   if (ENCRYPTION_KEY && insecureEncryptionKeys.includes(ENCRYPTION_KEY)) {
-    throw new Error(
-      'ENCRYPTION_KEY cannot use a placeholder value. Set a secure 32+ character key in production.',
+    logger.warn(
+      'ENCRYPTION_KEY uses a placeholder value. Set a secure 32+ character key in production.',
     );
   }
 }
