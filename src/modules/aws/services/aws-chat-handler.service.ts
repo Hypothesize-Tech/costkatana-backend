@@ -97,10 +97,10 @@ export class AwsChatHandlerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Generate approval token for a plan
+   * Generate cryptographically secure approval token for a plan
    */
   private generateApprovalToken(plan: any, userId: string): string {
-    const token = `approval-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    const token = `approval-${Date.now()}-${crypto.randomBytes(32).toString('hex')}`;
     this.approvalTokens.set(token, {
       plan,
       userId,

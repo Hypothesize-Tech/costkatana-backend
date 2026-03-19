@@ -479,3 +479,41 @@ export function getSentryConfig(): typeof sentryConfig {
 export function isSentryEnabled(): boolean {
   return !!SENTRY_DSN && Sentry.getCurrentScope() !== undefined;
 }
+
+/**
+ * Check Sentry health status for monitoring endpoint
+ */
+export function checkSentryHealth(): {
+  enabled: boolean;
+  configured: boolean;
+  environment?: string;
+  release?: string;
+  lastError?: string;
+} {
+  try {
+    const enabled = isSentryEnabled();
+    const config = getSentryConfig();
+
+    if (!enabled) {
+      return {
+        enabled: false,
+        configured: !!config.dsn,
+        environment: config.environment,
+        release: config.release,
+      };
+    }
+
+    return {
+      enabled: true,
+      configured: true,
+      environment: config.environment,
+      release: config.release,
+    };
+  } catch (error) {
+    return {
+      enabled: false,
+      configured: false,
+      lastError: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}

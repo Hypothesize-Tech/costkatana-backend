@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage } from 'mongoose';
+import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import * as os from 'os';
 import {
@@ -639,7 +640,7 @@ export class SessionReplayService {
       if (!session) {
         throw new Error('Session not found');
       }
-      const shareToken = `share_${sessionId}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      const shareToken = `share_${sessionId}_${crypto.randomUUID()}`;
       const expiresAt = options.expiresIn
         ? new Date(Date.now() + options.expiresIn * 60 * 60 * 1000)
         : undefined;

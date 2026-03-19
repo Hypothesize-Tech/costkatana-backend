@@ -422,7 +422,7 @@ export class AdminAnomalyDetectionService {
                 <h3 style="color: #991b1b; margin-top: 0;">Alerts:</h3>
                 <pre style="white-space: pre-wrap; color: #7f1d1d;">${alertSummary}</pre>
               </div>
-              <p><a href="${process.env.FRONTEND_URL || 'https://app.costkatana.com'}/admin/user-spending" style="background: #dc2626; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View Dashboard</a></p>
+              <p><a href="${process.env.FRONTEND_URL || 'https://app.costkatana.com'}/admin/users/spending" style="background: #dc2626; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View Dashboard</a></p>
             </div>
           `,
         });

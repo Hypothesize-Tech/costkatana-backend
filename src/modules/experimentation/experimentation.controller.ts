@@ -5,6 +5,7 @@
  * what-if scenarios, and SSE streaming for progress updates.
  */
 
+import * as crypto from 'crypto';
 import {
   Controller,
   Get,
@@ -215,7 +216,7 @@ export class ExperimentationController {
       this.jwtService.sign(
         {
           id: userId,
-          jti: `rt_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+          jti: `rt_${Date.now()}_${crypto.randomUUID()}`,
         },
         { expiresIn: '1h' },
       );

@@ -138,25 +138,17 @@ export class VectorMemoryService {
         error: error instanceof Error ? error.message : String(error),
       });
 
-      // Fallback: generate a deterministic hash-based embedding
-      return this.generateHashBasedEmbedding(text);
+      // Do not use hash-based fallback - it produces semantically meaningless vectors
+      // that break similarity search. Callers must configure AWS Bedrock or another
+      // real embedding provider (e.g. OpenAI text-embedding-ada-002) for production.
+      throw new Error(
+        `Embedding generation failed: ${error instanceof Error ? error.message : String(error)}. ` +
+          'Configure AWS Bedrock (or OpenAI embeddings) for vector memory. Hash-based fallback is disabled.',
+      );
     }
   }
 
-  /**
-   * Hash-based embedding fallback when Bedrock is unavailable.
-   * Returns 1024 dimensions (matches Titan v2) for dimension-compatible similarity.
-   * Not semantically meaningful - configure AWS Bedrock for production.
-   */
-  private generateHashBasedEmbedding(text: string): number[] {
-    const normalized = text.trim() || 'empty';
-    const hash = crypto.createHash('sha256').update(normalized).digest();
-    const embedding: number[] = [];
-    for (let i = 0; i < this.EMBEDDING_DIMENSIONS; i++) {
-      embedding.push(hash[i % hash.length] / 255);
-    }
-    return this.normalizeVector(embedding);
-  }
+
 
   /**
    * Hash string to number

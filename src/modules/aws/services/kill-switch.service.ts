@@ -131,9 +131,9 @@ export class KillSwitchService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     if (process.env.NODE_ENV === 'production') {
       const phone = this.configService.get<string>('EMERGENCY_PHONE_NUMBER');
-      if (!phone || phone.includes('XXX')) {
-        this.logger.warn(
-          'EMERGENCY_PHONE_NUMBER not configured. Kill-switch notifications will show a placeholder. Set EMERGENCY_PHONE_NUMBER in production.',
+      if (!phone || phone.includes('XXX') || phone.trim() === '') {
+        throw new Error(
+          'EMERGENCY_PHONE_NUMBER must be configured in production. Kill-switch notifications require a valid emergency contact. Set EMERGENCY_PHONE_NUMBER in your environment.',
         );
       }
     }

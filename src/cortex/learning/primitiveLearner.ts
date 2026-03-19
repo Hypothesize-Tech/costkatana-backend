@@ -14,6 +14,7 @@ import { getCacheService } from '../../common/cache/cache.service';
 import { BedrockModelFormatter } from '../utils/bedrockModelFormatter';
 import { RetryWithBackoff } from '../../utils/retryWithBackoff';
 import { encodeToTOON, decodeFromTOON } from '../../utils/toon.utils';
+import * as crypto from 'crypto';
 import {
   BedrockRuntimeClient,
   InvokeModelCommand,
@@ -88,9 +89,16 @@ export class PrimitiveLearner {
         return [];
       }
 
-      // Analyze each unknown term
+      // Analyze each unknown term - deterministic sampling for reproducibility
       for (const term of unknownTerms) {
-        if (Math.random() > this.learningRate) {
+        const sampleKey = `${input}:${term}`;
+        const sample = this.hashToUnitInterval(sampleKey);
+        if (sample > this.learningRate) {
+          loggingService.debug('Primitive learning skipped by rate', {
+            term,
+            sample,
+            learningRate: this.learningRate,
+          });
           continue; // Skip based on learning rate
         }
 
@@ -118,6 +126,15 @@ export class PrimitiveLearner {
     }
 
     return newPrimitives;
+  }
+
+  /**
+   * Deterministic hash to [0, 1) for reproducible sampling
+   */
+  private hashToUnitInterval(key: string): number {
+    const hash = crypto.createHash('sha256').update(key).digest();
+    const uint = hash.readUInt32BE(0);
+    return uint / (0xffffffff + 1);
   }
 
   /**

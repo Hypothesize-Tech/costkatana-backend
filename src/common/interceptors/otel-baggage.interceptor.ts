@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import {
   Injectable,
   NestInterceptor,
@@ -32,7 +33,7 @@ export class OtelBaggageInterceptor implements NestInterceptor {
     const requestId =
       (request.headers['x-request-id'] as string) ||
       (request.headers['x-trace-id'] as string) ||
-      `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      crypto.randomUUID();
 
     const userId = (request as any).user?.id || 'anonymous';
     const tenantId = request.headers['x-tenant-id'] as string;

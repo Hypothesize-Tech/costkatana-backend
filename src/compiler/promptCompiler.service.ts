@@ -24,6 +24,7 @@ import {
   InstructionNode,
   LiteralNode,
   ExpressionNode,
+  ConditionalNode,
 } from './promptAST.types';
 
 export class PromptCompilerService {
@@ -239,25 +240,16 @@ export class PromptCompilerService {
         continue;
       }
 
-      // Detect conditional statements
-      const conditionalMatch = this.detectConditional(segment.text);
+      // Detect and parse conditional statements recursively
+      const conditionalMatch = PromptCompilerService.parseConditional(segment.text);
       if (conditionalMatch) {
-        loggingService.warn('Conditional parsing skipped; treated as context', {
-          metric: 'prompt_compiler.conditional_parsing_skipped',
-          segmentPreview: segment.text.slice(0, 80),
-          reason: 'Full conditional parsing requires recursive parsing (not yet implemented)',
-        });
-        // Treat as context with high priority until recursive conditional parsing is implemented
-        const contextNode = this.createContextNode(
-          segment.text,
-          'local',
-          8, // High priority for conditionals
-          true, // Required
+        const conditionalNode = PromptCompilerService.createConditionalNode(
+          conditionalMatch,
           startPos,
           endPos,
           i,
         );
-        body.push(contextNode);
+        body.push(conditionalNode);
         continue;
       }
 
@@ -542,6 +534,144 @@ export class PromptCompilerService {
       /^(if|when|whenever|provided that|assuming|suppose)\s+/i.test(text) ||
       /\b(if|when|whenever)\s+[^,]+,\s*(then|do|perform)/i.test(text)
     );
+  }
+
+  /**
+   * Parse conditional text into condition, then-branch, and optional else-branch.
+   * Supports: "if X then Y else Z", "when X, do Y", "if X then Y"
+   */
+  private static parseConditional(
+    text: string,
+  ): { condition: string; then: string; else?: string } | null {
+    if (!this.detectConditional(text)) return null;
+
+    const t = text.trim();
+
+    // "if X then Y else Z" or "if X then Y"
+    const ifThenElse = t.match(
+      /^(if|when|whenever|provided that|assuming|suppose)\s+(.+?)\s+then\s+(.+?)(?:\s+else\s+(.+))?$/is,
+    );
+    if (ifThenElse) {
+      return {
+        condition: ifThenElse[2].trim(),
+        then: ifThenElse[3].trim(),
+        else: ifThenElse[4]?.trim(),
+      };
+    }
+
+    // "when X, do Y" or "when X, perform Y"
+    const whenDo = t.match(
+      /^(when|whenever)\s+(.+?),\s*(?:then|do|perform)\s+(.+)$/is,
+    );
+    if (whenDo) {
+      return {
+        condition: whenDo[2].trim(),
+        then: whenDo[3].trim(),
+      };
+    }
+
+    // Fallback: treat first clause as condition, rest as then
+    const firstWord = t.match(/^(if|when|whenever|provided that|assuming|suppose)\s+/i);
+    if (firstWord) {
+      const rest = t.slice(firstWord[0].length).trim();
+      const thenElse = rest.split(/\s+else\s+/i);
+      const thenPart = thenElse[0].replace(/\s+then\s+/i, ' ').trim();
+      const condThen = thenPart.match(/^(.+?)\s+then\s+(.+)$/is);
+      if (condThen) {
+        return {
+          condition: condThen[1].trim(),
+          then: condThen[2].trim(),
+          else: thenElse[1]?.trim(),
+        };
+      }
+      return { condition: rest, then: rest };
+    }
+
+    return null;
+  }
+
+  /**
+   * Create a ConditionalNode with recursively parsed then/else branches
+   */
+  private static createConditionalNode(
+    parsed: { condition: string; then: string; else?: string },
+    startPos: number,
+    endPos: number,
+    index: number,
+  ): ConditionalNode {
+    const id = `cond_${startPos}_${endPos}_${index}`;
+
+    const conditionExpr: LiteralNode = {
+      type: 'Literal',
+      id: `${id}_cond`,
+      value: parsed.condition,
+      compressible: false,
+      metadata: { startPos, endPos },
+    };
+
+    const thenBody = PromptCompilerService.parseSegmentsToStatements([parsed.then], startPos, endPos);
+    const elseBody = parsed.else
+      ? PromptCompilerService.parseSegmentsToStatements([parsed.else], startPos, endPos)
+      : undefined;
+
+    return {
+      type: 'Conditional',
+      id,
+      condition: conditionExpr,
+      then: thenBody,
+      else: elseBody,
+      metadata: { startPos, endPos },
+    };
+  }
+
+  /**
+   * Parse segment strings into statement nodes (recursive helper for conditional branches)
+   */
+  private static parseSegmentsToStatements(
+    segments: string[],
+    baseStart: number,
+    baseEnd: number,
+  ): StatementNode[] {
+    const nodes: StatementNode[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      const startPos = baseStart + i * 10;
+      const endPos = startPos + seg.length;
+
+      if (PromptCompilerService.detectConditional(seg)) {
+        const parsed = PromptCompilerService.parseConditional(seg);
+        if (parsed) {
+          nodes.push(
+            PromptCompilerService.createConditionalNode(parsed, startPos, endPos, i),
+          );
+        } else {
+          nodes.push(
+            PromptCompilerService.createContextNode(
+              seg,
+              'local',
+              8,
+              true,
+              startPos,
+              endPos,
+              i,
+            ),
+          );
+        }
+      } else {
+        nodes.push(
+          PromptCompilerService.createContextNode(
+            seg,
+            'local',
+            5,
+            false,
+            startPos,
+            endPos,
+            i,
+          ),
+        );
+      }
+    }
+    return nodes;
   }
 
   /**
