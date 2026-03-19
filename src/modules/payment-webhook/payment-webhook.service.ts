@@ -5,7 +5,7 @@ import { PaymentGatewayService } from '../payment-gateway/payment-gateway.servic
 import { SubscriptionService } from '../subscription/subscription.service';
 import { SubscriptionNotificationService } from '../subscription/subscription-notification.service';
 import { Invoice } from '../../schemas/billing/invoice.schema';
-import { Subscription } from '../../schemas/billing/subscription.schema';
+import { Subscription } from '../../schemas/core/subscription.schema';
 import { PaymentMethod } from '../../schemas/billing/payment-method.schema';
 import { User } from '../../schemas/user/user.schema';
 import { SubscriptionHistory } from '../../schemas/billing/subscription-history.schema';

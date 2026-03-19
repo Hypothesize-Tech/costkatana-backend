@@ -126,6 +126,9 @@ export interface IAgentDecisionAuditMethods {
 export type AgentDecisionAuditDocument = HydratedDocument<AgentDecisionAudit> &
   IAgentDecisionAuditMethods;
 
+/** Alias for compatibility with governance module */
+export type IAgentDecisionAudit = AgentDecisionAuditDocument;
+
 @Schema({ timestamps: true, collection: 'agent_decision_audits' })
 export class AgentDecisionAudit implements IAgentDecisionAuditMethods {
   // Identity
@@ -224,44 +227,46 @@ export class AgentDecisionAudit implements IAgentDecisionAuditMethods {
 
   // Strategic reasoning
   @Prop({
-    tradeoffType: {
-      type: String,
-      enum: [
-        'cost_vs_latency',
-        'cost_vs_quality',
-        'latency_vs_quality',
-        'all_three',
-      ],
+    type: {
+      tradeoffType: {
+        type: String,
+        enum: [
+          'cost_vs_latency',
+          'cost_vs_quality',
+          'latency_vs_quality',
+          'all_three',
+        ],
+      },
+      costWeight: { type: Number, min: 0, max: 1 },
+      latencyWeight: { type: Number, min: 0, max: 1 },
+      qualityWeight: { type: Number, min: 0, max: 1 },
+      costImpact: {
+        estimated: Number,
+        actual: Number,
+        savings: Number,
+      },
+      latencyImpact: {
+        estimated: Number,
+        actual: Number,
+        overhead: Number,
+      },
+      qualityImpact: {
+        estimated: Number,
+        actual: Number,
+        degradation: Number,
+      },
+      strategy: {
+        type: String,
+        enum: [
+          'cost_optimized',
+          'speed_optimized',
+          'quality_optimized',
+          'balanced',
+        ],
+      },
+      rationale: String,
+      policyReference: String,
     },
-    costWeight: { type: Number, min: 0, max: 1 },
-    latencyWeight: { type: Number, min: 0, max: 1 },
-    qualityWeight: { type: Number, min: 0, max: 1 },
-    costImpact: {
-      estimated: Number,
-      actual: Number,
-      savings: Number,
-    },
-    latencyImpact: {
-      estimated: Number,
-      actual: Number,
-      overhead: Number,
-    },
-    qualityImpact: {
-      estimated: Number,
-      actual: Number,
-      degradation: Number,
-    },
-    strategy: {
-      type: String,
-      enum: [
-        'cost_optimized',
-        'speed_optimized',
-        'quality_optimized',
-        'balanced',
-      ],
-    },
-    rationale: String,
-    policyReference: String,
   })
   strategicTradeoff?: IStrategicTradeoff;
 
@@ -281,9 +286,11 @@ export class AgentDecisionAudit implements IAgentDecisionAuditMethods {
   architecturalDecisions?: IArchitecturalDecisionReference[];
 
   @Prop({
-    policiesApplied: [String],
-    policyOverrides: [String],
-    complianceScore: { type: Number, min: 0, max: 1 },
+    type: {
+      policiesApplied: [String],
+      policyOverrides: [String],
+      complianceScore: { type: Number, min: 0, max: 1 },
+    },
   })
   policyCompliance?: {
     policiesApplied: string[];
@@ -321,30 +328,32 @@ export class AgentDecisionAudit implements IAgentDecisionAuditMethods {
   riskLevel: 'low' | 'medium' | 'high' | 'critical';
 
   @Prop({
-    costImpact: {
-      type: String,
-      enum: ['negligible', 'low', 'medium', 'high', 'critical'],
-      default: 'low',
-    },
-    performanceImpact: {
-      type: String,
-      enum: ['negligible', 'low', 'medium', 'high', 'critical'],
-      default: 'low',
-    },
-    securityImpact: {
-      type: String,
-      enum: ['negligible', 'low', 'medium', 'high', 'critical'],
-      default: 'low',
-    },
-    userExperienceImpact: {
-      type: String,
-      enum: ['negligible', 'low', 'medium', 'high', 'critical'],
-      default: 'low',
-    },
-    overallRiskLevel: {
-      type: String,
-      enum: ['low', 'medium', 'high', 'critical'],
-      required: true,
+    type: {
+      costImpact: {
+        type: String,
+        enum: ['negligible', 'low', 'medium', 'high', 'critical'],
+        default: 'low',
+      },
+      performanceImpact: {
+        type: String,
+        enum: ['negligible', 'low', 'medium', 'high', 'critical'],
+        default: 'low',
+      },
+      securityImpact: {
+        type: String,
+        enum: ['negligible', 'low', 'medium', 'high', 'critical'],
+        default: 'low',
+      },
+      userExperienceImpact: {
+        type: String,
+        enum: ['negligible', 'low', 'medium', 'high', 'critical'],
+        default: 'low',
+      },
+      overallRiskLevel: {
+        type: String,
+        enum: ['low', 'medium', 'high', 'critical'],
+        required: true,
+      },
     },
   })
   impactAssessment?: IDecisionImpact;
@@ -354,47 +363,51 @@ export class AgentDecisionAudit implements IAgentDecisionAuditMethods {
 
   // Execution
   @Prop({
-    executionId: { type: String, required: true },
-    sandboxId: String,
-    processId: Number,
-    containerId: String,
-    cpuUsagePercent: Number,
-    memoryUsageMB: Number,
-    diskUsageMB: Number,
-    networkBytesSent: Number,
-    networkBytesReceived: Number,
-    startTime: { type: Date, required: true },
-    endTime: Date,
-    durationMs: Number,
-    queueTimeMs: Number,
-    estimatedCost: Number,
-    actualCost: Number,
-    costBreakdown: {
-      inputTokensCost: Number,
-      outputTokensCost: Number,
-      computeCost: Number,
-      storageCost: Number,
+    type: {
+      executionId: { type: String, required: true },
+      sandboxId: String,
+      processId: Number,
+      containerId: String,
+      cpuUsagePercent: Number,
+      memoryUsageMB: Number,
+      diskUsageMB: Number,
+      networkBytesSent: Number,
+      networkBytesReceived: Number,
+      startTime: { type: Date, required: true },
+      endTime: Date,
+      durationMs: Number,
+      queueTimeMs: Number,
+      estimatedCost: Number,
+      actualCost: Number,
+      costBreakdown: {
+        inputTokensCost: Number,
+        outputTokensCost: Number,
+        computeCost: Number,
+        storageCost: Number,
+      },
+      inputTokens: Number,
+      outputTokens: Number,
+      totalTokens: Number,
+      status: {
+        type: String,
+        enum: ['pending', 'running', 'completed', 'failed', 'timeout', 'killed'],
+        required: true,
+      },
+      exitCode: Number,
+      errorMessage: String,
+      errorStack: String,
     },
-    inputTokens: Number,
-    outputTokens: Number,
-    totalTokens: Number,
-    status: {
-      type: String,
-      enum: ['pending', 'running', 'completed', 'failed', 'timeout', 'killed'],
-      required: true,
-    },
-    exitCode: Number,
-    errorMessage: String,
-    errorStack: String,
   })
   executionContext: IExecutionContext;
 
   // Data
   @Prop({
-    prompt: String,
-    context: mongoose.Schema.Types.Mixed,
-    parameters: mongoose.Schema.Types.Mixed,
-    userIntent: String,
+    type: {
+      prompt: String,
+      context: mongoose.Schema.Types.Mixed,
+      parameters: mongoose.Schema.Types.Mixed,
+      userIntent: String,
+    },
   })
   inputData?: {
     prompt?: string;
@@ -404,10 +417,12 @@ export class AgentDecisionAudit implements IAgentDecisionAuditMethods {
   };
 
   @Prop({
-    result: mongoose.Schema.Types.Mixed,
-    modelResponse: String,
-    actionsTaken: [String],
-    sideEffects: [String],
+    type: {
+      result: mongoose.Schema.Types.Mixed,
+      modelResponse: String,
+      actionsTaken: [String],
+      sideEffects: [String],
+    },
   })
   outputData?: {
     result?: any;
@@ -418,19 +433,21 @@ export class AgentDecisionAudit implements IAgentDecisionAuditMethods {
 
   // Human oversight
   @Prop({
-    reviewerId: { type: MongooseSchema.Types.ObjectId, ref: 'User' },
-    reviewerEmail: String,
-    reviewerName: String,
-    reviewStatus: {
-      type: String,
-      enum: ['pending', 'approved', 'rejected', 'escalated'],
-      default: 'pending',
+    type: {
+      reviewerId: { type: MongooseSchema.Types.ObjectId, ref: 'User' },
+      reviewerEmail: String,
+      reviewerName: String,
+      reviewStatus: {
+        type: String,
+        enum: ['pending', 'approved', 'rejected', 'escalated'],
+        default: 'pending',
+      },
+      reviewedAt: Date,
+      reviewComments: String,
+      approvalRequired: Boolean,
+      approvalGranted: Boolean,
+      approvalReason: String,
     },
-    reviewedAt: Date,
-    reviewComments: String,
-    approvalRequired: Boolean,
-    approvalGranted: Boolean,
-    approvalReason: String,
   })
   humanReview?: IHumanReview;
 

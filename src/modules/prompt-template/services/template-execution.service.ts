@@ -15,7 +15,7 @@ import {
   TemplateExecution,
   TemplateExecutionDocument,
 } from '../../../schemas/prompt/template-execution.schema';
-import { Usage } from '../../../schemas/analytics/usage.schema';
+import { Usage } from '../../../schemas/core/usage.schema';
 
 export interface TemplateExecutionRequest {
   templateId: string;

@@ -11,7 +11,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import mongoose from 'mongoose';
 import { User, IOtherEmail } from '../../schemas/user/user.schema';
-import { Alert } from '../../schemas/user/alert.schema';
+import { Alert } from '../../schemas/core/alert.schema';
 import { Usage } from '../../schemas/core/usage.schema';
 import { Optimization } from '../../schemas/core/optimization.schema';
 import { SubscriptionService } from '../subscription/subscription.service';

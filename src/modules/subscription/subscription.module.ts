@@ -7,9 +7,9 @@ import { SubscriptionNotificationService } from './subscription-notification.ser
 import {
   Subscription,
   SubscriptionSchema,
-} from '../../schemas/billing/subscription.schema';
+} from '../../schemas/core/subscription.schema';
 import { Invoice, InvoiceSchema } from '../../schemas/billing/invoice.schema';
-import { Usage, UsageSchema } from '../../schemas/analytics/usage.schema';
+import { Usage, UsageSchema } from '../../schemas/core/usage.schema';
 import { User, UserSchema } from '../../schemas/user/user.schema';
 import {
   PaymentMethod,

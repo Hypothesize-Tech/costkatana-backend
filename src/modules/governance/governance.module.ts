@@ -8,7 +8,7 @@ import {
 import {
   AgentDecisionAudit,
   AgentDecisionAuditSchema,
-} from './schemas/agent-decision-audit.schema';
+} from '../../schemas/agent/agent-decision-audit.schema';
 import {
   GovernancePolicy,
   GovernancePolicySchema,

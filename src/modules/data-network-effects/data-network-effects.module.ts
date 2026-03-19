@@ -35,7 +35,7 @@ import {
 import {
   GlobalBenchmark,
   GlobalBenchmarkSchema,
-} from '../../schemas/ai/global-benchmark.schema';
+} from '../../schemas/analytics/global-benchmark.schema';
 import {
   OptimizationOutcome,
   OptimizationOutcomeSchema,

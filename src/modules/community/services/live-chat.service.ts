@@ -4,7 +4,7 @@ import { Model, Types } from 'mongoose';
 import {
   ChatSession,
   ChatSessionDocument,
-} from '../schemas/chat-session.schema';
+} from '../../../schemas/community/chat-session.schema';
 import {
   ChatMessage,
   ChatMessageDocument,

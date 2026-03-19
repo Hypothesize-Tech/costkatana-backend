@@ -29,7 +29,7 @@ import {
   WhatIfScenario,
   WhatIfScenarioDocument,
 } from '../../../schemas/analytics/what-if-scenario.schema';
-import { Usage, UsageDocument } from '../../../schemas/analytics/usage.schema';
+import { Usage, UsageDocument } from '../../../schemas/core/usage.schema';
 
 // Utility imports
 import { MODEL_PRICING } from '../../../utils/pricing';

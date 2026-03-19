@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { User } from '../../schemas/user/user.schema';
-import { Alert } from '../../schemas/user/alert.schema';
+import { Alert } from '../../schemas/core/alert.schema';
 
 interface EmailOptions {
   to: string | string[];

@@ -5,7 +5,7 @@ import {
   ModelComparison,
   PerformanceTrend,
   BestPractice,
-} from '../../../schemas/ai/global-benchmark.schema';
+} from '../../../schemas/analytics/global-benchmark.schema';
 import { ModelPerformanceFingerprint } from '../../../schemas/ai/model-performance-fingerprint.schema';
 import {
   OptimizationOutcome,

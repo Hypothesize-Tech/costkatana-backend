@@ -3,7 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { UserController } from './user.controller';
 import { UserService } from './user.service';
 import { User, UserSchema } from '../../schemas/user/user.schema';
-import { Alert, AlertSchema } from '../../schemas/user/alert.schema';
+import { Alert, AlertSchema } from '../../schemas/core/alert.schema';
 import {
   UserModerationConfig,
   UserModerationConfigSchema,

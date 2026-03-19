@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
-import { Usage, UsageSchema } from '@/schemas/analytics/usage.schema';
+import { Usage, UsageSchema } from '@/schemas/core/usage.schema';
 import { TemplateAnalyticsController } from './template-analytics.controller';
 import { TemplateAnalyticsService } from './template-analytics.service';
 
