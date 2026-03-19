@@ -13,7 +13,10 @@ import { AuthModule } from '../auth/auth.module';
 import { DocsComment, DocsCommentSchema } from './schemas/docs-comment.schema';
 import { UserExample, UserExampleSchema } from './schemas/user-example.schema';
 import { Discussion, DiscussionSchema } from './schemas/discussion.schema';
-import { ChatSession, ChatSessionSchema } from './schemas/chat-session.schema';
+import {
+  ChatSession,
+  ChatSessionSchema,
+} from '../../schemas/community/chat-session.schema';
 import { ChatMessage, ChatMessageSchema } from './schemas/chat-message.schema';
 
 @Module({

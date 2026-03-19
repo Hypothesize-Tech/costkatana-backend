@@ -5,7 +5,7 @@ import {
   SimulationTracking,
   SimulationTrackingSchema,
 } from '@/schemas/analytics/simulation-tracking.schema';
-import { Usage, UsageSchema } from '@/schemas/analytics/usage.schema';
+import { Usage, UsageSchema } from '@/schemas/core/usage.schema';
 import { SimulationTrackingController } from './simulation-tracking.controller';
 import { SimulationTrackingService } from './simulation-tracking.service';
 

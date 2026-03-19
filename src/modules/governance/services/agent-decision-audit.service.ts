@@ -9,7 +9,7 @@ import {
   IDecisionImpact,
   IStrategicTradeoff,
   IArchitecturalDecisionReference,
-} from '../schemas/agent-decision-audit.schema';
+} from '../../../schemas/agent/agent-decision-audit.schema';
 
 export interface RecordDecisionOptions {
   decision: string;

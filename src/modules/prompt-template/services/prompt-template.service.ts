@@ -7,7 +7,7 @@ import {
   PromptTemplateDocument,
 } from '../../../schemas/prompt/prompt-template.schema';
 import { Project } from '../../../schemas/team-project/project.schema';
-import { Usage } from '../../../schemas/analytics/usage.schema';
+import { Usage } from '../../../schemas/core/usage.schema';
 import { ActivityService } from '../../../modules/activity/activity.service';
 import { AITemplateEngineService } from './ai-template-engine.service';
 import { TemplateExecutionService } from './template-execution.service';

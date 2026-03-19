@@ -9,7 +9,7 @@ import {
 } from '../../../schemas/prompt/prompt-template.schema';
 import { User } from '../../../schemas/user/user.schema';
 import { Project } from '../../../schemas/team-project/project.schema';
-import { Usage } from '../../../schemas/analytics/usage.schema';
+import { Usage } from '../../../schemas/core/usage.schema';
 import { VectorStoreService } from '../../agent/services/vector-store.service';
 
 export interface AITemplateGenerationRequest {

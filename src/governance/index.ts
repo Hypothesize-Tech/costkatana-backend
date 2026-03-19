@@ -9,14 +9,14 @@ export type {
   IAgentIdentity,
   IAgentCapability,
 } from '../modules/governance/schemas/agent-identity.schema';
-export { AgentDecisionAudit } from '../modules/governance/schemas/agent-decision-audit.schema';
-export type {
-  IAgentDecisionAudit,
-  IAlternativeConsidered,
-  IDecisionImpact,
-  IExecutionContext,
-  IHumanReview,
-} from '../modules/governance/schemas/agent-decision-audit.schema';
+export {
+  AgentDecisionAudit,
+  type IAgentDecisionAudit,
+  type IAlternativeConsidered,
+  type IDecisionImpact,
+  type IExecutionContext,
+  type IHumanReview,
+} from '../schemas/agent/agent-decision-audit.schema';
 export { AgentExecution } from '../schemas/agent/agent-execution.schema';
 export type {
   IAgentExecution,

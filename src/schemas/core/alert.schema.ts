@@ -38,6 +38,7 @@ export class Alert {
     enum: [
       'cost_threshold',
       'usage_spike',
+      'usage_limit', // user/alert compatibility
       'optimization_available',
       'weekly_summary',
       'monthly_summary',
@@ -51,12 +52,20 @@ export class Alert {
       'agent_trace_spike',
       'agent_trace_inefficiency',
       'agent_trace_failure',
+      'payment_failed', // user/alert compatibility
+      'subscription_expiring',
+      'api_key_expired',
+      'security_alert',
+      'system_maintenance',
+      'feature_update',
+      'test',
     ],
     required: true,
   })
   type:
     | 'cost_threshold'
     | 'usage_spike'
+    | 'usage_limit'
     | 'optimization_available'
     | 'weekly_summary'
     | 'monthly_summary'
@@ -69,7 +78,14 @@ export class Alert {
     | 'agent_trace_budget'
     | 'agent_trace_spike'
     | 'agent_trace_inefficiency'
-    | 'agent_trace_failure';
+    | 'agent_trace_failure'
+    | 'payment_failed'
+    | 'subscription_expiring'
+    | 'api_key_expired'
+    | 'security_alert'
+    | 'system_maintenance'
+    | 'feature_update'
+    | 'test';
 
   @Prop({ required: true })
   title: string;
@@ -107,6 +123,9 @@ export class Alert {
 
   @Prop()
   snoozedUntil?: Date;
+
+  @Prop({ type: Boolean, default: false })
+  snoozed?: boolean;
 
   @Prop({ type: Boolean, default: false })
   actionRequired: boolean;
@@ -156,6 +175,7 @@ export const AlertSchema = SchemaFactory.createForClass(Alert);
 AlertSchema.index({ userId: 1, sent: 1 });
 AlertSchema.index({ userId: 1, read: 1 });
 AlertSchema.index({ userId: 1, type: 1, createdAt: -1 });
+AlertSchema.index({ snoozedUntil: 1 });
 AlertSchema.index({ createdAt: -1 });
 
 // TTL index for automatic deletion of expired alerts

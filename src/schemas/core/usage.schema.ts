@@ -202,16 +202,21 @@ export class Usage implements IUsageMethods {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Project' })
   projectId?: MongooseSchema.Types.ObjectId;
 
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Subscription' })
+  subscriptionId?: MongooseSchema.Types.ObjectId;
+
   @Prop({
     type: String,
     enum: [
       'openai',
       'aws-bedrock',
       'google-ai',
+      'google', // alias for google-ai (analytics compatibility)
       'anthropic',
       'huggingface',
       'cohere',
       'dashboard-analytics',
+      'other', // analytics compatibility
     ],
     required: true,
   })
@@ -219,10 +224,12 @@ export class Usage implements IUsageMethods {
     | 'openai'
     | 'aws-bedrock'
     | 'google-ai'
+    | 'google'
     | 'anthropic'
     | 'huggingface'
     | 'cohere'
     | 'dashboard-analytics'
+    | 'other'
     | string;
 
   @Prop({ required: true })
@@ -246,8 +253,14 @@ export class Usage implements IUsageMethods {
   @Prop({ required: true, min: 0, default: 0 })
   cost: number;
 
+  @Prop({ min: 0 })
+  estimatedCost?: number;
+
   @Prop({ required: true, min: 0, default: 0 })
   responseTime: number;
+
+  @Prop({ type: Date })
+  recordedAt?: Date;
 
   @Prop({ type: mongoose.Schema.Types.Mixed, default: {} })
   metadata: IMetadata;
@@ -328,6 +341,18 @@ export class Usage implements IUsageMethods {
 
   @Prop({ min: 0 })
   traceSequence?: number;
+
+  @Prop()
+  workflowId?: string;
+
+  @Prop()
+  workflowName?: string;
+
+  @Prop()
+  workflowStep?: string;
+
+  @Prop({ min: 0 })
+  workflowSequence?: number;
 
   @Prop({ type: String, enum: ['zapier', 'make', 'n8n'] })
   automationPlatform?: 'zapier' | 'make' | 'n8n';
@@ -529,6 +554,12 @@ export class Usage implements IUsageMethods {
 
 export const UsageSchema = SchemaFactory.createForClass(Usage);
 
+// Virtual: provider alias for service (analytics compatibility when reading)
+UsageSchema.virtual('provider').get(function (this: Usage) {
+  const stored = (this as any).get?.('provider');
+  return stored != null ? stored : this.service;
+});
+
 // Instance methods
 UsageSchema.methods.costPerToken = function (): number {
   return this.totalTokens > 0 ? this.cost / this.totalTokens : 0;
@@ -627,7 +658,11 @@ UsageSchema.statics.getEnhancedUserSummary = async function (
 
 // Indexes
 UsageSchema.index({ userId: 1, createdAt: -1 });
+UsageSchema.index({ userId: 1, recordedAt: -1 });
+UsageSchema.index({ subscriptionId: 1 });
+UsageSchema.index({ recordedAt: -1 });
 UsageSchema.index({ createdAt: -1 });
+UsageSchema.index({ workflowId: 1 });
 UsageSchema.index({ service: 1, createdAt: -1 });
 UsageSchema.index({ cost: -1 });
 UsageSchema.index({ errorOccurred: 1, createdAt: -1 });

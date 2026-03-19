@@ -5,7 +5,7 @@ import {
   SimulationTracking,
   SimulationTrackingDocument,
 } from '@/schemas/analytics/simulation-tracking.schema';
-import { Usage, UsageDocument } from '@/schemas/analytics/usage.schema';
+import { Usage, UsageDocument } from '@/schemas/core/usage.schema';
 
 export interface SimulationTrackingData {
   userId: string;

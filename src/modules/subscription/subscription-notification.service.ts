@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EmailService } from '../email/email.service';
 import { User } from '../../schemas/user/user.schema';
-import { Subscription } from '../../schemas/billing/subscription.schema';
+import { Subscription } from '../../schemas/core/subscription.schema';
 import { Invoice } from '../../schemas/billing/invoice.schema';
 
 @Injectable()

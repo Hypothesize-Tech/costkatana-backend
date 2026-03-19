@@ -9,16 +9,16 @@ export type {
   IAgentIdentity,
   IAgentCapability,
 } from './schemas/agent-identity.schema';
-export { AgentDecisionAudit } from './schemas/agent-decision-audit.schema';
-export type {
-  IAgentDecisionAudit,
-  IAlternativeConsidered,
-  IStrategicTradeoff,
-  IArchitecturalDecisionReference,
-  IDecisionImpact,
-  IExecutionContext,
-  IHumanReview,
-} from './schemas/agent-decision-audit.schema';
+export {
+  AgentDecisionAudit,
+  type IAgentDecisionAudit,
+  type IAlternativeConsidered,
+  type IStrategicTradeoff,
+  type IArchitecturalDecisionReference,
+  type IDecisionImpact,
+  type IExecutionContext,
+  type IHumanReview,
+} from '../../schemas/agent/agent-decision-audit.schema';
 
 // Services
 export { AgentIdentityService } from './services/agent-identity.service';

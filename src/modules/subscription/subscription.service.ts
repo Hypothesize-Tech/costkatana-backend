@@ -8,10 +8,12 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import mongoose from 'mongoose';
 import { User } from '../../schemas/user/user.schema';
-import { Subscription } from '../../schemas/billing/subscription.schema';
-import type { SubscriptionDocument } from '../../schemas/billing/subscription.schema';
+import {
+  Subscription,
+  SubscriptionDocument,
+} from '../../schemas/core/subscription.schema';
 import { Invoice } from '../../schemas/billing/invoice.schema';
-import { Usage } from '../../schemas/analytics/usage.schema';
+import { Usage } from '../../schemas/core/usage.schema';
 import { PaymentMethod } from '../../schemas/billing/payment-method.schema';
 import { Discount } from '../../schemas/billing/discount.schema';
 import { SubscriptionHistory } from '../../schemas/billing/subscription-history.schema';

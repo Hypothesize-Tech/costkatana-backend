@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage } from 'mongoose';
-import { Usage, UsageDocument } from '@/schemas/analytics/usage.schema';
+import { Usage, UsageDocument } from '@/schemas/core/usage.schema';
 import {
   TagHierarchy as TagHierarchyModel,
   TagHierarchyDocument,

@@ -57,9 +57,13 @@ export class WebScraperService {
 
     this.logger.log(`Starting to scrape pricing for ${provider} from ${url}`);
 
+    const fullUrl = url.startsWith('http://') || url.startsWith('https://')
+      ? url
+      : `https://${url}`;
+
     try {
       // Make HTTP request with proper headers
-      const response = await axios.get(`https://${url}`, {
+      const response = await axios.get(fullUrl, {
         headers: {
           'User-Agent': this.getRandomUserAgent(),
           Accept:
@@ -93,7 +97,7 @@ export class WebScraperService {
         );
         return {
           provider,
-          url: `https://${url}`,
+          url: fullUrl,
           content,
           scrapedAt: new Date(),
           success: true,
@@ -114,7 +118,7 @@ export class WebScraperService {
         this.logger.log(`Using fallback content for ${provider}`);
         return {
           provider,
-          url: `https://${url}`,
+          url: fullUrl,
           content: fallbackContent,
           scrapedAt: new Date(),
           success: true,
@@ -123,7 +127,7 @@ export class WebScraperService {
 
       return {
         provider,
-        url: `https://${url}`,
+        url: fullUrl,
         content: '',
         scrapedAt: new Date(),
         success: false,

@@ -398,7 +398,7 @@ export class RealtimePricingService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      this.logger.warn(
+      this.logger.debug(
         `Error extracting pricing data for ${provider}: ${errorMessage}`,
       );
       throw error;
@@ -425,7 +425,7 @@ export class RealtimePricingService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      this.logger.warn(
+      this.logger.debug(
         `Pricing update failed for ${provider} (will use cached/DB data): ${errorMessage}`,
       );
       throw error;
@@ -456,16 +456,19 @@ export class RealtimePricingService implements OnModuleInit, OnModuleDestroy {
         this.updateProviderPricing(provider).catch((error) => {
           const errorMessage =
             error instanceof Error ? error.message : String(error);
-          this.logger.warn(
+          this.logger.debug(
             `Skipped pricing update for ${provider}: ${errorMessage}`,
           );
           return null;
         }),
       );
 
-      await Promise.all(updatePromises);
-
-      this.logger.log('Completed pricing update for all providers');
+      const results = await Promise.all(updatePromises);
+      const successCount = results.filter((r) => r !== null).length;
+      const skipCount = providers.length - successCount;
+      this.logger.log(
+        `Completed pricing update for all providers (${successCount} updated${skipCount > 0 ? `, ${skipCount} using cached/DB data` : ''})`,
+      );
     } finally {
       this.isUpdating = false;
     }

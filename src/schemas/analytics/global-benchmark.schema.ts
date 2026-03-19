@@ -4,7 +4,7 @@ import { HydratedDocument } from 'mongoose';
 /**
  * Aggregated performance metrics (privacy-preserving)
  */
-class AggregatedMetrics {
+export class AggregatedMetrics {
   @Prop({ required: true, default: 0 })
   totalRequests: number;
 
@@ -83,7 +83,7 @@ class AggregatedMetrics {
 /**
  * Model comparison data
  */
-class ModelComparison {
+export class ModelComparison {
   @Prop({ required: true })
   modelId: string;
 
@@ -115,7 +115,7 @@ class ModelComparison {
 /**
  * Trend data over time
  */
-class PerformanceTrend {
+export class PerformanceTrend {
   @Prop({ required: true })
   date: Date;
 
@@ -135,7 +135,7 @@ class PerformanceTrend {
 /**
  * Best practices derived from aggregate data
  */
-class BestPractice {
+export class BestPractice {
   @Prop({
     required: true,
     enum: [

@@ -77,6 +77,7 @@ export class Subscription {
       'trialing',
       'past_due',
       'canceled',
+      'cancelled', // alias for billing schema compatibility
       'unpaid',
       'incomplete',
       'paused',
@@ -89,6 +90,7 @@ export class Subscription {
     | 'trialing'
     | 'past_due'
     | 'canceled'
+    | 'cancelled'
     | 'unpaid'
     | 'incomplete'
     | 'paused';
@@ -138,6 +140,12 @@ export class Subscription {
 
   @Prop()
   gatewaySubscriptionId?: string;
+
+  @Prop({ type: Boolean, default: false })
+  cancelAtPeriodEnd?: boolean;
+
+  @Prop()
+  cancelledAt?: Date;
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'PaymentMethod' })
   paymentMethodId?: MongooseSchema.Types.ObjectId;

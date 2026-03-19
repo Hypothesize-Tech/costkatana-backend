@@ -8,7 +8,7 @@ import { Invoice, InvoiceSchema } from '../../schemas/billing/invoice.schema';
 import {
   Subscription,
   SubscriptionSchema,
-} from '../../schemas/billing/subscription.schema';
+} from '../../schemas/core/subscription.schema';
 import {
   PaymentMethod,
   PaymentMethodSchema,

@@ -1,6 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { Usage, UsageSchema } from '../../schemas/analytics/usage.schema';
+import { Usage, UsageSchema } from '../../schemas/core/usage.schema';
 import {
   WorkflowTemplateVersion,
   WorkflowTemplateVersionSchema,

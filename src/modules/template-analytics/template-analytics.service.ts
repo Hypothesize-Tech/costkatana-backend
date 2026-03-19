@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import mongoose from 'mongoose';
-import { Usage, UsageDocument } from '@/schemas/analytics/usage.schema';
+import { Usage, UsageDocument } from '@/schemas/core/usage.schema';
 
 export interface TemplateUsageFilters {
   startDate?: Date;
