@@ -858,10 +858,47 @@ export class ComplianceCheckService implements OnModuleInit, OnModuleDestroy {
   private startComplianceMonitoring(): void {
     this.consentMonitorInterval = setInterval(
       () => {
-        this.logger.debug('Compliance monitoring tick - consent expiry check');
-        // In production, iterate consent keys and expire stale records
+        void this.expireStaleConsentRecords();
       },
       60 * 60 * 1000,
     ); // Every hour
+  }
+
+  /**
+   * Iterates consent keys, finds records past their expiresAt,
+   * and deletes them. Ensures GDPR/CCPA consent records are properly expired.
+   */
+  private async expireStaleConsentRecords(): Promise<void> {
+    try {
+      const keys = await this.cache.scanKeys(`${this.CONSENT_KEY_PREFIX}*`);
+      const now = Date.now();
+      let expiredCount = 0;
+
+      for (const key of keys) {
+        const record = await this.cache.get<ConsentRecord>(key);
+        if (!record || typeof record.expiresAt !== 'number') continue;
+        if (record.expiresAt > now) continue;
+
+        await this.cache.del(key);
+        expiredCount++;
+        this.logger.debug('Expired consent record removed', {
+          key,
+          consentId: record.consentId,
+          userId: record.userId,
+          framework: record.framework,
+        });
+      }
+
+      if (expiredCount > 0) {
+        this.logger.log('Consent expiry check completed', {
+          keysScanned: keys.length,
+          expiredRemoved: expiredCount,
+        });
+      }
+    } catch (error) {
+      this.logger.error('Consent expiry check failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }

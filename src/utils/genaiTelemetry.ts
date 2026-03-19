@@ -107,6 +107,7 @@ function hashText(text: string): string {
 }
 
 const logger = new Logger('GenAITelemetry');
+let hasWarnedNullStore = false;
 
 /**
  * Record GenAI usage: OpenTelemetry spans/metrics, optional MongoDB persistence, redaction, and high-cost logging.
@@ -213,6 +214,8 @@ export function recordGenAIUsage(record: GenAIUsageRecord): void {
       baggage.workspace_id ?? workspaceId ?? 'default';
 
     if (telemetryStore) {
+      const now = Date.now();
+      const durationMs = latencyMs ?? 0;
       const storePayload: Partial<TelemetryStoreInput> = {
         trace_id: spanContext.traceId,
         span_id: spanContext.spanId,
@@ -221,10 +224,10 @@ export function recordGenAIUsage(record: GenAIUsageRecord): void {
         workspace_id: workspaceIdResolved,
         user_id: userIdResolved,
         request_id: requestIdResolved,
-        timestamp: new Date(),
-        start_time: new Date(),
-        end_time: new Date(),
-        duration_ms: latencyMs ?? 0,
+        timestamp: new Date(now),
+        start_time: new Date(now - durationMs),
+        end_time: new Date(now),
+        duration_ms: durationMs,
         service_name: 'cost-katana-api',
         operation_name: `gen_ai.${operationName}`,
         span_kind: 'client',
@@ -252,6 +255,13 @@ export function recordGenAIUsage(record: GenAIUsageRecord): void {
           error: err instanceof Error ? err.message : String(err),
         });
       });
+    } else {
+      if (!hasWarnedNullStore) {
+        hasWarnedNullStore = true;
+        logger.warn(
+          'GenAI telemetry store not initialized — usage data not persisted to MongoDB. Call setGenAITelemetryStore() at app bootstrap.',
+        );
+      }
     }
 
     if (!activeSpan) {

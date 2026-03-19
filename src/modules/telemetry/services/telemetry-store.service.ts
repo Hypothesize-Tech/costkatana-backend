@@ -57,10 +57,21 @@ export interface TelemetryStoreInput {
 export class TelemetryService {
   private readonly logger = new Logger(TelemetryService.name);
 
+  private static _storeTelemetryDataWarned = false;
+
   /** Static for legacy Express middleware - set by Nest or no-op */
   static storeTelemetryData: (
     data: Partial<TelemetryStoreInput>,
-  ) => Promise<unknown> = async () => ({});
+  ) => Promise<unknown> = async (data) => {
+    if (!TelemetryService._storeTelemetryDataWarned) {
+      TelemetryService._storeTelemetryDataWarned = true;
+      loggingService.warn(
+        'storeTelemetryData called before initialization — telemetry data lost. Wire TelemetryService.storeTelemetryData at app bootstrap.',
+        { span_id: data?.span_id, operation_name: data?.operation_name },
+      );
+    }
+    return {};
+  };
 
   constructor(
     @InjectModel(Telemetry.name)

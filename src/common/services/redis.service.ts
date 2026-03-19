@@ -4,6 +4,7 @@ import {
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
+import * as Sentry from '@sentry/node';
 import { createClient, RedisClientType } from 'redis';
 import * as crypto from 'crypto';
 import { createSafeBedrockEmbeddings } from '../../modules/agent/services/safe-bedrock-embeddings';
@@ -61,6 +62,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readerClient!: RedisClientType;
   private embeddingModel: ReturnType<typeof createSafeBedrockEmbeddings>;
   private _isConnected: boolean = false;
+  private _isHealthy: boolean = true;
   private inMemoryCache: LRUCache<string, { value: string; expiry: number }>;
   private isLocalDev: boolean = false;
   private connectionInProgress: boolean = false;
@@ -142,6 +144,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Check if Redis is healthy. Set to false in production when fallback to
+   * in-memory would have occurred; callers (e.g. health check) can fail fast.
+   */
+  public get isHealthy(): boolean {
+    return this._isHealthy;
+  }
+
+  /**
    * Setup Redis clients with proper error handling
    */
   private setupRedisClients(): void {
@@ -199,18 +209,53 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Fallback to in-memory cache when Redis fails
+   * Fallback to in-memory cache when Redis fails.
+   * In production, never silently degrade — set isHealthy=false, emit Sentry,
+   * and leave clients closed so health check fails and callers get errors.
    */
   private fallbackToInMemory(): void {
     if (!this.isLocalDev) {
+      if (process.env.NODE_ENV === 'production') {
+        this._isHealthy = false;
+        this._isConnected = false;
+        Sentry.captureMessage(
+          'Redis connection failed — service degraded. Redis is required in production.',
+          {
+            level: 'error',
+            tags: {
+              component: 'redis',
+              environment: process.env.NODE_ENV ?? 'unknown',
+            },
+          },
+        );
+        this.logger.error(
+          'Redis connection failed in production. Service unhealthy. ' +
+            'Fix Redis connectivity; health check will fail until resolved.',
+        );
+        try {
+          if (this.client) {
+            this.client.removeAllListeners();
+            if (typeof this.client.quit === 'function') {
+              this.client.quit().catch(() => {});
+            }
+          }
+          if (this.readerClient) {
+            this.readerClient.removeAllListeners();
+            if (typeof this.readerClient.quit === 'function') {
+              this.readerClient.quit().catch(() => {});
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+
       this.logger.log('🔄 Switching to in-memory cache mode');
 
-      // Attempt to gracefully close existing clients if they exist
       try {
-        // Remove all event listeners to prevent late errors from showing up
         if (this.client) {
           this.client.removeAllListeners();
-
           if (typeof this.client.quit === 'function') {
             this.client.quit().catch((err) =>
               this.logger.debug('Error while closing Redis client:', {
@@ -219,10 +264,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
             );
           }
         }
-
         if (this.readerClient) {
           this.readerClient.removeAllListeners();
-
           if (typeof this.readerClient.quit === 'function') {
             this.readerClient.quit().catch((err) =>
               this.logger.debug('Error while closing Redis reader client:', {
@@ -237,13 +280,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         });
       }
 
-      // Switch to in-memory mode
       this.isLocalDev = true;
       this.client = this.createMockClient();
       this.readerClient = this.createMockClient();
       this._isConnected = true;
-
-      // Log success message
       this.logger.log('✅ Successfully switched to in-memory cache mode');
     }
   }

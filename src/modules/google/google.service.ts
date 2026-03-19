@@ -999,6 +999,30 @@ export class GoogleService {
   }
 
   /**
+   * List calendars available to the connected account.
+   * Requires calendar.readonly or calendar scope.
+   */
+  async listCalendars(
+    connection: GoogleConnectionWithTokens,
+  ): Promise<Array<{ id: string; summary?: string; primary?: boolean }>> {
+    return this.executeWithRetry(
+      async () => {
+        const auth = await this.createAuthenticatedClient(connection);
+        const calendar = google.calendar({ version: 'v3', auth });
+        const { data } = await calendar.calendarList.list();
+        return (data.items ?? []).map((c) => ({
+          id: c.id!,
+          summary: c.summary,
+          primary: c.primary ?? false,
+        }));
+      },
+      true,
+      'calendar',
+      'list',
+    );
+  }
+
+  /**
    * List calendar events. Requires calendar.readonly or calendar scope.
    */
   async listCalendarEvents(

@@ -5,8 +5,26 @@ import {
   IsInt,
   Min,
   IsNumber,
+  IsObject,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+
+export class ServiceDependencyFilterDto {
+  @IsOptional()
+  @IsString()
+  sourceService?: string;
+
+  @IsOptional()
+  @IsString()
+  targetService?: string;
+
+  @IsOptional()
+  source_service?: string;
+
+  @IsOptional()
+  target_service?: string;
+}
 
 export class TelemetryQueryDto {
   @IsOptional()
@@ -109,4 +127,10 @@ export class TelemetryQueryDto {
   @IsOptional()
   @IsIn(['asc', 'desc'])
   sort_order?: 'asc' | 'desc';
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ServiceDependencyFilterDto)
+  service_dependency?: ServiceDependencyFilterDto;
 }

@@ -23,7 +23,8 @@ export class IntegrationOptionProviderService {
       | 'teams'
       | 'guilds'
       | 'issueTypes'
-      | 'priorities',
+      | 'priorities'
+      | 'calendars',
   ): Promise<IntegrationOption[]> {
     const integration = await this.integrationService.getIntegrationById(
       integrationId,
@@ -116,6 +117,25 @@ export class IntegrationOptionProviderService {
             label: String(i.name ?? i.id ?? ''),
             metadata: i,
           }));
+        }
+        break;
+      case 'calendars':
+        if (integration.type === 'google_oauth') {
+          const list = await this.integrationService.getGoogleCalendars(
+            integrationId,
+            userId,
+          );
+          return (list as Array<{ id?: string; summary?: string; primary?: boolean }>).map(
+            (c) => ({
+              value: String(c.id ?? 'primary'),
+              label: String(
+                c.primary
+                  ? `${c.summary ?? c.id ?? 'Primary'} (Primary)`
+                  : c.summary ?? c.id ?? 'Calendar',
+              ),
+              metadata: c,
+            }),
+          );
         }
         break;
     }

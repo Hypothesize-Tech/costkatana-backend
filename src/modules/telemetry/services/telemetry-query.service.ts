@@ -200,7 +200,9 @@ export class TelemetryQueryService implements OnModuleInit {
   }
 
   /**
-   * Query telemetry spans with circuit breaker protection
+   * Query telemetry spans with circuit breaker protection.
+   * When service_dependency has both sourceService and targetService, uses an
+   * aggregation pipeline to trace calls from source to target via parent_span_id.
    */
   async queryTelemetry(query: TelemetryQueryDto): Promise<{
     spans: TelemetrySpan[];
@@ -215,6 +217,21 @@ export class TelemetryQueryService implements OnModuleInit {
       if (this.isDbCircuitBreakerOpen()) {
         throw new ServiceUnavailableException(
           'Database circuit breaker is open',
+        );
+      }
+
+      const sd = query.service_dependency;
+      const sourceService =
+        sd?.sourceService ?? sd?.source_service ?? undefined;
+      const targetService =
+        sd?.targetService ?? sd?.target_service ?? undefined;
+
+      if (sourceService && targetService) {
+        return this.queryTelemetryWithServiceDependency(
+          query,
+          sourceService,
+          targetService,
+          startTime,
         );
       }
 
@@ -275,6 +292,113 @@ export class TelemetryQueryService implements OnModuleInit {
       });
       throw error;
     }
+  }
+
+  /**
+   * Query spans that represent calls from sourceService to targetService
+   * via parent_span_id linkage (distributed trace cross-service).
+   */
+  private async queryTelemetryWithServiceDependency(
+    query: TelemetryQueryDto,
+    sourceService: string,
+    targetService: string,
+    startTime: number,
+  ): Promise<{
+    spans: TelemetrySpan[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const limit = Math.min(query.limit || 100, 1000);
+    const page = query.page || 1;
+    const skip = (page - 1) * limit;
+
+    const sortField = query.sort_by || 'start_time';
+    const sortOrder = query.sort_order === 'asc' ? 1 : -1;
+
+    const pipeline: PipelineStage[] = [
+      {
+        $match: {
+          service_name: targetService,
+          ...(query.tenant_id && { tenant_id: query.tenant_id }),
+          ...(query.workspace_id && { workspace_id: query.workspace_id }),
+          ...(query.user_id && { user_id: query.user_id }),
+          ...(query.start_time && {
+            start_time: { $gte: new Date(query.start_time) },
+          }),
+          ...(query.end_time && {
+            end_time: { $lte: new Date(query.end_time) },
+          }),
+          parent_span_id: { $exists: true, $ne: null, $ne: '' },
+        },
+      },
+      {
+        $lookup: {
+          from: 'telemetries',
+          let: {
+            tid: '$trace_id',
+            pid: '$parent_span_id',
+          },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$trace_id', '$$tid'] },
+                    { $eq: ['$span_id', '$$pid'] },
+                    { $eq: ['$service_name', sourceService] },
+                  ],
+                },
+              },
+            },
+            { $limit: 1 },
+          ],
+          as: 'parentSpan',
+        },
+      },
+      { $match: { 'parentSpan.0': { $exists: true } } },
+      {
+        $facet: {
+          total: [{ $count: 'count' }],
+          docs: [
+            { $sort: { [sortField]: sortOrder } },
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                parentSpan: 0,
+              },
+            },
+          ],
+        },
+      },
+      {
+        $project: {
+          total: { $ifNull: [{ $arrayElemAt: ['$total.count', 0] }, 0] },
+          docs: 1,
+        },
+      },
+    ];
+
+    const result = await this.telemetryModel.aggregate(pipeline).exec();
+    const total = result[0]?.total ?? 0;
+    const docs = result[0]?.docs ?? [];
+
+    this.dbFailureCount = 0;
+    this.logger.debug('Cross-service dependency query executed', {
+      sourceService,
+      targetService,
+      total,
+      returned: docs.length,
+      duration: Date.now() - startTime,
+    });
+
+    return {
+      spans: docs as unknown as TelemetrySpan[],
+      total,
+      page,
+      limit,
+    };
   }
 
   /**
@@ -1894,37 +2018,35 @@ export class TelemetryQueryService implements OnModuleInit {
       },
     );
 
-    // Service dependency filters
+    // Service dependency filters.
+    // When both sourceService and targetService are provided, queryTelemetry
+    // uses an aggregation pipeline (parent_span_id linkage) instead of this filter.
     this.filterBuilders.set(
       'service_dependency',
       (params: {
         sourceService?: string;
         targetService?: string;
+        source_service?: string;
+        target_service?: string;
         excludeSelf?: boolean;
       }) => {
-        const conditions: any[] = [];
+        const source =
+          params.sourceService ?? params.source_service ?? undefined;
+        const target =
+          params.targetService ?? params.target_service ?? undefined;
 
-        if (params.sourceService) {
-          conditions.push({ service_name: params.sourceService });
+        if (source && target) {
+          return {}; // Handled by aggregation in queryTelemetry
         }
-
-        if (params.targetService) {
-          // Future enhancement: Use aggregation pipeline to trace cross-service calls
-          // For now, filter by service name for basic telemetry queries
-          conditions.push({ service_name: params.targetService });
-        }
-
+        if (source) return { service_name: source };
+        if (target) return { service_name: target };
         if (
           params.excludeSelf &&
-          params.sourceService &&
-          params.targetService
+          (source || target)
         ) {
-          conditions.push({ service_name: { $ne: params.sourceService } });
+          return { service_name: { $ne: source ?? target } };
         }
-
-        return conditions.length > 1
-          ? { $and: conditions }
-          : conditions[0] || {};
+        return {};
       },
     );
 

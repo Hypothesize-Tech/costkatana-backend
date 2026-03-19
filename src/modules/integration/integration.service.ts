@@ -11,6 +11,7 @@ import { SlackService } from './services/slack.service';
 import { DiscordService } from './services/discord.service';
 import { LinearService } from './services/linear.service';
 import { JiraService } from './services/jira.service';
+import { GoogleService } from './services/google.service';
 
 export interface CreateIntegrationDto {
   userId: string;
@@ -54,6 +55,7 @@ export class IntegrationService {
     private readonly discordService: DiscordService,
     private readonly linearService: LinearService,
     private readonly jiraService: JiraService,
+    private readonly googleService: GoogleService,
   ) {}
 
   async createIntegration(
@@ -456,6 +458,19 @@ export class IntegrationService {
       credentials.accessToken,
       useCloudId,
     );
+  }
+
+  async getGoogleCalendars(
+    integrationId: string,
+    userId: string,
+  ): Promise<unknown[]> {
+    const integration = await this.getIntegrationById(integrationId, userId);
+    if (!integration || integration.type !== 'google_oauth') {
+      throw new NotFoundException(
+        'Integration not found or not a Google OAuth integration',
+      );
+    }
+    return this.googleService.listCalendarsForUser(userId);
   }
 
   async validateLinearToken(
