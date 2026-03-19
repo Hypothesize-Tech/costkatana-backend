@@ -19,6 +19,7 @@ import { LRUCache } from 'lru-cache';
 
 // Internal imports
 import { AIRouterService } from '../../../modules/cortex/services/ai-router.service';
+import { IRPromptCompilerService } from '../../../modules/compiler/services/ir-prompt-compiler.service';
 import { PricingService } from '../../../modules/utils/services/pricing.service';
 import { TokenCounterService } from '../../../modules/utils/services/token-counter.service';
 import { BedrockService } from '../../bedrock/bedrock.service';
@@ -84,6 +85,7 @@ export class ExperimentationService {
     private whatIfScenarioModel: Model<WhatIfScenarioDocument>,
     @InjectModel(Usage.name) private usageModel: Model<UsageDocument>,
     private readonly aiRouterService: AIRouterService,
+    private readonly irPromptCompilerService: IRPromptCompilerService,
     private readonly pricingService: PricingService,
     private readonly tokenCounterService: TokenCounterService,
     private readonly jwtService: JwtService,
@@ -2661,7 +2663,8 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   }
 
   /**
-   * Simulate prompt optimization: collapse whitespace, remove filler words
+   * Simulate prompt optimization using the real Cortex IR compiler when available.
+   * Falls back to basic whitespace/filler-word reduction when Cortex is unavailable.
    */
   private async simulatePromptOptimization(
     prompt: string,
@@ -2675,19 +2678,43 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
       optimizedCost: number;
       savings: number;
       description: string;
+      usedCortexCompiler?: boolean;
     }>
   > {
-    const optimizedPrompt = prompt
-      .replace(/\s+/g, ' ')
-      .replace(/\b(very|really|quite|extremely|absolutely)\s+/gi, '')
-      .replace(/\s+/g, ' ')
-      .trim();
+    let optimizedPrompt: string;
+    let usedCortexCompiler = false;
+
+    try {
+      const result = await this.irPromptCompilerService.compile(prompt, {
+        optimizationLevel: 2,
+        preserveQuality: true,
+      });
+
+      if (
+        result.success &&
+        result.optimizedPrompt &&
+        result.metrics.tokenReduction > 0 &&
+        result.optimizedPrompt.trim() !== prompt.trim()
+      ) {
+        optimizedPrompt = result.optimizedPrompt;
+        usedCortexCompiler = true;
+      } else {
+        optimizedPrompt = this.applyBasicPromptOptimization(prompt);
+      }
+    } catch (error) {
+      this.logger.warn(
+        'Cortex compiler unavailable for prompt optimization, using fallback',
+        { error: error instanceof Error ? error.message : String(error) },
+      );
+      optimizedPrompt = this.applyBasicPromptOptimization(prompt);
+    }
 
     const originalCost = await this.calculatePromptCost(prompt, model);
     const optimizedCost = await this.calculatePromptCost(
       optimizedPrompt,
       model,
     );
+    const savings = originalCost - optimizedCost;
 
     return [
       {
@@ -2696,10 +2723,24 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
         optimizedLength: optimizedPrompt.length,
         originalCost,
         optimizedCost,
-        savings: originalCost - optimizedCost,
-        description: `Optimized prompt to save $${(originalCost - optimizedCost).toFixed(4)}`,
+        savings,
+        description: usedCortexCompiler
+          ? `Cortex compiler optimized prompt to save $${savings.toFixed(4)}`
+          : `Basic optimization (fallback) to save $${savings.toFixed(4)}`,
+        usedCortexCompiler,
       },
     ];
+  }
+
+  /**
+   * Fallback: collapse whitespace and remove filler words when Cortex is unavailable
+   */
+  private applyBasicPromptOptimization(prompt: string): string {
+    return prompt
+      .replace(/\s+/g, ' ')
+      .replace(/\b(very|really|quite|extremely|absolutely)\s+/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   /**

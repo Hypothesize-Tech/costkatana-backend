@@ -686,7 +686,7 @@ export class PredictiveCostIntelligenceService {
   }
 
   /**
-   * Derive scenario variables from real user data instead of hardcoded constants.
+   * Derives scenario variables from real user data.
    * - promptComplexity: from avg prompt tokens (500 = 1.0 baseline)
    * - optimizationLevel: from model mix (premium share = less optimized, more headroom)
    * - optimizationSavingsRate: from potentialSavings/currentMonthly

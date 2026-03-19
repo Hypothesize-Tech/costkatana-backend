@@ -1662,7 +1662,7 @@ export class AWSChatAgentService {
             timeout: plan.steps[plan.steps.length - 1].parameters.timeout,
             region: plan.steps[plan.steps.length - 1].parameters.region,
           });
-          message = `✅ **Lambda Function Created Successfully**\n\n⚡ **${result.functionName}**\nARN: ${result.functionArn}\n\n🚀 Function is ready to use!`;
+          message = `✅ **Lambda Function Created Successfully**\n\n⚡ **${result.functionName}**\nARN: ${result.functionArn}\n\n⚠️ **Placeholder deployment package** — This Lambda was created with a minimal empty deployment package. Upload your actual function code via the [AWS Console](https://console.aws.amazon.com/lambda) or AWS CLI (\`aws lambda update-function-code\`) before using it in production.`;
           break;
 
         case 'dynamodb':

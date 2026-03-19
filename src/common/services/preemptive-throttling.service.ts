@@ -14,7 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectConnection } from '@nestjs/mongoose';
 import type { Connection } from 'mongoose';
-import { CacheService } from '../../cache/cache.service';
+import { CacheService } from '../cache/cache.service';
 import * as os from 'os';
 
 export type ThrottlingPhase =
