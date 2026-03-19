@@ -106,8 +106,17 @@ export class ExperimentationService {
       }
 
       // Attempt to decode JWT token
+      const jwtSecret =
+        this.configService.get<string>('JWT_SECRET') ??
+        process.env.JWT_SECRET;
+      if (!jwtSecret) {
+        this.logger.warn(
+          'JWT_SECRET not configured - session validation will fail',
+        );
+        return { isValid: false };
+      }
       const payload = this.jwtService.verify(sessionId, {
-        secret: process.env.JWT_SECRET || 'default-secret',
+        secret: jwtSecret,
       });
 
       // Check if token is expired
@@ -1448,7 +1457,7 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
         cost: actualCost,
         latency: executionTime,
         tokenCount: totalTokens,
-        qualityScore: 85, // Will be updated by AI evaluation
+        qualityScore: null, // Pending AI evaluation - background job or evaluateModelWithAI fills this
         errorRate: 0, // Assume no errors for successful execution
       };
     } catch (error) {
@@ -2064,11 +2073,12 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
 
     const successfulResults = results.filter((r) => r.metrics.errorRate === 0);
 
-    // Base confidence on success rate and quality consistency
+    // Base confidence on success rate and quality consistency (exclude null quality)
     const successRate = successfulResults.length / results.length;
-    const qualityVariance = this.calculateVariance(
-      successfulResults.map((r) => r.metrics.qualityScore),
-    );
+    const qualityScores = successfulResults
+      .map((r) => r.metrics.qualityScore)
+      .filter((q): q is number => q != null);
+    const qualityVariance = this.calculateVariance(qualityScores);
 
     // Lower variance = higher confidence, higher success rate = higher confidence
     const varianceScore = Math.max(0, 100 - qualityVariance);

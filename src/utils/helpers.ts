@@ -9,10 +9,14 @@ export const encrypt = (
   text: string,
   configService?: ConfigService,
 ): { encrypted: string; iv: string; authTag: string } => {
-  // Get encryption key from config or use default
+  // Get encryption key from config or env. Must be set (validated at startup).
   const keyString =
-    configService?.get('ENCRYPTION_KEY') ||
-    'default-encryption-key-for-development-only';
+    configService?.get('ENCRYPTION_KEY') ?? process.env.ENCRYPTION_KEY;
+  if (!keyString) {
+    throw new Error(
+      'ENCRYPTION_KEY is required. Application should have validated this at startup.',
+    );
+  }
   const key = Buffer.from(keyString.padEnd(keyLength, '0').slice(0, keyLength));
 
   const iv = crypto.randomBytes(16);
@@ -36,10 +40,14 @@ export const decrypt = (
   authTag: string,
   configService?: ConfigService,
 ): string => {
-  // Get encryption key from config or use default
+  // Get encryption key from config or env. Must be set (validated at startup).
   const keyString =
-    configService?.get('ENCRYPTION_KEY') ||
-    'default-encryption-key-for-development-only';
+    configService?.get('ENCRYPTION_KEY') ?? process.env.ENCRYPTION_KEY;
+  if (!keyString) {
+    throw new Error(
+      'ENCRYPTION_KEY is required. Application should have validated this at startup.',
+    );
+  }
   const key = Buffer.from(keyString.padEnd(keyLength, '0').slice(0, keyLength));
 
   const decipher = crypto.createDecipheriv(

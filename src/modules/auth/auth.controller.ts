@@ -485,7 +485,7 @@ export class AuthController {
         duration: Date.now() - startTime,
       });
 
-      const resetUrl = `${this.configService.get('FRONTEND_URL', 'http://localhost:3000')}/reset-password/${resetToken}`;
+      const resetUrl = `${this.configService.getOrThrow<string>('FRONTEND_URL')}/reset-password/${resetToken}`;
 
       return {
         success: true,

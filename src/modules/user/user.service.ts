@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { CreateApiKeyDto, UpdateApiKeyDto } from './dto/api-key.dto';
 import { PresignedAvatarUrlDto } from './dto/avatar.dto';
 import { InjectModel } from '@nestjs/mongoose';
@@ -41,6 +42,7 @@ export class UserService {
     private accountClosureService: AccountClosureService,
     private authService: AuthService,
     private storageService: StorageService,
+    private configService: ConfigService,
   ) {}
 
   /**
@@ -462,7 +464,7 @@ export class UserService {
     await user.save();
 
     // Send verification email
-    const verificationUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email/${secondaryEmail.verificationToken}`;
+    const verificationUrl = `${this.configService.getOrThrow<string>('FRONTEND_URL')}/verify-email/${secondaryEmail.verificationToken}`;
     await (this.emailService as any).sendSecondaryEmailVerification?.(
       emailData.email,
       verificationUrl,
@@ -597,7 +599,7 @@ export class UserService {
     await user.save();
 
     // Send verification email
-    const verificationUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email/${secondaryEmail.verificationToken}`;
+    const verificationUrl = `${this.configService.getOrThrow<string>('FRONTEND_URL')}/verify-email/${secondaryEmail.verificationToken}`;
     await (this.emailService as any).sendSecondaryEmailVerification?.(
       email,
       verificationUrl,

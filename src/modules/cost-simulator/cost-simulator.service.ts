@@ -7,12 +7,18 @@
  * Used by GatewayAnalyticsService and BudgetEnforcementService.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { TelemetryService } from '../utils/services/telemetry.service';
 import { BudgetService } from '../budget/budget.service';
 import { TokenCounterService } from '../utils/services/token-counter.service';
 import { AIProvider } from '../../utils/modelDiscovery.types';
 import { generateSecureId } from '../../common/utils/secure-id.util';
+import {
+  SimulationAccuracy as SimulationAccuracyModel,
+  SimulationAccuracyDocument,
+} from '../../schemas/analytics/simulation-accuracy.schema';
 
 export interface CostSimulation {
   requestId: string;
@@ -73,7 +79,7 @@ export interface SimulateRequestCostOptions {
 }
 
 @Injectable()
-export class CostSimulatorService {
+export class CostSimulatorService implements OnModuleInit {
   private readonly logger = new Logger(CostSimulatorService.name);
   private readonly accuracyHistory = new Map<string, SimulationAccuracy>();
   private readonly MAX_ACCURACY_HISTORY = 1000;
@@ -97,8 +103,38 @@ export class CostSimulatorService {
     private readonly telemetryService: TelemetryService,
     private readonly budgetService: BudgetService,
     private readonly tokenCounterService: TokenCounterService,
+    @InjectModel(SimulationAccuracyModel.name)
+    private readonly simulationAccuracyModel: Model<SimulationAccuracyDocument>,
   ) {
     this.logger.log('Cost Simulator Service initialized');
+  }
+
+  async onModuleInit(): Promise<void> {
+    try {
+      const recent = await this.simulationAccuracyModel
+        .find()
+        .sort({ timestamp: -1 })
+        .limit(this.MAX_ACCURACY_HISTORY)
+        .lean();
+      for (const doc of recent) {
+        const key = doc.simulationId;
+        this.accuracyHistory.set(key, {
+          simulationId: doc.simulationId,
+          estimatedCost: doc.estimatedCost,
+          actualCost: doc.actualCost,
+          variance: doc.variance,
+          variancePercentage: doc.variancePercentage,
+          timestamp: doc.timestamp,
+        });
+      }
+      this.logger.log('Loaded accuracy history from persistence', {
+        count: this.accuracyHistory.size,
+      });
+    } catch (e) {
+      this.logger.warn('Could not load accuracy history', {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
   }
 
   /**
@@ -638,6 +674,7 @@ export class CostSimulatorService {
 
   /**
    * Record actual cost to improve future simulations.
+   * Persists to MongoDB for durability across restarts.
    */
   recordActualCost(
     simulationId: string,
@@ -662,6 +699,22 @@ export class CostSimulatorService {
       const oldestKey = Array.from(this.accuracyHistory.keys())[0];
       this.accuracyHistory.delete(oldestKey);
     }
+
+    this.simulationAccuracyModel
+      .create({
+        simulationId,
+        estimatedCost,
+        actualCost,
+        variance,
+        variancePercentage,
+        timestamp: accuracy.timestamp,
+      })
+      .catch((e) =>
+        this.logger.warn('Failed to persist simulation accuracy', {
+          simulationId,
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
 
     this.logger.debug('Recorded simulation accuracy', {
       simulationId,

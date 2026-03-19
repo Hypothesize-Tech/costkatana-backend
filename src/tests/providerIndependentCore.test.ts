@@ -6,7 +6,7 @@
  */
 
 import { ModelRegistryService } from '../services/modelRegistry.service';
-import { PricingRegistryService } from '../services/pricingRegistry.service';
+import { PricingRegistryService } from '../modules/pricing/services/pricing-registry.service';
 import { IntelligentRouterService } from '../services/intelligentRouter.service';
 import { IntelligentFailoverService } from '../services/intelligentFailover.service';
 import { NormalizationService } from '../services/normalization.service';

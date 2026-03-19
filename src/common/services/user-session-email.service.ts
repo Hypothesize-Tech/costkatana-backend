@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { EmailService } from '../../modules/email/email.service';
 
 interface IUser {
@@ -24,7 +25,10 @@ interface IUserSession {
 export class UserSessionEmailService {
   private readonly logger = new Logger(UserSessionEmailService.name);
 
-  constructor(private readonly emailService: EmailService) {}
+  constructor(
+    private readonly emailService: EmailService,
+    private readonly configService: ConfigService,
+  ) {}
 
   private getCurrentYear(): number {
     return new Date().getFullYear();
@@ -292,7 +296,7 @@ export class UserSessionEmailService {
    * Generate revoke session URL
    */
   generateRevokeSessionUrl(userSessionId: string, revokeToken: string): string {
-    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
     return `${frontendUrl}/auth/user-sessions/revoke/${userSessionId}/${revokeToken}`;
   }
 
@@ -300,7 +304,7 @@ export class UserSessionEmailService {
    * Generate change password URL
    */
   generateChangePasswordUrl(userId: string, token: string): string {
-    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
     return `${frontendUrl}/reset-password/${userId}/${token}`;
   }
 }

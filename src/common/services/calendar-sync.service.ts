@@ -368,9 +368,8 @@ export class CalendarSyncService implements OnModuleInit {
       const clientSecret = this.configService.get<string>(
         'GOOGLE_CALENDAR_CLIENT_SECRET',
       );
-      const redirectUri = this.configService.get<string>(
+      const redirectUri = this.configService.getOrThrow<string>(
         'GOOGLE_CALENDAR_REDIRECT_URI',
-        'http://localhost:3000/oauth2callback',
       );
 
       if (!clientId || !clientSecret) {

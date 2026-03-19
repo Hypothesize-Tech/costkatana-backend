@@ -172,9 +172,16 @@ export class TokenManager {
             const { google } = await import('googleapis');
             const clientId = process.env.GOOGLE_CLIENT_ID;
             const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+            const callbackUrl = process.env.GOOGLE_CALLBACK_URL;
+            const backendUrl = process.env.BACKEND_URL;
+            if (!callbackUrl && !backendUrl) {
+              throw new Error(
+                'GOOGLE_CALLBACK_URL or BACKEND_URL must be configured for Google OAuth callback.',
+              );
+            }
             const redirectUri =
-              process.env.GOOGLE_CALLBACK_URL ||
-              `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/oauth/google/callback`;
+              callbackUrl ||
+              `${backendUrl}/api/auth/oauth/google/callback`;
 
             if (!clientId || !clientSecret) {
               loggingService.error('Google OAuth credentials not configured');

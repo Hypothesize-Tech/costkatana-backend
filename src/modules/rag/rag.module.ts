@@ -54,8 +54,13 @@ const ragRedisLogger = new Logger('RagModule');
 const RAG_MOCK_REDIS_MAX_ENTRIES = 10_000;
 const RAG_MOCK_REDIS_TTL_MS = 3600_000; // 1 hour
 
-/** In-memory mock Redis for when Redis is unavailable (get/set/del only). */
+/** In-memory mock Redis for when Redis is unavailable (get/set/del only). Only allowed in test env. */
 function createMockRagRedis(): Redis {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'Mock Redis cannot be used in production. Redis is required for RAG memory.',
+    );
+  }
   const map = new Map<string, string>();
   const expiryMap = new Map<string, number>();
 

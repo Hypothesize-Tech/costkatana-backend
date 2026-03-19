@@ -737,17 +737,21 @@ export class IntegrationChatController {
           });
         } else if (type === 'discord') {
           if (subEntityType === 'roles') {
-            // Discord roles - not supported by current Discord service API
-            this.logger.error(
-              'Discord roles integration not supported by service API',
-              {
-                guildId: credentials.guildId,
-                userId: user.id,
-              },
-            );
-            throw new HttpException(
-              'Discord roles integration is not supported by the service API',
-              HttpStatus.NOT_IMPLEMENTED,
+            const botToken = credentials.botToken;
+            const guildId = credentials.guildId || entityId;
+            if (!botToken || !guildId) {
+              throw new HttpException(
+                {
+                  success: false,
+                  message:
+                    'Discord OAuth integration with bot token and guild ID is required to list roles. Webhook-only integrations cannot list roles.',
+                },
+                HttpStatus.BAD_REQUEST,
+              );
+            }
+            const roles = await this.discordService.listRoles(botToken, guildId);
+            subEntities.push(
+              ...roles.map((r) => ({ id: r.id, name: r.name })),
             );
           } else {
             this.logger.warn('Unsupported Discord sub-entity type', {

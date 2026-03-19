@@ -8,6 +8,10 @@ import {
   AWSConnection,
   AWSConnectionDocument,
 } from '../../../schemas/integration/aws-connection.schema';
+import {
+  AwsSimulationResult,
+  AwsSimulationResultDocument,
+} from '../../../schemas/integration/aws-simulation-result.schema';
 import { ExecutionPlan, ExecutionStep } from '../types/aws-dsl.types';
 
 /**
@@ -92,23 +96,14 @@ export interface RiskAssessment {
 
 @Injectable()
 export class SimulationEngineService implements OnModuleInit, OnModuleDestroy {
-  // Stored simulation results (for promotion workflow)
-  private simulationResults: Map<
-    string,
-    {
-      result: SimulationResult;
-      connectionId: string;
-      userId: string;
-      simulatedAt: Date;
-    }
-  > = new Map();
-
   // Cleanup interval reference
   private cleanupInterval?: NodeJS.Timeout;
 
   constructor(
     @InjectModel(AWSConnection.name)
     private awsConnectionModel: Model<AWSConnectionDocument>,
+    @InjectModel(AwsSimulationResult.name)
+    private awsSimulationResultModel: Model<AwsSimulationResultDocument>,
     private readonly logger: LoggerService,
     private readonly planGeneratorService: PlanGeneratorService,
     private readonly permissionBoundaryService: PermissionBoundaryService,
@@ -117,7 +112,7 @@ export class SimulationEngineService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     // Start cleanup interval (every hour)
     this.cleanupInterval = setInterval(
-      () => this.cleanupOldSimulations(),
+      () => this.cleanupOldSimulations().catch((e) => this.logger.warn('Cleanup failed', e)),
       3600000,
     );
     this.logger.log('SimulationEngineService initialized', {
@@ -216,13 +211,21 @@ export class SimulationEngineService implements OnModuleInit, OnModuleDestroy {
         simulationPeriodRemaining: daysRemaining,
       };
 
-      // Store simulation result
-      this.simulationResults.set(plan.planId, {
-        result,
-        connectionId: connection._id.toString(),
-        userId: userId,
-        simulatedAt: new Date(),
-      });
+      // Store simulation result in MongoDB for persistence across restarts
+      await this.awsSimulationResultModel
+        .findOneAndUpdate(
+          { planId: plan.planId },
+          {
+            planId: plan.planId,
+            userId: new Types.ObjectId(userId),
+            connectionId: connection._id,
+            result: result as unknown as Record<string, unknown>,
+            simulatedAt: new Date(),
+            updatedAt: new Date(),
+          },
+          { upsert: true, new: true },
+        )
+        .lean();
 
       this.logger.log('Simulation completed', {
         component: 'SimulationEngineService',
@@ -622,14 +625,19 @@ export class SimulationEngineService implements OnModuleInit, OnModuleDestroy {
   /**
    * Get stored simulation result
    */
-  getSimulationResult(planId: string, userId: string): SimulationResult | null {
-    const stored = this.simulationResults.get(planId);
+  async getSimulationResult(
+    planId: string,
+    userId: string,
+  ): Promise<SimulationResult | null> {
+    const stored = await this.awsSimulationResultModel
+      .findOne({ planId, userId: new Types.ObjectId(userId) })
+      .lean();
 
-    if (!stored || stored.userId !== userId) {
+    if (!stored?.result) {
       return null;
     }
 
-    return stored.result;
+    return stored.result as unknown as SimulationResult;
   }
 
   /**
@@ -695,26 +703,19 @@ export class SimulationEngineService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Clean up old simulation results
+   * Clean up old simulation results (older than 24 hours)
    */
-  private cleanupOldSimulations(): void {
-    const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-    const now = Date.now();
-    let cleaned = 0;
+  private async cleanupOldSimulations(): Promise<void> {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const deleteResult = await this.awsSimulationResultModel.deleteMany({
+      simulatedAt: { $lt: cutoff },
+    });
 
-    for (const [planId, data] of this.simulationResults) {
-      if (now - data.simulatedAt.getTime() > maxAge) {
-        this.simulationResults.delete(planId);
-        cleaned++;
-      }
-    }
-
-    if (cleaned > 0) {
+    if (deleteResult.deletedCount > 0) {
       this.logger.log('Cleaned up old simulation results', {
         component: 'SimulationEngineService',
         operation: 'cleanupOldSimulations',
-        resultsRemoved: cleaned,
-        remainingResults: this.simulationResults.size,
+        resultsRemoved: deleteResult.deletedCount,
       });
     }
   }
@@ -722,46 +723,40 @@ export class SimulationEngineService implements OnModuleInit, OnModuleDestroy {
   /**
    * Get all stored simulation results for a user
    */
-  getUserSimulations(userId: string): Array<{
-    planId: string;
-    simulatedAt: Date;
-    status: string;
-    canPromoteToLive: boolean;
-  }> {
-    const results: Array<{
+  async getUserSimulations(userId: string): Promise<
+    Array<{
       planId: string;
       simulatedAt: Date;
       status: string;
       canPromoteToLive: boolean;
-    }> = [];
+    }>
+  > {
+    const docs = await this.awsSimulationResultModel
+      .find({ userId: new Types.ObjectId(userId) })
+      .sort({ simulatedAt: -1 })
+      .lean();
 
-    for (const [planId, data] of this.simulationResults) {
-      if (data.userId === userId) {
-        results.push({
-          planId,
-          simulatedAt: data.simulatedAt,
-          status: data.result.status,
-          canPromoteToLive: data.result.canPromoteToLive,
-        });
-      }
-    }
-
-    return results.sort(
-      (a, b) => b.simulatedAt.getTime() - a.simulatedAt.getTime(),
-    );
+    return docs.map((d) => ({
+      planId: d.planId,
+      simulatedAt: d.simulatedAt,
+      status: (d.result as { status?: string }).status ?? 'unknown',
+      canPromoteToLive:
+        (d.result as { canPromoteToLive?: boolean }).canPromoteToLive ?? false,
+    }));
   }
 
   /**
    * Delete a stored simulation result
    */
-  deleteSimulation(planId: string, userId: string): boolean {
-    const stored = this.simulationResults.get(planId);
+  async deleteSimulation(planId: string, userId: string): Promise<boolean> {
+    const deleted = await this.awsSimulationResultModel.deleteOne({
+      planId,
+      userId: new Types.ObjectId(userId),
+    });
 
-    if (!stored || stored.userId !== userId) {
+    if (deleted.deletedCount === 0) {
       return false;
     }
-
-    this.simulationResults.delete(planId);
 
     this.logger.log('Simulation deleted', {
       component: 'SimulationEngineService',
@@ -776,26 +771,28 @@ export class SimulationEngineService implements OnModuleInit, OnModuleDestroy {
   /**
    * Get simulation statistics
    */
-  getStatistics(): {
+  async getStatistics(): Promise<{
     totalSimulations: number;
     successfulSimulations: number;
     failedSimulations: number;
     averageDuration: number;
-  } {
+  }> {
+    const docs = await this.awsSimulationResultModel.find().lean();
     let successful = 0;
     let failed = 0;
     let totalDuration = 0;
 
-    for (const [, data] of this.simulationResults) {
-      if (data.result.status === 'simulated') {
+    for (const d of docs) {
+      const result = d.result as { status?: string; duration?: number };
+      if (result?.status === 'simulated') {
         successful++;
       } else {
         failed++;
       }
-      totalDuration += data.result.duration;
+      totalDuration += result?.duration ?? 0;
     }
 
-    const total = this.simulationResults.size;
+    const total = docs.length;
     const averageDuration = total > 0 ? totalDuration / total : 0;
 
     return {

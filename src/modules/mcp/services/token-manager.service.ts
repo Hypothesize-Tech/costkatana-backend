@@ -4,6 +4,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { LoggerService } from '@/common/logger/logger.service';
@@ -17,6 +18,7 @@ import { Integration } from '@/schemas/integration/integration.schema';
 export class TokenManagerService {
   constructor(
     private logger: LoggerService,
+    private configService: ConfigService,
     @InjectModel(VercelConnection.name)
     private vercelConnectionModel: Model<VercelConnection>,
     @InjectModel(GitHubConnection.name)
@@ -289,9 +291,16 @@ export class TokenManagerService {
         // You'll need to configure these from environment variables or config service
         const clientId = process.env.GOOGLE_CLIENT_ID;
         const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+        const callbackUrl = this.configService.get<string>('GOOGLE_CALLBACK_URL');
+        const backendUrl = this.configService.get<string>('BACKEND_URL');
+        if (!callbackUrl && !backendUrl) {
+          throw new Error(
+            'GOOGLE_CALLBACK_URL or BACKEND_URL must be configured for Google OAuth callback.',
+          );
+        }
         const redirectUri =
-          process.env.GOOGLE_CALLBACK_URL ||
-          `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/oauth/google/callback`;
+          callbackUrl ||
+          `${backendUrl}/api/auth/oauth/google/callback`;
 
         if (!clientId || !clientSecret) {
           this.logger.error('Google OAuth credentials not configured');

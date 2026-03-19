@@ -2,12 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as Sentry from '@sentry/node';
-import { metrics } from '@opentelemetry/api';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Usage } from '../../../schemas/core/usage.schema';
 import { calculateCost, getModelPricing } from '../../../utils/pricing';
-import { getHardcodedFallbackPricing } from '../../../config/pricing-fallback.config';
+import {
+  getHardcodedFallbackPricing,
+  PRICING_FALLBACK_LAST_UPDATED,
+} from '../../../config/pricing-fallback.config';
 
 interface TrueCostComponents {
   // Provider API costs
@@ -394,11 +396,12 @@ export class TrueCostService {
     details: string;
   } {
     this.logger.warn(
-      `Using hardcoded pricing fallback for ${metrics.provider}/${metrics.model} - pricing registry/DB lookup unavailable. Consider syncing model_pricing collection.`,
+      `Using hardcoded pricing fallback for ${metrics.provider}/${metrics.model} - pricing registry/DB lookup unavailable. Fallback last updated: ${PRICING_FALLBACK_LAST_UPDATED}. Consider syncing model_pricing collection.`,
       {
         provider: metrics.provider,
         model: metrics.model,
         metric: 'pricing.hardcoded_fallback',
+        lastUpdated: PRICING_FALLBACK_LAST_UPDATED,
       },
     );
 

@@ -775,11 +775,13 @@ export class ModelSelectorTool extends Tool {
             ? 'good'
             : 'expensive',
       quality:
-        results.qualityScore > 85
-          ? 'high'
-          : results.qualityScore > 70
-            ? 'good'
-            : 'needs improvement',
+        results.qualityScore == null
+          ? 'pending evaluation'
+          : results.qualityScore > 85
+            ? 'high'
+            : results.qualityScore > 70
+              ? 'good'
+              : 'needs improvement',
       recommendations: [] as string[],
     };
 

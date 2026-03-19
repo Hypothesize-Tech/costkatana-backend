@@ -342,8 +342,7 @@ export class MonitoringService {
     const startTime = Date.now();
     const { startOfMonth } = this.getOptimizedDateRanges();
     const frontendUrl =
-      this.configService.get<string>('FRONTEND_URL')?.replace(/\/$/, '') ||
-      'http://localhost:3000';
+      this.configService.getOrThrow<string>('FRONTEND_URL').replace(/\/$/, '');
 
     const recentUsage = await this.usageModel
       .find({

@@ -124,8 +124,7 @@ export class VercelController {
   ): Promise<void> {
     if (!code) {
       const frontendUrl =
-        this.configService.get<string>('FRONTEND_URL') ??
-        'http://localhost:3000';
+        this.configService.getOrThrow<string>('FRONTEND_URL');
       res.redirect(
         `${frontendUrl}/integrations?error=${encodeURIComponent('Missing authorization code')}`,
       );
@@ -140,8 +139,7 @@ export class VercelController {
         hasTeamId: !!teamId,
       });
       const frontendUrl =
-        this.configService.get<string>('FRONTEND_URL') ??
-        'http://localhost:3000';
+        this.configService.getOrThrow<string>('FRONTEND_URL');
       res.redirect(
         `${frontendUrl}/integrations?error=${encodeURIComponent('Please connect Vercel from the CostKatana integrations page')}`,
       );
@@ -158,16 +156,14 @@ export class VercelController {
       });
 
       const frontendUrl =
-        this.configService.get<string>('FRONTEND_URL') ??
-        'http://localhost:3000';
+        this.configService.getOrThrow<string>('FRONTEND_URL');
       res.redirect(
         `${frontendUrl}/integrations?vercelConnected=true&message=${encodeURIComponent('Vercel account connected successfully!')}`,
       );
     } catch (error: any) {
       // Note: OAuth callbacks redirect, so we handle redirects in the catch block
       const frontendUrl =
-        this.configService.get<string>('FRONTEND_URL') ??
-        'http://localhost:3000';
+        this.configService.getOrThrow<string>('FRONTEND_URL');
       res.redirect(
         `${frontendUrl}/integrations?error=${encodeURIComponent(error.message || 'OAuth callback failed')}`,
       );

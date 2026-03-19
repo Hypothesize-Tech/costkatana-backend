@@ -235,9 +235,7 @@ export class OAuthController {
    * Get frontend URL from config
    */
   private getFrontendUrl(): string {
-    return (
-      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000'
-    );
+    return this.configService.getOrThrow<string>('FRONTEND_URL');
   }
 
   /**

@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 import Redis from 'ioredis';
+import { getCacheService } from '../cache/cache.service';
 
 /**
  * Graceful Degradation Middleware
@@ -65,7 +66,7 @@ export class GracefulDegradationMiddleware implements NestMiddleware {
     }
     // Quick health check
     if (this.degradationMode || !this.isSystemHealthy()) {
-      const fallbackResponse = this.getFallbackResponse(req);
+      const fallbackResponse = await this.getFallbackResponse(req);
       if (fallbackResponse) {
         this.logger.warn(
           'Serving fallback response due to system degradation',
@@ -233,7 +234,7 @@ export class GracefulDegradationMiddleware implements NestMiddleware {
   /**
    * Get fallback response for degraded endpoints
    */
-  private getFallbackResponse(
+  private async getFallbackResponse(
     req: Request,
   ): { status: number; body: any; type: string } | null {
     const endpoint = req.path;
@@ -268,14 +269,17 @@ export class GracefulDegradationMiddleware implements NestMiddleware {
       };
     }
 
-    // Analytics endpoints - return cached data
+    // Analytics endpoints - return cached data if available
     if (endpoint.includes('analytics') || endpoint.includes('usage')) {
+      const cachedData = await this.getCachedAnalyticsData(endpoint);
       return {
         status: 503,
         body: {
           error: 'Analytics Service Degraded',
-          message: 'Analytics data may be delayed. Using cached information.',
-          data: this.getCachedAnalyticsData(endpoint),
+          message: cachedData?.cached
+            ? 'Analytics data may be delayed. Using cached information.'
+            : 'Analytics data temporarily unavailable. No cached data.',
+          data: cachedData,
           fallback: true,
         },
         type: 'analytics_fallback',
@@ -339,33 +343,64 @@ export class GracefulDegradationMiddleware implements NestMiddleware {
   }
 
   /**
-   * Get cached analytics data for fallback responses
+   * Get cached analytics data for fallback responses.
+   * Reads from CacheService when available; returns cached: false when no real data exists.
    */
-  private getCachedAnalyticsData(endpoint: string): any {
-    // Return minimal cached data structure
-    // In a real implementation, this would return actual cached data
-    if (endpoint.includes('usage')) {
-      return {
-        totalRequests: 0,
-        totalCost: 0,
-        cached: true,
-        lastUpdated: new Date().toISOString(),
-      };
-    }
+  private async getCachedAnalyticsData(endpoint: string): Promise<{
+    totalRequests?: number;
+    totalCost?: number;
+    avgResponseTime?: number;
+    successRate?: number;
+    message?: string;
+    cached: boolean;
+    lastUpdated?: string;
+  }> {
+    try {
+      const cache = getCacheService();
+      const usageKey = 'graceful-deg:analytics:usage';
+      const perfKey = 'graceful-deg:analytics:performance';
 
-    if (endpoint.includes('performance')) {
-      return {
-        avgResponseTime: 0,
-        successRate: 0,
-        cached: true,
-        lastUpdated: new Date().toISOString(),
-      };
-    }
+      if (endpoint.includes('usage')) {
+        const data = await cache.get<{
+          totalRequests?: number;
+          totalCost?: number;
+          lastUpdated?: string;
+        }>(usageKey);
+        if (data && (data.totalRequests != null || data.totalCost != null)) {
+          return {
+            ...data,
+            cached: true,
+            lastUpdated: data.lastUpdated ?? new Date().toISOString(),
+          };
+        }
+        return { cached: false, message: 'No cached usage data available' };
+      }
 
-    return {
-      message: 'Data temporarily unavailable',
-      cached: true,
-      lastUpdated: new Date().toISOString(),
-    };
+      if (endpoint.includes('performance')) {
+        const data = await cache.get<{
+          avgResponseTime?: number;
+          successRate?: number;
+          lastUpdated?: string;
+        }>(perfKey);
+        if (
+          data &&
+          (data.avgResponseTime != null || data.successRate != null)
+        ) {
+          return {
+            ...data,
+            cached: true,
+            lastUpdated: data.lastUpdated ?? new Date().toISOString(),
+          };
+        }
+        return {
+          cached: false,
+          message: 'No cached performance data available',
+        };
+      }
+
+      return { cached: false, message: 'Data temporarily unavailable' };
+    } catch {
+      return { cached: false, message: 'Cache unavailable' };
+    }
   }
 }

@@ -236,8 +236,7 @@ export class GithubOAuthController {
 
       // Redirect to error page
       const frontendUrl =
-        this.configService.get<string>('FRONTEND_URL') ||
-        'http://localhost:3000';
+        this.configService.getOrThrow<string>('FRONTEND_URL');
       res.redirect(
         `${frontendUrl}?error=callback_failed&message=${encodeURIComponent(error.message)}`,
       );
@@ -373,8 +372,7 @@ export class GithubOAuthController {
     // --- Step 7: Redirect to final destination with context ---
     const successRedirectUri =
       redirectUri ||
-      this.configService.get<string>('FRONTEND_URL') ||
-      'http://localhost:3000';
+      this.configService.getOrThrow<string>('FRONTEND_URL');
 
     // Forward minimal info to frontend for continued onboarding
     const params = new URLSearchParams({
@@ -481,8 +479,7 @@ export class GithubOAuthController {
       // Redirect to error page
       const errorRedirectUri =
         redirectUri ||
-        this.configService.get<string>('FRONTEND_URL') ||
-        'http://localhost:3000';
+        this.configService.getOrThrow<string>('FRONTEND_URL');
       res.redirect(`${errorRedirectUri}?error=github_install_fetch_failed`);
       return;
     }
@@ -520,8 +517,7 @@ export class GithubOAuthController {
     // Step 4: Redirect to the success page with minimal info for the frontend
     const successRedirectUri =
       redirectUri ||
-      this.configService.get<string>('FRONTEND_URL') ||
-      'http://localhost:3000';
+      this.configService.getOrThrow<string>('FRONTEND_URL');
     const params = new URLSearchParams({
       success: 'install_completed',
     });
@@ -556,11 +552,10 @@ export class GithubOAuthController {
       nonce,
     });
 
-    // Get HMAC secret from config
+    // Get HMAC secret from config. JWT_SECRET is required at startup.
     const secret =
-      this.configService.get<string>('OAUTH_STATE_SECRET') ||
-      this.configService.get<string>('JWT_SECRET') ||
-      'default-oauth-secret-change-in-production';
+      this.configService.get<string>('OAUTH_STATE_SECRET') ??
+      this.configService.getOrThrow<string>('JWT_SECRET');
 
     // Create HMAC signature
     const hmac = crypto.createHmac('sha256', secret);
@@ -613,11 +608,10 @@ export class GithubOAuthController {
         return null;
       }
 
-      // Get HMAC secret from config
+      // Get HMAC secret from config. JWT_SECRET is required at startup.
       const secret =
-        this.configService.get<string>('OAUTH_STATE_SECRET') ||
-        this.configService.get<string>('JWT_SECRET') ||
-        'default-oauth-secret-change-in-production';
+        this.configService.get<string>('OAUTH_STATE_SECRET') ??
+        this.configService.getOrThrow<string>('JWT_SECRET');
 
       // Verify HMAC signature
       const hmac = crypto.createHmac('sha256', secret);
@@ -687,11 +681,10 @@ export class GithubOAuthController {
       nonce,
     });
 
-    // Get HMAC secret from config
+    // Get HMAC secret from config. JWT_SECRET is required at startup.
     const secret =
-      this.configService.get<string>('OAUTH_STATE_SECRET') ||
-      this.configService.get<string>('JWT_SECRET') ||
-      'default-oauth-secret-change-in-production';
+      this.configService.get<string>('OAUTH_STATE_SECRET') ??
+      this.configService.getOrThrow<string>('JWT_SECRET');
 
     // Create HMAC signature
     const hmac = crypto.createHmac('sha256', secret);

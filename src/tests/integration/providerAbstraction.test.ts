@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { ModelCapabilityRegistry } from '../../services/modelCapabilityRegistry.service';
-import { PricingRegistryService } from '../../services/pricingRegistry.service';
+import { PricingRegistryService } from '../../modules/pricing/services/pricing-registry.service';
 import { CapabilityRouterService } from '../../services/capabilityRouter.service';
 import {
   ModelCapability,

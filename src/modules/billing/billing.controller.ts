@@ -7,9 +7,11 @@ import {
   Body,
   Param,
   Query,
+  Req,
   UseGuards,
   UsePipes,
   ValidationPipe,
+  BadRequestException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -223,12 +225,20 @@ export class BillingController {
   /**
    * Add payment method
    * POST /api/billing/payment-methods
+   * PCI: Raw card data (cardDetails) is explicitly rejected.
    */
   @Post('payment-methods')
   async addPaymentMethod(
     @CurrentUser('id') userId: string,
     @Body() dto: AddPaymentMethodDto,
+    @Req() req: { body?: Record<string, unknown> },
   ) {
+    if (req.body?.cardDetails) {
+      throw new BadRequestException(
+        'Raw card data (cardDetails) cannot be sent for PCI compliance. ' +
+          'Use paymentMethodId (Stripe) or razorpayTokenId (Razorpay) instead.',
+      );
+    }
     const startTime = Date.now();
     const paymentMethod = await this.billingService.addPaymentMethod(
       userId,

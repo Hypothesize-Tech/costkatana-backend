@@ -66,6 +66,10 @@ import {
   AWSConnectionSchema,
 } from '@/schemas/integration/aws-connection.schema';
 import {
+  AwsSimulationResult,
+  AwsSimulationResultSchema,
+} from '@/schemas/integration/aws-simulation-result.schema';
+import {
   AWSAuditLog,
   AWSAuditLogSchema,
 } from '@/schemas/security/aws-audit-log.schema';
@@ -97,6 +101,7 @@ import { AuthModule } from '../auth/auth.module';
     AuthModule,
     MongooseModule.forFeature([
       { name: AWSConnection.name, schema: AWSConnectionSchema },
+      { name: AwsSimulationResult.name, schema: AwsSimulationResultSchema },
       { name: AWSAuditLog.name, schema: AWSAuditLogSchema },
       { name: AuditAnchor.name, schema: AuditAnchorSchema },
       { name: DailyAnchorSummary.name, schema: DailyAnchorSummarySchema },

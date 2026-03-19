@@ -16,7 +16,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
-import { isRedisEnabled } from '../../../config/redis';
+import { isRedisEnabled, resolveRedisUrl } from '../../../config/redis';
 import { ChatEventData, IChatEventsService } from './chat-events.interface';
 import { generateSecureId } from '../../../common/utils/secure-id.util';
 
@@ -46,10 +46,7 @@ export class ChatEventsRedisService
     }
 
     try {
-      const redisUrl = this.configService.get<string>(
-        'REDIS_URL',
-        'redis://localhost:6379',
-      );
+      const redisUrl = resolveRedisUrl();
       const redisPassword = this.configService.get<string>('REDIS_PASSWORD');
 
       // Create separate publisher and subscriber connections

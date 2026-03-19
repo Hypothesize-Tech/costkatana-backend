@@ -92,25 +92,19 @@ export class AuditAnchorService implements OnModuleInit, OnModuleDestroy {
     const configuredSigningKey = this.configService
       .get<string>('AUDIT_ANCHOR_SIGNING_KEY')
       ?.trim();
-    if (
-      configuredSigningKey &&
-      configuredSigningKey !== 'costkatana-anchor-signing-key'
-    ) {
-      this.signingKey = configuredSigningKey;
-      return;
-    }
+    const isPlaceholder =
+      !configuredSigningKey ||
+      configuredSigningKey === 'costkatana-anchor-signing-key';
 
-    if (process.env.NODE_ENV === 'production') {
+    if (isPlaceholder) {
       throw new Error(
-        'AUDIT_ANCHOR_SIGNING_KEY must be configured securely in production',
+        'AUDIT_ANCHOR_SIGNING_KEY must be set to a secure value. ' +
+          'Ephemeral keys cannot be used - audit chains would be invalid across restarts. ' +
+          'Set AUDIT_ANCHOR_SIGNING_KEY in your environment.',
       );
     }
 
-    this.signingKey = randomBytes(32).toString('hex');
-    this.logger.warn(
-      'AUDIT_ANCHOR_SIGNING_KEY not configured; using ephemeral development key. ' +
-        'Note: Audit chains cannot be verified across restarts; persist key to .env.local for consistent dev verification.',
-    );
+    this.signingKey = configuredSigningKey;
   }
 
   onModuleInit() {

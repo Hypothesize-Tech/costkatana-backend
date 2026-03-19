@@ -160,8 +160,7 @@ export class VercelService {
       clientSecret:
         this.configService.get<string>('VERCEL_CLIENT_SECRET') ?? '',
       callbackUrl:
-        this.configService.get<string>('VERCEL_CALLBACK_URL') ??
-        'http://localhost:3000/api/vercel/callback',
+        this.configService.getOrThrow<string>('VERCEL_CALLBACK_URL'),
     };
   }
 
@@ -179,8 +178,7 @@ export class VercelService {
       userId,
       nonce: crypto.randomBytes(16).toString('hex'),
     };
-    const jwtSecret =
-      this.configService.get<string>('JWT_SECRET') || 'default-secret';
+    const jwtSecret = this.configService.getOrThrow<string>('JWT_SECRET');
     const state = this.jwtService.sign(statePayload, {
       secret: jwtSecret,
       expiresIn: OAUTH_STATE_TTL_SECONDS,
@@ -239,7 +237,7 @@ export class VercelService {
     // 2. Fallback: verify state as signed JWT (works when Redis is down or cache miss)
     if (!userId) {
       const jwtSecret =
-        this.configService.get<string>('JWT_SECRET') || 'default-secret';
+        this.configService.getOrThrow<string>('JWT_SECRET');
       try {
         const payload = this.jwtService.verify<{
           userId: string;

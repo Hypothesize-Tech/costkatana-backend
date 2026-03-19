@@ -254,7 +254,7 @@ export class EmailService {
                 <p><strong>If this wasn't you:</strong> Please change your password immediately and contact our support team.</p>
               </div>
 
-              <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/security" style="display: inline-block; padding: 12px 24px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 4px; margin: 10px 0;">Review Account Security</a>
+              <a href="${this.configService.getOrThrow<string>('FRONTEND_URL')}/security" style="display: inline-block; padding: 12px 24px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 4px; margin: 10px 0;">Review Account Security</a>
 
               <p>If you have any concerns about your account security, please don't hesitate to contact our support team.</p>
             </div>
@@ -330,7 +330,7 @@ export class EmailService {
                 <li>Batch similar requests to reduce overhead</li>
                 <li>Enable prompt caching where applicable</li>
               </ul>
-              <a href="${process.env.FRONTEND_URL}/dashboard" style="display: inline-block; padding: 12px 24px; background-color: #4a90e2; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0;">View Dashboard</a>
+              <a href="${this.configService.getOrThrow<string>('FRONTEND_URL')}/dashboard" style="display: inline-block; padding: 12px 24px; background-color: #4a90e2; color: white; text-decoration: none; border-radius: 4px; margin: 20px 0;">View Dashboard</a>
             </div>
             <div style="text-align: center; padding: 20px; color: #666; font-size: 12px;">
               <p>You can update your alert preferences in your account settings.</p>
@@ -416,7 +416,7 @@ export class EmailService {
     const severity = 'severity' in alert ? alert.severity : 'medium';
     const year = this.getCurrentYear();
     const dashboardUrl =
-      this.configService.get('FRONTEND_URL', 'https://app.costkatana.com') +
+      this.configService.getOrThrow<string>('FRONTEND_URL') +
       '/dashboard/alerts';
     const headerColor = this.getSeverityColor(severity ?? 'medium');
     const typeLabel = type
@@ -705,7 +705,7 @@ export class EmailService {
               ${optimization.type ? `<p><strong>Type:</strong> ${optimization.type}</p>` : ''}
             </div>
 
-            <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/optimizations" class="button">View Optimization</a>
+            <a href="${this.configService.getOrThrow<string>('FRONTEND_URL')}/optimizations" class="button">View Optimization</a>
 
             <p>You can apply this optimization directly from your dashboard.</p>
           </div>
@@ -753,7 +753,7 @@ export class EmailService {
               <p>${alert.message || 'There is a performance issue that requires your attention.'}</p>
             </div>
 
-            <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard" class="button">View Dashboard</a>
+            <a href="${this.configService.getOrThrow<string>('FRONTEND_URL')}/dashboard" class="button">View Dashboard</a>
 
             <p>Please review the performance metrics and take appropriate action.</p>
           </div>
@@ -812,7 +812,7 @@ export class EmailService {
             </div>
 
             <p>If you wish to cancel this action:</p>
-            <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/settings/account" class="button">Cancel Account Closure</a>
+            <a href="${this.configService.getOrThrow<string>('FRONTEND_URL')}/settings/account" class="button">Cancel Account Closure</a>
 
             <p>If you have any questions or need assistance, please contact our support team.</p>
           </div>
@@ -873,7 +873,7 @@ export class EmailService {
             </ul>
 
             <p>If you wish to stop this deletion:</p>
-            <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/settings/account" class="button">Cancel Deletion Immediately</a>
+            <a href="${this.configService.getOrThrow<string>('FRONTEND_URL')}/settings/account" class="button">Cancel Deletion Immediately</a>
 
             <p>If you have already left the platform or this was intentional, no further action is needed.</p>
 
@@ -929,7 +929,7 @@ export class EmailService {
               <li>Continue optimizing your AI costs</li>
             </ul>
 
-            <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard" class="button">Go to Dashboard</a>
+            <a href="${this.configService.getOrThrow<string>('FRONTEND_URL')}/dashboard" class="button">Go to Dashboard</a>
 
             <p>If you have any questions about your account reactivation, please contact our support team.</p>
           </div>
@@ -1042,7 +1042,7 @@ export class EmailService {
 
             <p>You now have access to view and work with these projects in your dashboard.</p>
 
-            <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard" class="button">View Projects</a>
+            <a href="${this.configService.getOrThrow<string>('FRONTEND_URL')}/dashboard" class="button">View Projects</a>
 
             <p>If you have any questions about these projects or need additional permissions, please contact your workspace administrator.</p>
           </div>
