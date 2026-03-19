@@ -10,7 +10,11 @@ import {
 import { Type } from 'class-transformer';
 
 /**
- * Card details for payment method
+ * PCI DSS: Raw card data must NEVER be sent to the server.
+ * For Stripe: use Stripe.js/Elements to create a PaymentMethod, then pass paymentMethodId.
+ * For Razorpay: use Razorpay Checkout/Elements to tokenize, then pass razorpayTokenId.
+ *
+ * CardDetailsDto is deprecated for server-side use. Kept for validation fallback only.
  */
 export class CardDetailsDto {
   @IsString()
@@ -61,6 +65,10 @@ export class BankAccountDetailsDto {
 /**
  * Body DTO for add payment method endpoint.
  * POST api/billing/payment-methods
+ *
+ * For Stripe cards: pass paymentMethodId (pm_xxx) from Stripe.js createPaymentMethod().
+ * For Razorpay cards: pass razorpayTokenId from Razorpay Checkout/Elements.
+ * Raw card data (cardDetails) is rejected for PCI compliance.
  */
 export class AddPaymentMethodDto {
   @IsIn(['stripe', 'razorpay', 'paypal'])
@@ -69,6 +77,17 @@ export class AddPaymentMethodDto {
   @IsIn(['card', 'upi', 'bank_account', 'paypal_account'])
   type: 'card' | 'upi' | 'bank_account' | 'paypal_account';
 
+  /** Stripe: PaymentMethod ID (pm_xxx) from Stripe.js - required for card when gateway is stripe */
+  @IsOptional()
+  @IsString()
+  paymentMethodId?: string;
+
+  /** Razorpay: Token from Razorpay Checkout/Elements - required for card when gateway is razorpay */
+  @IsOptional()
+  @IsString()
+  razorpayTokenId?: string;
+
+  /** @deprecated PCI: Do not send. Use paymentMethodId (Stripe) or razorpayTokenId (Razorpay) instead. */
   @IsOptional()
   @ValidateNested()
   @Type(() => CardDetailsDto)

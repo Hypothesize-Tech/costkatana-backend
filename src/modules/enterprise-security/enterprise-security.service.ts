@@ -1692,9 +1692,16 @@ export class EnterpriseSecurityService {
       return {
         totalRequests,
         blockedRequests,
-        averageProcessingTime: 45, // Estimated processing time
+        averageProcessingTime: 45,
         falsePositiveRate:
-          totalRequests > 0 ? (blockedRequests / totalRequests) * 0.1 : 0, // Estimate false positives
+          totalRequests > 0 ? (blockedRequests / totalRequests) * 0.1 : 0,
+        _meta: {
+          estimatedFields: [
+            'averageProcessingTime',
+            'falsePositiveRate',
+          ] as const,
+          note: 'averageProcessingTime and falsePositiveRate are estimates; implement APM integration for real values',
+        },
       };
     } catch (error) {
       this.logger.warn('Failed to get filter statistics', { error });
@@ -1703,6 +1710,7 @@ export class EnterpriseSecurityService {
         blockedRequests: 0,
         averageProcessingTime: 0,
         falsePositiveRate: 0,
+        _meta: { estimatedFields: [] },
       };
     }
   }
@@ -1717,14 +1725,20 @@ export class EnterpriseSecurityService {
         createdAt: { $gte: new Date(startTime), $lte: new Date(endTime) },
       });
 
-      // Estimate sensitive data based on user profiles
-      const estimatedSensitive = Math.floor(totalUsers * 0.3); // Assume 30% have sensitive data
+      const estimatedSensitive = Math.floor(totalUsers * 0.3);
 
       return {
         totalItems: totalUsers,
         classifiedAsSensitive: estimatedSensitive,
         averageConfidence: 0.85,
         topCategories: ['user_data', 'profile_info', 'account_settings'],
+        _meta: {
+          estimatedFields: [
+            'classifiedAsSensitive',
+            'averageConfidence',
+          ] as const,
+          note: 'classifiedAsSensitive and averageConfidence are estimates; implement data classification scan for real values',
+        },
       };
     } catch (error) {
       this.logger.warn('Failed to get classification statistics', { error });
@@ -1733,6 +1747,7 @@ export class EnterpriseSecurityService {
         classifiedAsSensitive: 0,
         averageConfidence: 0,
         topCategories: [],
+        _meta: { estimatedFields: [] },
       };
     }
   }
@@ -1817,8 +1832,12 @@ export class EnterpriseSecurityService {
       return {
         activeAlerts: alerts.length,
         threatLevel: threatLandscape.current_threat_level,
-        monitoringUptime: 99.5, // Estimated uptime
-        averageResponseTime: 150, // Estimated response time in ms
+        monitoringUptime: 99.5,
+        averageResponseTime: 150,
+        _meta: {
+          estimatedFields: ['monitoringUptime', 'averageResponseTime'] as const,
+          note: 'monitoringUptime and averageResponseTime are estimates; integrate with APM (DataDog/New Relic) for real values',
+        },
       };
     } catch (error) {
       this.logger.warn('Failed to get monitoring statistics', { error });
@@ -1827,6 +1846,7 @@ export class EnterpriseSecurityService {
         threatLevel: 'low',
         monitoringUptime: 100,
         averageResponseTime: 0,
+        _meta: { estimatedFields: [] },
       };
     }
   }

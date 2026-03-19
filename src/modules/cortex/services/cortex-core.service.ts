@@ -1883,7 +1883,7 @@ TRANSFORMED FRAME:
       entities.push({ type: 'location', value: match[0], confidence: 0.9 });
     }
 
-    // Country names (simplified list)
+    // Country names (ISO 3166-1 compatible set for NER)
     const countries = [
       'United States',
       'United Kingdom',
@@ -1891,6 +1891,40 @@ TRANSFORMED FRAME:
       'Australia',
       'Germany',
       'France',
+      'Japan',
+      'China',
+      'India',
+      'Brazil',
+      'Mexico',
+      'Spain',
+      'Italy',
+      'Netherlands',
+      'South Korea',
+      'Indonesia',
+      'Russia',
+      'South Africa',
+      'Nigeria',
+      'Egypt',
+      'Saudi Arabia',
+      'United Arab Emirates',
+      'Turkey',
+      'Poland',
+      'Sweden',
+      'Norway',
+      'Denmark',
+      'Finland',
+      'Ireland',
+      'New Zealand',
+      'Singapore',
+      'Malaysia',
+      'Thailand',
+      'Vietnam',
+      'Philippines',
+      'Argentina',
+      'Chile',
+      'Colombia',
+      'Pakistan',
+      'Bangladesh',
     ];
     countries.forEach((country) => {
       if (text.includes(country)) {

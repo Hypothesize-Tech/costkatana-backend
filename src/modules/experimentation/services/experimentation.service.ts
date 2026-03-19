@@ -5,7 +5,11 @@
  * Handles model comparisons, what-if scenarios, fine-tuning analysis, and real-time experiments.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
 import { Model } from 'mongoose';
@@ -16,6 +20,7 @@ import { LRUCache } from 'lru-cache';
 // Internal imports
 import { AIRouterService } from '../../../modules/cortex/services/ai-router.service';
 import { PricingService } from '../../../modules/utils/services/pricing.service';
+import { TokenCounterService } from '../../../modules/utils/services/token-counter.service';
 import { BedrockService } from '../../bedrock/bedrock.service';
 
 // Schema imports
@@ -80,6 +85,7 @@ export class ExperimentationService {
     @InjectModel(Usage.name) private usageModel: Model<UsageDocument>,
     private readonly aiRouterService: AIRouterService,
     private readonly pricingService: PricingService,
+    private readonly tokenCounterService: TokenCounterService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
@@ -658,27 +664,77 @@ export class ExperimentationService {
   }
 
   /**
-   * Map model name and provider to Bedrock model ID
+   * Map model name and provider to Bedrock model ID.
+   * Covers all supported Bedrock models from ModelRegistry.
    */
   private mapToBedrockModelId(modelName: string, provider: string): string {
-    // Model mapping logic - simplified version
     const modelMappings: Record<string, Record<string, string>> = {
       anthropic: {
         'claude-3-sonnet': 'anthropic.claude-3-sonnet-20240229-v1:0',
+        'claude-3-5-sonnet': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
         'claude-3-haiku': 'anthropic.claude-3-haiku-20240307-v1:0',
+        'claude-sonnet-4': 'anthropic.claude-sonnet-4-20250514-v1:0',
+        'claude-sonnet-4-5': 'anthropic.claude-sonnet-4-5-20250929-v1:0',
+        'claude-sonnet-4-6': 'anthropic.claude-sonnet-4-6-v1:0',
+        'claude-opus-4': 'anthropic.claude-opus-4-20250514-v1:0',
+        'claude-opus-4-1': 'anthropic.claude-opus-4-1-20250805-v1:0',
+        'claude-opus-4-5': 'anthropic.claude-opus-4-5-20250514-v1:0',
+        'claude-opus-4-6': 'anthropic.claude-opus-4-6-v1',
+        'claude-haiku-4-5': 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         'claude-2': 'anthropic.claude-v2',
+      },
+      amazon: {
+        'nova-micro': 'amazon.nova-micro-v1:0',
+        'nova-lite': 'amazon.nova-lite-v1:0',
+        'nova-pro': 'amazon.nova-pro-v1:0',
+        'nova-2-lite': 'amazon.nova-2-lite-v1:0',
+        'nova-2-pro': 'amazon.nova-2-pro-v1:0',
+        'nova-2-omni': 'amazon.nova-2-omni-v1:0',
+        'nova-2-sonic': 'amazon.nova-2-sonic-v1:0',
+        'titan-text-lite': 'amazon.titan-text-lite-v1',
+      },
+      meta: {
+        'llama-2-70b': 'meta.llama2-70b-chat-v1',
+        'llama-2-13b': 'meta.llama2-13b-chat-v1',
+        'llama3-1-8b': 'meta.llama3-1-8b-instruct-v1:0',
+        'llama3-1-70b': 'meta.llama3-1-70b-instruct-v1:0',
+        'llama3-1-405b': 'meta.llama3-1-405b-instruct-v1:0',
+        'llama3-2-1b': 'meta.llama3-2-1b-instruct-v1:0',
+        'llama3-2-3b': 'meta.llama3-2-3b-instruct-v1:0',
+      },
+      mistral: {
+        'mistral-7b': 'mistral.mistral-7b-instruct-v0:2',
+        'mixtral-8x7b': 'mistral.mixtral-8x7b-instruct-v0:1',
+        'mistral-large': 'mistral.mistral-large-2402-v1:0',
+      },
+      ai21: {
+        'j2-ultra': 'ai21.j2-ultra-v1',
+        'j2-mid': 'ai21.j2-mid-v1',
+        'jamba': 'ai21.jamba-instruct-v1:0',
+      },
+      cohere: {
+        'command': 'command',
+        'command-r7b': 'command-r7b-12-2024',
+        'command-r-plus': 'command-r-plus-04-2024',
+        'command-r': 'command-r-08-2024',
       },
       openai: {
         'gpt-4': 'gpt-4',
         'gpt-3.5-turbo': 'gpt-3.5-turbo',
       },
-      meta: {
-        'llama-2-70b': 'meta.llama2-70b-chat-v1',
-        'llama-2-13b': 'meta.llama2-13b-chat-v1',
-      },
     };
 
-    return modelMappings[provider]?.[modelName] || modelName;
+    const normalizedProvider = provider.toLowerCase().replace(/-/g, '');
+    const providerMap =
+      modelMappings[provider] ??
+      modelMappings[normalizedProvider] ??
+      (provider.toLowerCase() === 'aws' ? modelMappings.amazon : undefined);
+    const normalizedModel = modelName.toLowerCase().replace(/\s+/g, '-');
+    return (
+      providerMap?.[modelName] ??
+      providerMap?.[normalizedModel] ??
+      modelName
+    );
   }
 
   /**
@@ -710,9 +766,6 @@ export class ExperimentationService {
       );
 
       const estimatedInputTokens = Math.ceil(evaluationPrompt.length / 4);
-
-      // Add substantial delay to prevent throttling
-      await new Promise((resolve) => setTimeout(resolve, 15000));
 
       let evaluationResponse: string | undefined;
 
@@ -748,7 +801,6 @@ export class ExperimentationService {
             `Evaluation model ${modelId} failed:`,
             lastError.message,
           );
-          await new Promise((resolve) => setTimeout(resolve, 5000));
         }
       }
 
@@ -994,7 +1046,6 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
             `Analysis model ${modelId} failed:`,
             lastAnalysisError.message,
           );
-          await new Promise((resolve) => setTimeout(resolve, 5000));
         }
       }
 
@@ -1094,12 +1145,15 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
     prompt: string,
   ): Promise<string | null> {
     try {
-      // Check if real API calls are enabled
+      // Check if real API calls are enabled - fail loudly instead of returning null
       const realCallsEnabled =
         this.configService.get('ENABLE_REAL_MODEL_COMPARISON', 'false') ===
         'true';
       if (!realCallsEnabled) {
-        return null;
+        throw new BadRequestException(
+          'ENABLE_REAL_MODEL_COMPARISON must be set to "true" for model experimentation. ' +
+            'Experiments require real API execution; simulated responses are not supported.',
+        );
       }
 
       this.logger.log('Performing real model API call', {
@@ -2386,7 +2440,6 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
         .limit(1000)
         .lean();
 
-      // Basic analysis - in production this would be more sophisticated
       const totalCost = usageData.reduce(
         (sum, usage) => sum + (usage.cost || 0),
         0,
@@ -2398,17 +2451,52 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
         },
         {} as Record<string, number>,
       );
+      const costs = usageData.map((u) => u.cost || 0).filter((c) => c > 0);
+      const sortedCosts = [...costs].sort((a, b) => a - b);
+      const medianCost =
+        sortedCosts.length > 0
+          ? sortedCosts[Math.floor(sortedCosts.length / 2)]
+          : 0;
+      const variance =
+        costs.length > 0
+          ? costs.reduce(
+              (sum, c) =>
+                sum + Math.pow(c - totalCost / usageData.length, 2),
+              0,
+            ) / costs.length
+          : 0;
+      const p95Index = Math.floor(sortedCosts.length * 0.95);
+      const p95Cost =
+        sortedCosts.length > 0
+          ? sortedCosts[Math.min(p95Index, sortedCosts.length - 1)]
+          : 0;
+      const highUsageModels = Object.entries(modelUsage)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 5)
+        .map(([model, count]) => ({ model, count }));
+      const costTrend =
+        usageData.length >= 2
+          ? (usageData[usageData.length - 1]?.cost || 0) >
+            (usageData[0]?.cost || 0)
+            ? 'increasing'
+            : (usageData[usageData.length - 1]?.cost || 0) <
+              (usageData[0]?.cost || 0)
+              ? 'decreasing'
+              : 'stable'
+          : 'insufficient_data';
 
       return {
         totalRequests: usageData.length,
         totalCost,
         modelDistribution: modelUsage,
-        averageCostPerRequest: totalCost / usageData.length,
+        averageCostPerRequest:
+          usageData.length > 0 ? totalCost / usageData.length : 0,
+        medianCost,
+        variance,
+        p95Cost,
+        costTrend,
         patterns: {
-          highUsageModels: Object.entries(modelUsage)
-            .sort(([, a], [, b]) => b - a)
-            .slice(0, 3)
-            .map(([model, count]) => ({ model, count })),
+          highUsageModels,
         },
       };
     } catch (error) {
@@ -2475,13 +2563,16 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   }
 
   /**
-   * Calculate prompt cost
+   * Calculate prompt cost using token-based estimation
    */
   private async calculatePromptCost(
     prompt: string,
     model: string,
   ): Promise<number> {
-    const inputTokens = Math.ceil(prompt.length / 4);
+    const tokenResult = this.tokenCounterService.countTokens(prompt, {
+      model,
+    });
+    const inputTokens = tokenResult.tokens;
     const pricing = MODEL_PRICING.find((p) =>
       p.modelName.toLowerCase().includes(model.toLowerCase()),
     );
@@ -2492,17 +2583,34 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   }
 
   /**
-   * Simulate context trimming
+   * Simulate context trimming using token-based length estimation
    */
   private async simulateContextTrimming(
     prompt: string,
     model: string,
     trimPercentage: number,
-  ): Promise<any[]> {
+    ): Promise<
+      Array<{
+        type: 'context_trimming';
+        originalLength: number;
+        trimmedLength: number;
+        trimPercentage: number;
+        originalCost: number;
+        trimmedCost: number;
+        savings: number;
+        description: string;
+      }>
+    > {
     const originalCost = await this.calculatePromptCost(prompt, model);
-    const trimmedLength = Math.floor(
-      prompt.length * (1 - trimPercentage / 100),
+    const originalTokens = this.tokenCounterService.countTokens(prompt, {
+      model,
+    }).tokens;
+    const trimmedTokens = Math.max(
+      1,
+      Math.floor(originalTokens * (1 - trimPercentage / 100)),
     );
+    const charPerToken = prompt.length / Math.max(1, originalTokens);
+    const trimmedLength = Math.floor(trimmedTokens * charPerToken);
     const trimmedPrompt = prompt.substring(0, trimmedLength);
     const trimmedCost = await this.calculatePromptCost(trimmedPrompt, model);
 
@@ -2521,19 +2629,25 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   }
 
   /**
-   * Simulate model alternatives
+   * Simulate model alternatives (currentCost hoisted out of loop)
    */
   private async simulateModelAlternatives(
     prompt: string,
     alternativeModels: string[],
     currentModel: string,
-  ): Promise<any[]> {
-    const results = [];
+  ): Promise<
+    Array<{ model: string; cost: number; savings: number; efficiency: number }>
+  > {
+    const currentCost = await this.calculatePromptCost(prompt, currentModel);
+    const results: Array<{
+      model: string;
+      cost: number;
+      savings: number;
+      efficiency: number;
+    }> = [];
 
     for (const altModel of alternativeModels) {
       const altCost = await this.calculatePromptCost(prompt, altModel);
-      const currentCost = await this.calculatePromptCost(prompt, currentModel);
-
       results.push({
         model: altModel,
         cost: altCost,
@@ -2547,17 +2661,26 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   }
 
   /**
-   * Simulate prompt optimization
+   * Simulate prompt optimization: collapse whitespace, remove filler words
    */
   private async simulatePromptOptimization(
     prompt: string,
     model: string,
-  ): Promise<any[]> {
-    // Simple optimization: remove redundant words and shorten
+  ): Promise<
+    Array<{
+      type: 'prompt_optimization';
+      originalLength: number;
+      optimizedLength: number;
+      originalCost: number;
+      optimizedCost: number;
+      savings: number;
+      description: string;
+    }>
+  > {
     const optimizedPrompt = prompt
       .replace(/\s+/g, ' ')
-      .replace(/very\s+/g, '')
-      .replace(/really\s+/g, '')
+      .replace(/\b(very|really|quite|extremely|absolutely)\s+/gi, '')
+      .replace(/\s+/g, ' ')
       .trim();
 
     const originalCost = await this.calculatePromptCost(prompt, model);

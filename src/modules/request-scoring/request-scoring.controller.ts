@@ -17,13 +17,13 @@ import {
 } from './request-scoring.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
-@Controller('api/training')
+@Controller('api/request-scoring')
 export class RequestScoringController {
   constructor(private readonly requestScoringService: RequestScoringService) {}
 
   /**
    * Score a request for training quality
-   * POST /api/training/score
+   * POST /api/request-scoring/score
    */
   @Post('score')
   @HttpCode(HttpStatus.OK)
@@ -59,7 +59,7 @@ export class RequestScoringController {
 
   /**
    * Get score for a specific request
-   * GET /api/training/score/:requestId
+   * GET /api/request-scoring/score/:requestId
    */
   @Get('score/:requestId')
   async getRequestScore(
@@ -88,7 +88,7 @@ export class RequestScoringController {
 
   /**
    * Get all scores for the authenticated user
-   * GET /api/training/scores
+   * GET /api/request-scoring/scores
    */
   @Get('scores')
   async getUserScores(
@@ -137,7 +137,7 @@ export class RequestScoringController {
 
   /**
    * Get training candidates (high-scoring requests)
-   * GET /api/training/candidates
+   * GET /api/request-scoring/candidates
    */
   @Get('candidates')
   async getTrainingCandidates(
@@ -182,7 +182,7 @@ export class RequestScoringController {
 
   /**
    * Get scoring analytics
-   * GET /api/training/analytics
+   * GET /api/request-scoring/analytics
    */
   @Get('analytics')
   async getScoringAnalytics(@CurrentUser() user: any) {
@@ -202,7 +202,7 @@ export class RequestScoringController {
 
   /**
    * Bulk score multiple requests
-   * POST /api/training/score/bulk
+   * POST /api/request-scoring/score/bulk
    */
   @Post('score/bulk')
   @HttpCode(HttpStatus.OK)
@@ -247,7 +247,7 @@ export class RequestScoringController {
 
   /**
    * Delete a request score
-   * DELETE /api/training/score/:requestId
+   * DELETE /api/request-scoring/score/:requestId
    */
   @Delete('score/:requestId')
   async deleteScore(

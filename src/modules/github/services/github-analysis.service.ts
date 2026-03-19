@@ -337,14 +337,42 @@ export class GithubAnalysisService {
   }
 
   /**
-   * Detect framework used in the project
+   * Detect framework from project structure (config files, conventions).
+   * For JS/TS: next, nuxt, vue, angular, svelte, vite, express (from package.json handled by extractDependencies).
+   * For Python: django, flask, fastapi. For Ruby: rails. For PHP: laravel. For Go/Rust: inferred from language.
    */
   private detectFramework(
     files: Array<{ path: string; size: number; type: string }>,
   ): string | undefined {
-    // This would typically read package.json or similar files
-    // For now, return undefined as framework detection is complex
-    // Will be enhanced when we implement dependency extraction
+    const paths = new Set(
+      files.filter((f) => f.type === 'file').map((f) => f.path.toLowerCase()),
+    );
+
+    const hasPath = (p: string) =>
+      Array.from(paths).some(
+        (path) => path === p || path.endsWith('/' + p) || path.includes('/' + p + '/'),
+      );
+
+    if (hasPath('next.config.js') || hasPath('next.config.ts') || hasPath('next.config.mjs')) {
+      return 'next';
+    }
+    if (hasPath('nuxt.config.ts') || hasPath('nuxt.config.js')) return 'nuxt';
+    if (hasPath('angular.json')) return 'angular';
+    if (hasPath('svelte.config.js') || hasPath('svelte.config.cjs')) return 'svelte';
+    if (hasPath('vue.config.js')) return 'vue';
+    if (hasPath('vite.config.ts') || hasPath('vite.config.js')) return 'vite';
+    if (hasPath('manage.py')) return 'django';
+    if (hasPath('requirements.txt')) {
+      if (hasPath('main.py') || hasPath('app/main.py')) return 'fastapi';
+      if (hasPath('app.py') || hasPath('application.py')) return 'flask';
+    }
+    if (hasPath('artisan') || hasPath('artisan.php')) return 'laravel';
+    if (hasPath('config/routes.rb') || hasPath('config/application.rb')) return 'rails';
+    if (hasPath('go.mod')) return 'go';
+    if (hasPath('cargo.toml')) return 'rust';
+    if (hasPath('pom.xml')) return 'spring';
+    if (hasPath('composer.json')) return 'php';
+
     return undefined;
   }
 

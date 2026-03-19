@@ -418,10 +418,13 @@ export class AgentTraceService {
           ) / recentExecutions.length
         : 0;
 
+    const { throughputValues, errorRateCurrent } =
+      await this.computePerformanceMetrics(userId, fromDate, now);
+
     return {
       overview: {
         totalExecutions: tracesMap.size,
-        successRate: 95,
+        successRate: errorRateCurrent < 100 ? 100 - errorRateCurrent : 0,
         averageDuration: avgDuration,
         totalCost: sumCost,
         activeWorkflows: 0,
@@ -430,18 +433,14 @@ export class AgentTraceService {
       performanceMetrics: {
         throughput: {
           period: 'hour',
-          values: Array.from({ length: 24 }, (_, i) =>
-            i >= 9 && i <= 17
-              ? 3 + Math.floor(Math.random() * 5)
-              : Math.floor(Math.random() * 3),
-          ),
+          values: throughputValues,
         },
         latency: {
           p50: avgDuration,
           p95: avgDuration * 1.5,
           p99: avgDuration * 2,
         },
-        errorRate: { current: 5, trend: 0 },
+        errorRate: { current: errorRateCurrent, trend: 0 },
       },
       costAnalysis: {
         totalSpend: sumCost,
@@ -488,6 +487,76 @@ export class AgentTraceService {
         },
       },
       alerts: [],
+    };
+  }
+
+  /**
+   * Compute real throughput per hour and error rate from Usage collection.
+   * Uses the most recent 24 hours of the range for consistent 24-bucket output.
+   */
+  private async computePerformanceMetrics(
+    userId: string,
+    fromDate: Date,
+    toDate: Date,
+  ): Promise<{ throughputValues: number[]; errorRateCurrent: number }> {
+    const windowEnd = toDate;
+    const windowStart = new Date(
+      Math.max(
+        fromDate.getTime(),
+        windowEnd.getTime() - 24 * 3600 * 1000,
+      ),
+    );
+
+    const pipeline = [
+      {
+        $match: {
+          $or: [
+            { tags: 'agent_trace' },
+            { traceId: { $exists: true, $ne: null } },
+            { automationPlatform: { $exists: true, $ne: null } },
+          ],
+          userId: userId as unknown as Types.ObjectId,
+          createdAt: { $gte: windowStart, $lte: windowEnd },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            $floor: {
+              $divide: [
+                { $subtract: ['$createdAt', windowStart] },
+                3600000,
+              ],
+            },
+          },
+          count: { $sum: 1 },
+          errors: { $sum: { $cond: ['$errorOccurred', 1, 0] } },
+        },
+      },
+    ];
+
+    const results = await this.usageModel.aggregate<
+      { _id: number; count: number; errors: number }
+    >(pipeline)
+      .exec();
+
+    const throughputValues = Array.from({ length: 24 }, () => 0);
+    let totalCount = 0;
+    let totalErrors = 0;
+
+    for (const r of results) {
+      const slot = Math.max(0, Math.min(r._id, 23));
+      throughputValues[slot] = r.count;
+      totalCount += r.count;
+      totalErrors += r.errors;
+    }
+
+    const errorRateCurrent =
+      totalCount > 0 ? Math.round((totalErrors / totalCount) * 100) : 0;
+
+    return {
+      throughputValues,
+      errorRateCurrent,
     };
   }
 }

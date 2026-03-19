@@ -45,6 +45,7 @@ import { UtilsModule } from '../utils/utils.module';
 import { McpModule } from '../mcp/mcp.module';
 import { BedrockModule } from '../bedrock/bedrock.module';
 import { AuthModule } from '../auth/auth.module';
+import { GovernedAgentModule } from '../governed-agent/governed-agent.module';
 
 // Schemas (for MongooseModule.forFeature)
 import { Usage, UsageSchema } from '../../schemas/core/usage.schema';
@@ -89,6 +90,7 @@ import {
     McpModule, // For MongoDbMcpService, VercelMcpService, AwsMcpService (McpToolSyncerService)
     BedrockModule, // For BedrockService (ModelSelectorToolService)
     AuthModule, // For JwtAuthGuard
+    GovernedAgentModule, // For TaskClassifierService (MultiAgentFlowService)
 
     // Mongoose schemas needed by agent services
     MongooseModule.forFeature([

@@ -520,8 +520,7 @@ export class VectorizationJob {
         }
       }
 
-      // Clear any scheduled job flags (if using a job queue system)
-      // This is a placeholder for future job queue integration
+      // Clear scheduled job flags in Redis to prevent stale state
       const scheduledJobKeys = [
         'vectorization:scheduled:user_memories',
         'vectorization:scheduled:conversations',

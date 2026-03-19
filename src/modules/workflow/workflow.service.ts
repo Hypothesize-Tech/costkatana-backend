@@ -363,6 +363,19 @@ export class WorkflowService {
           ) / recentExecutions.length
         : 0;
 
+    // Compute throughput per hour from actual execution data (last 24 hours)
+    const nowMs = now.getTime();
+    const hourlyCounts = new Array<number>(24).fill(0);
+    const oneHourMs = 60 * 60 * 1000;
+    for (const exec of recentExecutions as Array<{ endTime: Date }>) {
+      const endMs = new Date(exec.endTime).getTime();
+      const hoursAgo = (nowMs - endMs) / oneHourMs;
+      const bucketIndex = Math.floor(hoursAgo);
+      if (bucketIndex >= 0 && bucketIndex < 24) {
+        hourlyCounts[23 - bucketIndex] += 1;
+      }
+    }
+
     return {
       overview: {
         totalExecutions: workflowsMap.size,
@@ -375,11 +388,7 @@ export class WorkflowService {
       performanceMetrics: {
         throughput: {
           period: 'hour',
-          values: Array.from({ length: 24 }, (_, i) =>
-            i >= 9 && i <= 17
-              ? 3 + Math.floor(Math.random() * 5)
-              : Math.floor(Math.random() * 3),
-          ),
+          values: hourlyCounts,
         },
         latency: {
           p50: avgDuration,

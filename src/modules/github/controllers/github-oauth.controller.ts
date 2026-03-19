@@ -12,6 +12,7 @@ import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { Public } from '../../../common/decorators/public.decorator';
 import { GithubOAuthApiService } from '../services/github-oauth-api.service';
+import { GithubConnectionService } from '../services/github-connection.service';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 
@@ -19,14 +20,9 @@ import * as crypto from 'crypto';
 export class GithubOAuthController {
   private readonly logger = new Logger(GithubOAuthController.name);
 
-  /** Optional: set when connection persistence is wired up */
-  private readonly githubConnectionService?: {
-    upsertConnection?: (data: any) => Promise<void>;
-    upsertInstallation?: (data: any) => Promise<void>;
-  };
-
   constructor(
     private readonly githubOAuthApiService: GithubOAuthApiService,
+    private readonly githubConnectionService: GithubConnectionService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -350,17 +346,13 @@ export class GithubOAuthController {
 
     // --- Step 6: Persist or update GitHub connection in database ---
     try {
-      // Assuming a githubConnectionService exists for demonstration.
-      // If not implemented, this can be replaced/removed.
-      if (this['githubConnectionService']?.upsertConnection) {
-        await this['githubConnectionService'].upsertConnection({
-          userId,
-          githubUserId: githubUser.id,
-          githubUsername: githubUser.login,
-          accessToken: tokenResponse.access_token,
-          scopes: tokenResponse.scope,
-        });
-      }
+      await this.githubConnectionService.upsertConnection({
+        userId,
+        githubUserId: githubUser.id,
+        githubUsername: githubUser.login,
+        accessToken: tokenResponse.access_token,
+        scopes: tokenResponse.scope,
+      });
     } catch (dbErr: any) {
       this.logger.error('Failed to upsert GitHub connection', {
         error: dbErr.message,
@@ -498,18 +490,15 @@ export class GithubOAuthController {
     const accountId = installation.account?.id;
     const accountLogin = installation.account?.login;
 
-    // Step 3: Upsert GitHub Installation Connection in DB (if service exists)
+    // Step 3: Upsert GitHub Installation Connection in DB
     try {
-      // Assuming githubConnectionService implements upsertInstallation
-      if (this['githubConnectionService']?.upsertInstallation) {
-        await this['githubConnectionService'].upsertInstallation({
-          userId,
-          installationId,
-          accountId,
-          accountLogin,
-          setupAction,
-        });
-      }
+      await this.githubConnectionService.upsertInstallation({
+        userId,
+        installationId,
+        accountId,
+        accountLogin,
+        setupAction,
+      });
     } catch (dbErr: any) {
       this.logger.error('Failed to upsert GitHub App installation in DB', {
         error: dbErr.message,

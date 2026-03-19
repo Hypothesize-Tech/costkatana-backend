@@ -8,6 +8,7 @@
  * 4. Generate: IR → Optimized prompt
  */
 
+import { estimateTokenCount } from '../utils/token-count.utils';
 import { loggingService } from '../common/services/logging.service';
 import {
   ProgramNode,
@@ -21,12 +22,16 @@ import {
   OutputFormatNode,
   ConstraintNode,
   InstructionNode,
+  LiteralNode,
+  ExpressionNode,
+  ConditionalNode,
 } from './promptAST.types';
 
 export class PromptCompilerService {
   /**
    * Compile prompt with full optimization pipeline
    */
+  /** Optional summarizer for context compression. When provided, uses AI summarization instead of stub. */
   static async compile(
     prompt: string,
     options: {
@@ -34,6 +39,7 @@ export class PromptCompilerService {
       targetTokens?: number;
       preserveQuality?: boolean;
       enableParallelization?: boolean;
+      summarizer?: (text: string, maxOutputTokens?: number) => Promise<string>;
     } = {},
   ): Promise<CompilationResult> {
     const startTime = Date.now();
@@ -42,6 +48,7 @@ export class PromptCompilerService {
       targetTokens,
       preserveQuality = true,
       enableParallelization = true,
+      summarizer,
     } = options;
 
     try {
@@ -78,6 +85,7 @@ export class PromptCompilerService {
           const compressionResult = await this.compressContext(
             optimizedAST,
             targetTokens,
+            summarizer,
           );
           optimizedAST = compressionResult.ast;
           optimizationResults.push(compressionResult.result);
@@ -232,21 +240,16 @@ export class PromptCompilerService {
         continue;
       }
 
-      // Detect conditional statements
-      const conditionalMatch = this.detectConditional(segment.text);
+      // Detect and parse conditional statements recursively
+      const conditionalMatch = PromptCompilerService.parseConditional(segment.text);
       if (conditionalMatch) {
-        // For now, treat as context with high priority
-        // Full conditional parsing would require recursive parsing
-        const contextNode = this.createContextNode(
-          segment.text,
-          'local',
-          8, // High priority for conditionals
-          true, // Required
+        const conditionalNode = PromptCompilerService.createConditionalNode(
+          conditionalMatch,
           startPos,
           endPos,
           i,
         );
-        body.push(contextNode);
+        body.push(conditionalNode);
         continue;
       }
 
@@ -531,6 +534,144 @@ export class PromptCompilerService {
       /^(if|when|whenever|provided that|assuming|suppose)\s+/i.test(text) ||
       /\b(if|when|whenever)\s+[^,]+,\s*(then|do|perform)/i.test(text)
     );
+  }
+
+  /**
+   * Parse conditional text into condition, then-branch, and optional else-branch.
+   * Supports: "if X then Y else Z", "when X, do Y", "if X then Y"
+   */
+  private static parseConditional(
+    text: string,
+  ): { condition: string; then: string; else?: string } | null {
+    if (!this.detectConditional(text)) return null;
+
+    const t = text.trim();
+
+    // "if X then Y else Z" or "if X then Y"
+    const ifThenElse = t.match(
+      /^(if|when|whenever|provided that|assuming|suppose)\s+(.+?)\s+then\s+(.+?)(?:\s+else\s+(.+))?$/is,
+    );
+    if (ifThenElse) {
+      return {
+        condition: ifThenElse[2].trim(),
+        then: ifThenElse[3].trim(),
+        else: ifThenElse[4]?.trim(),
+      };
+    }
+
+    // "when X, do Y" or "when X, perform Y"
+    const whenDo = t.match(
+      /^(when|whenever)\s+(.+?),\s*(?:then|do|perform)\s+(.+)$/is,
+    );
+    if (whenDo) {
+      return {
+        condition: whenDo[2].trim(),
+        then: whenDo[3].trim(),
+      };
+    }
+
+    // Fallback: treat first clause as condition, rest as then
+    const firstWord = t.match(/^(if|when|whenever|provided that|assuming|suppose)\s+/i);
+    if (firstWord) {
+      const rest = t.slice(firstWord[0].length).trim();
+      const thenElse = rest.split(/\s+else\s+/i);
+      const thenPart = thenElse[0].replace(/\s+then\s+/i, ' ').trim();
+      const condThen = thenPart.match(/^(.+?)\s+then\s+(.+)$/is);
+      if (condThen) {
+        return {
+          condition: condThen[1].trim(),
+          then: condThen[2].trim(),
+          else: thenElse[1]?.trim(),
+        };
+      }
+      return { condition: rest, then: rest };
+    }
+
+    return null;
+  }
+
+  /**
+   * Create a ConditionalNode with recursively parsed then/else branches
+   */
+  private static createConditionalNode(
+    parsed: { condition: string; then: string; else?: string },
+    startPos: number,
+    endPos: number,
+    index: number,
+  ): ConditionalNode {
+    const id = `cond_${startPos}_${endPos}_${index}`;
+
+    const conditionExpr: LiteralNode = {
+      type: 'Literal',
+      id: `${id}_cond`,
+      value: parsed.condition,
+      compressible: false,
+      metadata: { startPos, endPos },
+    };
+
+    const thenBody = PromptCompilerService.parseSegmentsToStatements([parsed.then], startPos, endPos);
+    const elseBody = parsed.else
+      ? PromptCompilerService.parseSegmentsToStatements([parsed.else], startPos, endPos)
+      : undefined;
+
+    return {
+      type: 'Conditional',
+      id,
+      condition: conditionExpr,
+      then: thenBody,
+      else: elseBody,
+      metadata: { startPos, endPos },
+    };
+  }
+
+  /**
+   * Parse segment strings into statement nodes (recursive helper for conditional branches)
+   */
+  private static parseSegmentsToStatements(
+    segments: string[],
+    baseStart: number,
+    baseEnd: number,
+  ): StatementNode[] {
+    const nodes: StatementNode[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      const startPos = baseStart + i * 10;
+      const endPos = startPos + seg.length;
+
+      if (PromptCompilerService.detectConditional(seg)) {
+        const parsed = PromptCompilerService.parseConditional(seg);
+        if (parsed) {
+          nodes.push(
+            PromptCompilerService.createConditionalNode(parsed, startPos, endPos, i),
+          );
+        } else {
+          nodes.push(
+            PromptCompilerService.createContextNode(
+              seg,
+              'local',
+              8,
+              true,
+              startPos,
+              endPos,
+              i,
+            ),
+          );
+        }
+      } else {
+        nodes.push(
+          PromptCompilerService.createContextNode(
+            seg,
+            'local',
+            5,
+            false,
+            startPos,
+            endPos,
+            i,
+          ),
+        );
+      }
+    }
+    return nodes;
   }
 
   /**
@@ -1057,7 +1198,11 @@ export class PromptCompilerService {
         if (contextValue) {
           variableMap.set(implicitVar.name, contextValue);
         } else {
-          // Store as placeholder for later resolution
+          loggingService.warn('Unresolved variable; rendering may contain placeholder', {
+            metric: 'prompt_compiler.unresolved_variable_placeholder',
+            variableName: implicitVar.name,
+            instructionIndex: index,
+          });
           variableMap.set(implicitVar.name, `[${implicitVar.name}]`);
         }
       }
@@ -1267,22 +1412,108 @@ export class PromptCompilerService {
   }
 
   /**
-   * Constant folding pass
+   * Constant folding pass - merges consecutive literals and folds constant expressions
    */
   private static async foldConstants(ast: ProgramNode): Promise<{
     ast: ProgramNode;
     result: OptimizationPassResult;
   }> {
     const transformations: OptimizationPassResult['transformations'] = [];
+    let applied = false;
 
-    // Merge consecutive literals
-    // (Implementation simplified for demonstration)
+    const mergeLiteral = (a: LiteralNode, b: LiteralNode): LiteralNode => {
+      const aVal = typeof a.value === 'string' ? a.value : String(a.value);
+      const bVal = typeof b.value === 'string' ? b.value : String(b.value);
+      return {
+        ...a,
+        value: aVal + bVal,
+        compressible: a.compressible && b.compressible,
+        metadata: {
+          ...a.metadata,
+          endPos: b.metadata.endPos,
+        },
+      };
+    };
+
+    const foldExpression = (node: ExpressionNode): ExpressionNode => {
+      const n = node as { type?: string; operator?: string; left?: ExpressionNode; right?: ExpressionNode };
+      if (n.type === 'BinaryOp' && n.operator === '+' && n.left && n.right) {
+        const left = foldExpression(n.left);
+        const right = foldExpression(n.right);
+        if (left.type === 'Literal' && right.type === 'Literal') {
+          applied = true;
+          const leftStr = String((left as LiteralNode).value);
+          const rightStr = String((right as LiteralNode).value);
+          const mergedStr = leftStr + rightStr;
+          const tokensSaved = Math.max(
+            1,
+            estimateTokenCount(leftStr) + estimateTokenCount(rightStr) - estimateTokenCount(mergedStr),
+          );
+          transformations.push({
+            type: 'constant_fold',
+            description: `Merged literal "${String((left as LiteralNode).value).slice(0, 20)}..." with "${String((right as LiteralNode).value).slice(0, 20)}..."`,
+            tokensSaved,
+            costSaved: tokensSaved * 0.00001,
+          });
+          return mergeLiteral(left as LiteralNode, right as LiteralNode);
+        }
+        return { ...n, left, right } as ExpressionNode;
+      }
+      return node;
+    };
+
+    const newBody = ast.body.map((stmt) => {
+      const s = stmt as any;
+      if (s.type === 'Context' && s.content) {
+        return { ...s, content: foldExpression(s.content) };
+      }
+      if (s.type === 'Instruction' && s.subject) {
+        return { ...s, subject: foldExpression(s.subject) };
+      }
+      if (s.type === 'Constraint' && s.value) {
+        return { ...s, value: foldExpression(s.value) };
+      }
+      return stmt;
+    });
+
+    // Merge consecutive Context nodes with Literal content
+    const mergedBody: StatementNode[] = [];
+    for (let i = 0; i < newBody.length; i++) {
+      const curr = newBody[i] as any;
+      const next = newBody[i + 1] as any;
+      if (
+        curr?.type === 'Context' &&
+        next?.type === 'Context' &&
+        curr.content?.type === 'Literal' &&
+        next.content?.type === 'Literal'
+      ) {
+        const leftStr = String(curr.content.value ?? '');
+        const rightStr = String(next.content.value ?? '');
+        const mergedStr = leftStr + rightStr;
+        const tokensSaved = Math.max(
+          1,
+          estimateTokenCount(leftStr) + estimateTokenCount(rightStr) - estimateTokenCount(mergedStr),
+        );
+        const mergedContent = mergeLiteral(curr.content, next.content);
+        mergedBody.push({ ...curr, content: mergedContent });
+        i++;
+        applied = true;
+        transformations.push({
+          type: 'constant_fold',
+          description: 'Merged consecutive context literals',
+          tokensSaved,
+          costSaved: tokensSaved * 0.00001,
+        });
+      } else {
+        mergedBody.push(newBody[i]);
+      }
+    }
 
     return {
-      ast,
+      ast: { ...ast, body: mergedBody },
       result: {
         passName: 'Constant Folding',
-        applied: false,
+        applied,
         transformations,
         warnings: [],
       },
@@ -1290,11 +1521,13 @@ export class PromptCompilerService {
   }
 
   /**
-   * Context compression pass
+   * Context compression pass.
+   * When summarizer is provided, uses AI summarization. Otherwise skips compression to avoid stub quality loss.
    */
   private static async compressContext(
     ast: ProgramNode,
     targetTokens?: number,
+    summarizer?: (text: string, maxOutputTokens?: number) => Promise<string>,
   ): Promise<{
     ast: ProgramNode;
     result: OptimizationPassResult;
@@ -1310,13 +1543,13 @@ export class PromptCompilerService {
         typeof node.metadata?.tokens === 'number'
           ? node.metadata.tokens
           : typeof (node as any)?.content?.value === 'string'
-            ? (node as any).content.value.length / 4
+            ? estimateTokenCount((node as any).content.value)
             : 0;
       if (
         node.type === 'Instruction' &&
         typeof (node as any)?.subject?.value === 'string'
       ) {
-        estimatedTokens += (node as any).subject.value.length / 4;
+        estimatedTokens += estimateTokenCount((node as any).subject.value);
       }
     }
 
@@ -1333,75 +1566,83 @@ export class PromptCompilerService {
       };
     }
 
-    // Simulated summarization/compression:
-    // - For each Context node, if it's verbose (length > 40 or tokens > 15) compress ("summarize") it
-    // - Recalculate token estimates, stop when under targetToken budget
+    // Real summarization when summarizer provided; skip compression otherwise to avoid stub quality loss
     let newTotalTokens = 0;
     let compressed = false;
-    const newBody = ast.body.map((node) => {
+    const newBody: typeof ast.body = [];
+
+    for (const node of ast.body) {
       if (
         node.type === 'Context' &&
         typeof (node as any).content.value === 'string' &&
         ((node as any).content.value.length > 40 ||
-          (node.metadata?.tokens && node.metadata.tokens > 15))
+          (node.metadata?.tokens && node.metadata.tokens > 15)) &&
+        summarizer
       ) {
-        // Simulate summarization by taking the first 12 words and adding " (summary)"
         const originalValue = (node as any).content.value;
         const originalTokens =
-          node.metadata?.tokens ?? originalValue.length / 4;
+          node.metadata?.tokens ?? estimateTokenCount(originalValue);
+        const maxOutputTokens = Math.max(15, Math.ceil(originalTokens * 0.4));
 
-        const summaryWords = originalValue.split(/\s+/).slice(0, 12).join(' ');
-        const summarized =
-          summaryWords +
-          (summaryWords.length < originalValue.length
-            ? ' ... (summary)'
-            : ' (summary)');
-        const compressedTokens = Math.round(summarized.length / 4);
+        try {
+          const summarized = await summarizer(originalValue, maxOutputTokens);
+          const compressedTokens = estimateTokenCount(summarized);
 
-        // Record transformation if token count is reduced
-        if (compressedTokens < originalTokens) {
-          transformations.push({
-            type: 'context_compression',
-            description: `Compressed context node '${node.id}' from ${originalTokens} to ${compressedTokens} tokens`,
-            tokensSaved: originalTokens - compressedTokens,
-            costSaved: (originalTokens - compressedTokens) * 0.00001,
-          });
-          compressed = true;
-        }
+          if (compressedTokens < originalTokens) {
+            transformations.push({
+              type: 'context_compression',
+              description: `Compressed context node '${node.id}' from ${originalTokens} to ${compressedTokens} tokens`,
+              tokensSaved: originalTokens - compressedTokens,
+              costSaved: (originalTokens - compressedTokens) * 0.00001,
+            });
+            compressed = true;
+          }
 
-        // Provide a new context node object (immutably)
-        const newNode = {
-          ...node,
-          content: {
-            ...(node as any).content,
-            value: summarized,
-            compressible: true,
-            metadata: {
-              ...(node as any).content.metadata,
-              originalValue,
-              wasCompressed: true,
+          const newNode = {
+            ...node,
+            content: {
+              ...(node as any).content,
+              value: summarized,
+              compressible: true,
+              metadata: {
+                ...(node as any).content.metadata,
+                originalValue,
+                wasCompressed: true,
+              },
             },
-          },
-          metadata: {
-            ...node.metadata,
-            tokens: compressedTokens,
-            originalTokens,
-            compressionSummary: true,
-          },
-        };
-        newTotalTokens += compressedTokens;
-        return newNode;
+            metadata: {
+              ...node.metadata,
+              tokens: compressedTokens,
+              originalTokens,
+              compressionSummary: true,
+            },
+          };
+          newTotalTokens += compressedTokens;
+          newBody.push(newNode);
+        } catch (err) {
+          loggingService.warn(
+            'Context summarization failed, keeping original',
+            {
+              nodeId: node.id,
+              error: err instanceof Error ? err.message : String(err),
+            },
+          );
+          newTotalTokens += originalTokens;
+          newBody.push(node);
+        }
       } else {
-        // Not a context node or already short enough; copy as is
         const nodeTokens =
           node.metadata?.tokens ??
           (typeof (node as any).content?.value === 'string'
-            ? (node as any).content.value.length / 4
-            : 0);
+            ? estimateTokenCount((node as any).content.value)
+            : node.type === 'Instruction' &&
+                typeof (node as any).subject?.value === 'string'
+              ? estimateTokenCount((node as any).subject.value)
+              : 0);
         newTotalTokens += nodeTokens;
-        return node;
+        newBody.push(node);
       }
-    });
+    }
 
     // If after compression still over budget, warn
     const warnings: string[] = [];
@@ -1502,7 +1743,7 @@ export class PromptCompilerService {
           if (!value) continue;
           let strVal = value;
           let originalTokens =
-            node.metadata?.tokens ?? Math.ceil((strVal?.length ?? 0) / 4);
+            node.metadata?.tokens ?? estimateTokenCount(strVal ?? '');
           let compressedTokens = originalTokens;
           let newValue = strVal;
 
@@ -1520,7 +1761,7 @@ export class PromptCompilerService {
             );
             newValue =
               strVal.substring(0, maxLen) + ' [...] (aggressively truncated)';
-            compressedTokens = Math.ceil(newValue.length / 4);
+            compressedTokens = estimateTokenCount(newValue);
 
             if (node.type === 'Context') {
               compressedBody.push({
@@ -1682,9 +1923,9 @@ export class PromptCompilerService {
   }
 
   /**
-   * Estimate token count (simplified)
+   * Estimate token count via tiktoken when available, else 4-char heuristic.
    */
   private static estimateTokens(text: string): number {
-    return Math.ceil(text.length / 4);
+    return estimateTokenCount(text);
   }
 }

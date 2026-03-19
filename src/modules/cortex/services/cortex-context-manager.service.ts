@@ -455,19 +455,68 @@ export class CortexContextManagerService {
     context: ConversationContext,
     frame: CortexFrame,
   ): void {
-    // Simple entity extraction - in a real implementation this would be more sophisticated
+    const structuredRegexPipeline: Array<{
+      pattern: RegExp;
+      type: string;
+      extractId: (match: RegExpMatchArray) => string | null;
+    }> = [
+      // UUIDs and IDs
+      {
+        pattern: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+        type: 'uuid',
+        extractId: (m) => `uuid_${m[0].toLowerCase()}`,
+      },
+      // Project/file/entity IDs (entity_xxx, project_xxx, etc.)
+      {
+        pattern: /\b(entity|project|file|chunk|repo)_([a-zA-Z0-9_-]+)/g,
+        type: 'identifier',
+        extractId: (m) => `${m[1]}_${m[2]}`,
+      },
+      // PascalCase identifiers (likely classes/names)
+      {
+        pattern: /\b([A-Z][a-z]+(?:[A-Z][a-z]*)+)\b/g,
+        type: 'object',
+        extractId: (m) => `name_${m[1]}`,
+      },
+      // camelCase identifiers (functions, variables) - skip very short
+      {
+        pattern: /\b([a-z][a-zA-Z0-9]{3,})\b/g,
+        type: 'object',
+        extractId: (m) => `identifier_${m[1]}`,
+      },
+      // Numeric IDs
+      {
+        pattern: /\b(?:id|ID|#)\s*[=:]\s*([a-zA-Z0-9_-]+)/g,
+        type: 'identifier',
+        extractId: (m) => `id_${m[1]}`,
+      },
+      // Email addresses
+      {
+        pattern: /\b[\w.-]+@[\w.-]+\.\w+\b/g,
+        type: 'email',
+        extractId: (m) => `email_${m[0].toLowerCase()}`,
+      },
+      // URL-like paths
+      {
+        pattern: /(?:^|\s)([\w.-]+\/[\w./-]+)(?:\s|$)/g,
+        type: 'path',
+        extractId: (m) => (m[1].length > 5 ? `path_${m[1]}` : null),
+      },
+    ];
+
     for (const [role, value] of Object.entries(frame)) {
       if (role === 'frameType' || typeof value !== 'string') continue;
 
-      // Look for entity-like patterns
-      const entityMatches = value.match(/entity_([a-z_]+)/g);
-      if (entityMatches) {
-        for (const match of entityMatches) {
-          const entityId = match;
+      for (const { pattern, type, extractId } of structuredRegexPipeline) {
+        const matches = value.matchAll(pattern);
+        for (const match of matches) {
+          const entityId = extractId(match as RegExpMatchArray);
+          if (!entityId) continue;
+
           if (!context.entities.has(entityId)) {
             const entity: ContextEntity = {
               id: entityId,
-              type: 'object', // Default type
+              type: type as 'object' | 'string' | 'number' | 'boolean',
               name: entityId,
               properties: new Map(),
               relationships: [],

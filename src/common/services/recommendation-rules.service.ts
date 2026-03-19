@@ -4,6 +4,10 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+import { CacheService } from '../cache/cache.service';
+
+const RECOMMENDATIONS_COUNTER_KEY = 'recommendation_rules:recommendations_generated';
+const COUNTER_TTL_YEARS = 10; // Persistent counter - long TTL
 
 export interface SmartRecommendation {
   type:
@@ -55,6 +59,8 @@ export interface ChatGPTPlan {
 export class RecommendationRulesService {
   private readonly logger = new Logger(RecommendationRulesService.name);
 
+  constructor(private readonly cacheService: CacheService) {}
+
   /**
    * Generate rule-based recommendations
    */
@@ -105,7 +111,7 @@ export class RecommendationRulesService {
     }
 
     // Sort by priority and potential savings
-    return recommendations.sort((a, b) => {
+    const sorted = recommendations.sort((a, b) => {
       const priorityOrder = { urgent: 4, high: 3, medium: 2, low: 1 };
       const priorityDiff =
         priorityOrder[b.priority] - priorityOrder[a.priority];
@@ -115,6 +121,23 @@ export class RecommendationRulesService {
       const bSavings = b.potentialSavings?.cost || 0;
       return bSavings - aSavings;
     });
+
+    if (sorted.length > 0) {
+      this.incrementRecommendationsGenerated(sorted.length).catch((err) =>
+        this.logger.warn('Failed to persist recommendations counter', {
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+
+    return sorted;
+  }
+
+  private async incrementRecommendationsGenerated(delta: number): Promise<void> {
+    const ttl = COUNTER_TTL_YEARS * 365 * 24 * 60 * 60;
+    const current =
+      (await this.cacheService.get<number>(RECOMMENDATIONS_COUNTER_KEY)) ?? 0;
+    await this.cacheService.set(RECOMMENDATIONS_COUNTER_KEY, current + delta, ttl);
   }
 
   /**
@@ -559,14 +582,16 @@ export class RecommendationRulesService {
   }
 
   /**
-   * Get recommendations statistics
+   * Get recommendations statistics with persisted counter
    */
-  getStatistics(): {
+  async getStatistics(): Promise<{
     totalRules: number;
     activeRules: string[];
     averageConfidence: number;
     recommendationsGenerated: number;
-  } {
+  }> {
+    const recommendationsGenerated =
+      (await this.cacheService.get<number>(RECOMMENDATIONS_COUNTER_KEY)) ?? 0;
     return {
       totalRules: 9, // Number of rule check methods
       activeRules: [
@@ -581,7 +606,7 @@ export class RecommendationRulesService {
         'checkCostSpike',
       ],
       averageConfidence: 0.85,
-      recommendationsGenerated: 0, // Would track this in production
+      recommendationsGenerated,
     };
   }
 }

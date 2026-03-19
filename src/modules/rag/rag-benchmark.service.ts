@@ -5,6 +5,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { RagServiceLocator } from './rag-service-locator';
+import { RAGEvaluationService } from './evaluation/metrics';
 
 export interface BenchmarkResult {
   pattern: string;
@@ -47,7 +48,10 @@ export class RagBenchmarkService {
     'What are reserved instances?',
   ];
 
-  constructor(private readonly ragServiceLocator: RagServiceLocator) {}
+  constructor(
+    private readonly ragServiceLocator: RagServiceLocator,
+    private readonly ragEvaluationService: RAGEvaluationService,
+  ) {}
 
   /**
    * Benchmark a single pattern
@@ -101,8 +105,10 @@ export class RagBenchmarkService {
 
         const latency = Date.now() - startTime;
 
-        // Basic evaluation (simplified - full evaluation would use dedicated service)
-        const evaluationMetrics = this.basicEvaluation(query, result);
+        const evaluationMetrics = await this.evaluateWithService(
+          query,
+          result,
+        );
 
         const benchmarkResult: BenchmarkResult = {
           pattern,
@@ -287,39 +293,66 @@ export class RagBenchmarkService {
   }
 
   /**
-   * Basic evaluation (simplified - would use dedicated evaluation service in production)
+   * Evaluate using RAGEvaluationService (RAGAS-aligned metrics)
    */
-  private basicEvaluation(
+  private async evaluateWithService(
     query: string,
     result: any,
-  ): BenchmarkResult['evaluationMetrics'] {
+  ): Promise<BenchmarkResult['evaluationMetrics']> {
     if (!result.success || !result.answer) {
       return undefined;
     }
 
-    // Simple heuristics for evaluation
+    try {
+      const documents = result.documents ?? result.context ?? [];
+      const evalResult = await this.ragEvaluationService.evaluate(
+        query,
+        Array.isArray(documents)
+          ? documents.map((d: any) => (typeof d === 'string' ? { pageContent: d } : d))
+          : [],
+        result.answer,
+      );
+
+      const m = evalResult.metrics;
+      return {
+        contextRelevance: m.relevance ?? 0.5,
+        answerFaithfulness: m.faithfulness ?? 0.5,
+        answerRelevance: m.answerCorrectness ?? 0.5,
+        overall: m.overall ?? 0.5,
+      };
+    } catch (error) {
+      this.logger.warn('RAG evaluation service failed, using fallback', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return this.basicEvaluationFallback(query, result);
+    }
+  }
+
+  /**
+   * Fallback heuristic evaluation when RAGEvaluationService fails
+   */
+  private basicEvaluationFallback(
+    query: string,
+    result: any,
+  ): BenchmarkResult['evaluationMetrics'] {
+    if (!result.answer) return undefined;
+
     const answer = result.answer.toLowerCase();
-    const queryWords = query.toLowerCase().split(/\s+/);
-
-    // Context relevance: how many query terms appear in answer
-    const queryTermMatches = queryWords.filter(
-      (word) => word.length > 3 && answer.includes(word),
-    ).length;
-    const contextRelevance = Math.min(
-      1.0,
-      queryTermMatches / queryWords.length,
-    );
-
-    // Answer faithfulness: check for consistency with provided context
+    const queryWords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+    const contextRelevance =
+      queryWords.length > 0
+        ? Math.min(
+            1.0,
+            queryWords.filter((w) => answer.includes(w)).length /
+              queryWords.length,
+          )
+        : 0.5;
     const answerFaithfulness = this.calculateAnswerFaithfulness(
       query,
       result.answer,
       result.context || [],
     );
-
-    // Answer relevance: assume good if answer length is reasonable
     const answerRelevance = result.answer.length > 50 ? 0.9 : 0.6;
-
     const overall =
       (contextRelevance + answerFaithfulness + answerRelevance) / 3;
 

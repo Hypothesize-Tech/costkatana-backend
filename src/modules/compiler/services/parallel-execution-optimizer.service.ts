@@ -278,16 +278,36 @@ export class ParallelExecutionOptimizerService {
   private async traverseAST(ast: ASTProgram): Promise<DependencyNode[]> {
     const nodes: DependencyNode[] = [];
 
-    // Simplified AST traversal - would analyze actual AST structure
+    // Build definition map: variable name -> node id that defines it (last write wins per scope)
+    const varToNodeId = new Map<string, string>();
     for (let i = 0; i < ast.body.length; i++) {
       const node = ast.body[i];
-      const dependencies = this.findNodeDependencies(node, ast);
+      const defVars = this.findDefinedVariables(node);
+      for (const v of defVars) {
+        varToNodeId.set(v, `node_${i}`);
+      }
+    }
+
+    for (let i = 0; i < ast.body.length; i++) {
+      const node = ast.body[i];
+      const usedVars = this.findNodeDependencies(node, ast);
+      const dependencyNodeIds: string[] = [];
+      for (const dep of usedVars) {
+        const definerId = dep.startsWith('node_')
+          ? dep
+          : varToNodeId.get(dep);
+        if (!definerId || definerId === `node_${i}`) continue;
+        const definerIdx = parseInt(definerId.replace('node_', ''), 10);
+        if (definerIdx < i && !dependencyNodeIds.includes(definerId)) {
+          dependencyNodeIds.push(definerId);
+        }
+      }
 
       nodes.push({
         id: `node_${i}`,
         node,
-        dependencies,
-        dependents: [], // Will be filled later
+        dependencies: dependencyNodeIds,
+        dependents: [],
         weight: 1,
         canParallelize: this.canNodeBeParallelized(node),
         estimatedTime: this.estimateNodeExecutionTime(node),
@@ -295,7 +315,6 @@ export class ParallelExecutionOptimizerService {
       });
     }
 
-    // Fill dependents
     for (const node of nodes) {
       for (const dep of node.dependencies) {
         const depNode = nodes.find((n) => n.id === dep);
@@ -308,36 +327,58 @@ export class ParallelExecutionOptimizerService {
     return nodes;
   }
 
-  private findNodeDependencies(node: ASTNode, ast: ASTProgram): string[] {
-    // Real dependency analysis - analyze actual AST references
+  private findDefinedVariables(node: ASTNode): string[] {
+    const vars: string[] = [];
+    if (node.type === 'assignment' && 'left' in node) {
+      const left = (node as any).left;
+      if (left?.type === 'identifier' && left.name) {
+        vars.push(left.name);
+      }
+    }
+    if (node.type === 'variable_declaration' && 'name' in node) {
+      vars.push((node as any).name);
+    }
+    if (node.type === 'block' && 'statements' in node) {
+      for (const stmt of (node as any).statements || []) {
+        vars.push(...this.findDefinedVariables(stmt));
+      }
+    }
+    return vars;
+  }
+
+  private findNodeDependencies(node: ASTNode, _ast: ASTProgram): string[] {
     const dependencies: string[] = [];
 
-    // Check for variable dependencies in expressions
-    if (node.type === 'expression' && 'dependencies' in node) {
-      dependencies.push(...((node as any).dependencies || []));
+    // Extract variable usages from expressions (right side of assignment, conditionals, etc.)
+    if (node.type === 'assignment' && 'right' in node) {
+      this.extractVariableDependencies((node as any).right, dependencies);
+    } else if (
+      node.type === 'conditional' &&
+      ('condition' in node || 'test' in node)
+    ) {
+      const cond = (node as any).condition ?? (node as any).test;
+      this.extractVariableDependencies(cond, dependencies);
+    } else if (node.type === 'expression' || node.type === 'function_call') {
+      this.extractVariableDependencies(node as any, dependencies);
     }
 
-    // Check for dependencies in statements
     if (node.type === 'block' && 'statements' in node) {
       for (const child of (node as any).statements || []) {
-        dependencies.push(...this.findNodeDependencies(child, ast));
+        dependencies.push(...this.findNodeDependencies(child as ASTNode, _ast));
       }
     }
 
-    // Check for dependencies in assignments
-    if (node.type === 'assignment' && 'left' in node) {
-      const leftNode = (node as any).left;
-      if (leftNode?.type === 'identifier' && leftNode.name) {
-        dependencies.push(leftNode.name);
-      }
-    }
-
-    // Check for explicit dependencies
     if ('dependencies' in node && Array.isArray((node as any).dependencies)) {
-      dependencies.push(...(node as any).dependencies);
+      const explicit = (node as any).dependencies;
+      for (const d of explicit) {
+        if (typeof d === 'string' && d.startsWith('node_')) {
+          dependencies.push(d);
+        } else if (typeof d === 'string') {
+          dependencies.push(d);
+        }
+      }
     }
 
-    // Remove duplicates
     return [...new Set(dependencies)];
   }
 
@@ -549,7 +590,6 @@ export class ParallelExecutionOptimizerService {
   }
 
   private detectCycles(edges: ASTDependencyGraph['edges']): string[][] {
-    // Simplified cycle detection using DFS
     const cycles: string[][] = [];
     const visited = new Set<string>();
     const recursionStack = new Set<string>();
@@ -1237,45 +1277,105 @@ export class ParallelExecutionOptimizerService {
 
   private findCriticalPath(
     timelineSteps: ExecutionTimeline['steps'],
-    dependencies: ASTDependencyGraph,
+    dependencies: ASTDependencyGraph | Record<string, string[]>,
   ): string[] {
-    // Simplified critical path finding - return the step with maximum end time
     if (timelineSteps.length === 0) return [];
 
-    let criticalStep = timelineSteps[0];
-    for (const step of timelineSteps) {
-      if (step.endTime > criticalStep.endTime) {
-        criticalStep = step;
+    const stepMap = new Map(
+      timelineSteps.map((s) => [s.stepId, s]),
+    );
+    const stepIds = new Set(stepMap.keys());
+
+    // Build predecessor map: depGraph[from] = [to1, to2] means from depends on to1, to2
+    const pred = new Map<string, string[]>();
+    const depRecord =
+      'nodes' in dependencies && 'edges' in dependencies
+        ? Object.fromEntries(
+            Array.from((dependencies as ASTDependencyGraph).nodes.keys()).map(
+              (id) => [
+                id,
+                (dependencies as ASTDependencyGraph).edges
+                  .filter((e) => e.from === id)
+                  .map((e) => e.to)
+                  .filter((x) => stepIds.has(x)),
+              ],
+            ),
+          )
+        : (dependencies as Record<string, string[]>);
+    for (const [id, deps] of Object.entries(depRecord)) {
+      if (Array.isArray(deps)) {
+        pred.set(id, deps.filter((d) => stepIds.has(d)));
       }
     }
-
-    return [criticalStep.stepId];
-  }
-
-  private buildExecutionGraph(
-    timelineSteps: ExecutionTimeline['steps'],
-    dependencies: ASTDependencyGraph,
-  ): Map<string, string[]> {
-    const graph = new Map<string, string[]>();
-
-    // Initialize graph
-    for (const step of timelineSteps) {
-      graph.set(step.stepId, []);
+    for (const id of stepIds) {
+      if (!pred.has(id)) pred.set(id, []);
     }
 
-    // Add edges based on dependencies
-    for (const [fromId, deps] of Object.entries(dependencies)) {
-      if (graph.has(fromId)) {
-        for (const toId of deps) {
-          if (graph.has(toId)) {
-            graph.get(fromId)!.push(toId);
-          }
+    // Longest path from each node to sink (reverse graph: successors)
+    const succ = new Map<string, string[]>();
+    for (const [id, deps] of pred) {
+      for (const d of deps) {
+        if (!succ.has(d)) succ.set(d, []);
+        succ.get(d)!.push(id);
+      }
+    }
+    const topoOrder = this.topoSort(timelineSteps.map((s) => s.stepId), pred);
+    const longestFrom = new Map<string, number>();
+    const nextOnPath = new Map<string, string>();
+    for (const id of topoOrder.reverse()) {
+      const step = stepMap.get(id);
+      const duration = step ? step.endTime - step.startTime : 0;
+      const succIds = succ.get(id) || [];
+      let maxSucc = 0;
+      let bestNext = '';
+      for (const s of succIds) {
+        const v = longestFrom.get(s) ?? 0;
+        if (v > maxSucc) {
+          maxSucc = v;
+          bestNext = s;
         }
       }
+      longestFrom.set(id, duration + maxSucc);
+      if (bestNext) nextOnPath.set(id, bestNext);
     }
-
-    return graph;
+    const startIds = topoOrder.filter((id) => (pred.get(id) || []).length === 0);
+    let bestStart = startIds[0];
+    let bestLen = 0;
+    for (const s of startIds) {
+      const len = longestFrom.get(s) ?? 0;
+      if (len > bestLen) {
+        bestLen = len;
+        bestStart = s;
+      }
+    }
+    const path: string[] = [];
+    for (let id: string | undefined = bestStart; id; id = nextOnPath.get(id)) {
+      path.push(id);
+    }
+    return path;
   }
+
+  private topoSort(
+    ids: string[],
+    pred: Map<string, string[]>,
+  ): string[] {
+    const result: string[] = [];
+    const visited = new Set<string>();
+    const visit = (id: string) => {
+      if (visited.has(id)) return;
+      visited.add(id);
+      for (const p of pred.get(id) || []) {
+        visit(p);
+      }
+      result.push(id);
+    };
+    for (const id of ids) {
+      visit(id);
+    }
+    return result;
+  }
+
+
 
   private identifyBottlenecks(
     timelineSteps: ExecutionTimeline['steps'],

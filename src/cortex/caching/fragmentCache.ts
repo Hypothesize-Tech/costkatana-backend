@@ -60,6 +60,8 @@ export interface FragmentIdentification {
 export class FragmentCacheManager {
   private readonly cachePrefix = 'cortex:fragment:';
   private readonly metadataPrefix = 'cortex:fragment:meta:';
+  /** Redis Set key prefix for O(1) dependency→fragment lookup: cortex:fragment:dep:{depKey} */
+  private readonly depIndexPrefix = 'cortex:fragment:dep:';
   private fragmentStats = new Map<
     FragmentType,
     { hits: number; misses: number; savings: number }
@@ -353,12 +355,14 @@ export class FragmentCacheManager {
 
   /**
    * Set cached fragment
+   * @param dependencies - Optional list of dependency keys for O(1) invalidation via reverse index
    */
   public async setFragment(
     key: string,
     value: any,
     type: FragmentType,
     ttl?: number,
+    dependencies?: string[],
   ): Promise<void> {
     try {
       const cacheKey = `${this.cachePrefix}${key}`;
@@ -373,12 +377,13 @@ export class FragmentCacheManager {
           created: new Date(),
           ttl: ttl || this.calculateFragmentTTL(type, {} as CortexExpression),
           size: JSON.stringify(value).length,
+          dependencies,
         },
       };
 
       await getCacheService().set(cacheKey, fragment, fragment.metadata.ttl);
 
-      // Store metadata separately for analytics
+      // Store metadata and maintain reverse index for O(1) dependency invalidation
       await this.storeFragmentMetadata(key, fragment.metadata);
 
       loggingService.debug('Fragment cached', {
@@ -416,15 +421,17 @@ export class FragmentCacheManager {
    * Invalidate fragments based on dependencies
    */
   public async invalidateFragments(dependencies: string[]): Promise<void> {
-    // Find all fragments that depend on these keys
     const keysToInvalidate = await this.findDependentFragments(dependencies);
+    const cache = getCacheService();
 
-    // Invalidate each fragment
-    const promises = keysToInvalidate.map((key) =>
-      getCacheService().delete(`${this.cachePrefix}${key}`),
-    );
-
-    await Promise.all(promises);
+    for (const key of keysToInvalidate) {
+      await cache.delete(`${this.cachePrefix}${key}`);
+      // Remove from reverse index to prevent stale set entries
+      for (const dep of dependencies) {
+        const depIndexKey = `${this.depIndexPrefix}${dep}`;
+        await cache.srem(depIndexKey, key);
+      }
+    }
 
     loggingService.info('Fragments invalidated', {
       dependencies,
@@ -433,35 +440,43 @@ export class FragmentCacheManager {
   }
 
   /**
-   * Find fragments that depend on given keys
+   * Find fragments that depend on given keys.
+   * Uses Redis Set reverse index for O(1) lookup when available.
    */
   private async findDependentFragments(
     dependencies: string[],
   ): Promise<string[]> {
-    // Query metadata to find dependent fragments
-    const dependentKeys: string[] = [];
-
-    // Get all metadata keys from cache
-    const pattern = `${this.metadataPrefix}*`;
+    const dependentKeysSet = new Set<string>();
 
     try {
-      // Scan through all metadata entries to find dependencies
-      // Note: In production, this should use a proper index or database
+      const cache = getCacheService();
+
+      // O(1) path: use Redis Set reverse index (dep -> fragment keys)
+      for (const dep of dependencies) {
+        const depIndexKey = `${this.depIndexPrefix}${dep}`;
+        const fragmentKeys = await cache.smembers(depIndexKey);
+        fragmentKeys.forEach((k) => dependentKeysSet.add(k));
+      }
+
+      if (dependentKeysSet.size > 0) {
+        return Array.from(dependentKeysSet);
+      }
+
+      // Fallback: scan metadata for fragments without index (e.g. pre-migration)
+      const pattern = `${this.metadataPrefix}*`;
       const allKeys = await this.getAllCacheKeys(pattern);
 
       for (const metaKey of allKeys) {
-        const metadata = (await getCacheService().get(metaKey)) as any;
+        const metadata = (await cache.get(metaKey)) as any;
 
         if (metadata && metadata.dependencies) {
-          // Check if this fragment depends on any of the given keys
           const hasDependency = dependencies.some((dep) =>
             metadata.dependencies.includes(dep),
           );
 
           if (hasDependency) {
-            // Extract the fragment key from the metadata key
             const fragmentKey = metaKey.replace(this.metadataPrefix, '');
-            dependentKeys.push(fragmentKey);
+            dependentKeysSet.add(fragmentKey);
           }
         }
       }
@@ -469,7 +484,7 @@ export class FragmentCacheManager {
       loggingService.warn('Failed to find dependent fragments', { error });
     }
 
-    return dependentKeys;
+    return Array.from(dependentKeysSet);
   }
 
   /**
@@ -509,7 +524,7 @@ export class FragmentCacheManager {
   }
 
   /**
-   * Store fragment metadata
+   * Store fragment metadata and maintain Redis Set reverse index for O(1) invalidation.
    */
   private async storeFragmentMetadata(
     key: string,
@@ -517,6 +532,14 @@ export class FragmentCacheManager {
   ): Promise<void> {
     const metaKey = `${this.metadataPrefix}${key}`;
     await getCacheService().set(metaKey, metadata, metadata.ttl);
+
+    if (metadata?.dependencies?.length) {
+      const cache = getCacheService();
+      for (const dep of metadata.dependencies) {
+        const depIndexKey = `${this.depIndexPrefix}${dep}`;
+        await cache.sadd(depIndexKey, key);
+      }
+    }
   }
 
   /**

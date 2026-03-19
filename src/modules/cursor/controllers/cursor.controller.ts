@@ -5,12 +5,11 @@ import {
   Body,
   Logger,
   UseGuards,
-  Optional,
-  Inject,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { CursorService } from '../services/cursor.service';
+import { MagicLinkService } from '../../onboarding/magic-link.service';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { ApiKeyGuard } from '../../../common/guards/api-key.guard';
 import { User } from '../../../schemas/user/user.schema';
@@ -82,6 +81,7 @@ export class CursorController {
     private readonly cursorService: CursorService,
     @InjectModel(User.name) private userModel: Model<User>,
     private readonly encryptionService: EncryptionService,
+    private readonly magicLinkService: MagicLinkService,
   ) {}
 
   /**
@@ -274,7 +274,44 @@ export class CursorController {
 
   @Post('track-usage')
   async trackUsageEndpoint(@Body() body: CursorRequestBody) {
-    const userId = body.user_id || 'extension-user-id';
+    let userId: string | null = null;
+
+    if (body.user_id) {
+      if (!this.isValidUserId(body.user_id)) {
+        return {
+          success: false,
+          error: 'invalid_user_id',
+          message: 'Invalid user ID format',
+        };
+      }
+      userId = body.user_id;
+    } else if (body.api_key) {
+      const apiKeyValidation = await this.validateApiKey(body.api_key);
+      if (!apiKeyValidation.isValid) {
+        return {
+          success: false,
+          error: 'invalid_api_key',
+          message: 'Invalid or expired API key',
+        };
+      }
+      userId = apiKeyValidation.userId ?? null;
+    }
+
+    if (!userId) {
+      this.logger.warn('Track usage failed - authentication required', {
+        hasUserId: !!body.user_id,
+        hasApiKey: !!body.api_key,
+      });
+      return {
+        success: false,
+        error: 'authentication_required',
+        onboarding: true,
+        message:
+          'Authentication required. Provide user_id or api_key. Use generate_magic_link to onboard.',
+        next_action: 'generate_magic_link',
+      };
+    }
+
     return await this.trackUsage(userId, body);
   }
 
@@ -323,7 +360,7 @@ export class CursorController {
   // ============================================================================
 
   private async generateMagicLink(body: CursorRequestBody) {
-    const { email } = body;
+    const { email, name } = body;
 
     if (!email) {
       return {
@@ -333,17 +370,47 @@ export class CursorController {
       };
     }
 
-    const magicLink = `https://api.costkatana.com/auth/magic-link?token=${Buffer.from(email).toString('base64')}&expires=${Date.now() + 900000}`;
+    try {
+      const existingUser = await this.userModel.findOne({ email }).exec();
+      if (!existingUser) {
+        this.logger.log(
+          `Creating minimal user record for Cursor extension user: ${email}`,
+        );
+        await this.userModel.create({
+          email,
+          name: name || email.split('@')[0],
+          source: 'cursor',
+          isEmailVerified: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      }
 
-    return {
-      success: true,
-      data: {
-        magic_link: magicLink,
-        user_id: null, // User doesn't exist yet during onboarding
+      await this.magicLinkService.requestMagicLink(email);
+
+      return {
+        success: true,
+        data: {
+          message:
+            'Magic link sent to your email! Check your inbox and click the link to complete setup. The link expires in 24 hours.',
+          expires_in_hours: 24,
+          instructions: [
+            'Check your email for the magic link',
+            'Click the link to complete your account setup',
+            'Copy your API key from the dashboard',
+            'Configure the Cursor extension with your API key',
+          ],
+        },
+      };
+    } catch (error) {
+      this.logger.error('Magic link generation failed', { email, error });
+      return {
+        success: false,
+        error: 'magic_link_failed',
         message:
-          'Magic link generated successfully! Check your email to complete setup.',
-      },
-    };
+          error instanceof Error ? error.message : 'Failed to send magic link',
+      };
+    }
   }
 
   private async trackUsage(userId: string, body: CursorRequestBody) {

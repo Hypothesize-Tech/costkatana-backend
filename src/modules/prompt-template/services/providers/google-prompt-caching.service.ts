@@ -9,6 +9,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import axios from 'axios';
 import {
   GeminiCache,
   GeminiCacheDocument,
@@ -221,24 +222,121 @@ export class GooglePromptCachingService {
   }
 
   /**
-   * Create cached content (simulate API call)
+   * Create cached content via the real Gemini cachedContents API.
+   * Calls POST https://generativelanguage.googleapis.com/v1beta/cachedContents
    */
   async createCachedContent(
     content: GeminiCacheContent[],
     model: string,
     ttlHours: number = 1,
   ): Promise<GeminiCachedContent> {
+    const apiKey = this.configService.get<string>('GOOGLE_AI_API_KEY');
+    if (!apiKey) {
+      this.logger.warn(
+        'GOOGLE_AI_API_KEY not configured - cannot create real Gemini cache',
+      );
+      return this.createCachedContentFallback(content, model, ttlHours);
+    }
+
+    const modelName = model.startsWith('models/') ? model : `models/${model}`;
+    const ttlSeconds = Math.min(
+      Math.max(ttlHours * 3600, 300),
+      86400,
+    ); // 5 min - 24h
+    const displayName = `Cache-${Date.now()}`;
+
+    const requestBody = {
+      model: modelName,
+      displayName,
+      contents: content,
+      ttl: `${ttlSeconds}s`,
+    };
+
+    try {
+      const response = await axios.post<{
+        name?: string;
+        displayName?: string;
+        model?: string;
+        createTime?: string;
+        updateTime?: string;
+        expireTime?: string;
+        usageMetadata?: { totalTokenCount?: number };
+      }>(
+        `https://generativelanguage.googleapis.com/v1beta/cachedContents`,
+        requestBody,
+        {
+          params: { key: apiKey },
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 30000,
+        },
+      );
+
+      const data = response.data;
+      const name = data.name || '';
+      const cacheId = name.replace('cachedContents/', '');
+
+      const cachedContent: GeminiCachedContent = {
+        name,
+        displayName: data.displayName || displayName,
+        model: data.model || model,
+        createTime: data.createTime || new Date().toISOString(),
+        updateTime: data.updateTime || data.createTime || new Date().toISOString(),
+        expireTime: data.expireTime || new Date(Date.now() + ttlHours * 3600 * 1000).toISOString(),
+        content: content[0],
+        usageMetadata: data.usageMetadata,
+      };
+
+      try {
+        await this.geminiCacheModel.create({
+          id: cacheId,
+          content: Array.isArray(cachedContent.content)
+            ? cachedContent.content
+            : [cachedContent.content],
+          modelName: cachedContent.model,
+          displayName: cachedContent.displayName,
+          createdAt: new Date(),
+          expiresAt: new Date(cachedContent.expireTime),
+          usageCount: 0,
+          metadata: cachedContent.usageMetadata,
+        });
+      } catch (dbError) {
+        this.logger.warn('Failed to persist cache metadata to DB', {
+          cacheId,
+          error: dbError instanceof Error ? dbError.message : String(dbError),
+        });
+      }
+
+      this.logger.log(
+        `Created Gemini cached content via API: ${name}, ${data.usageMetadata?.totalTokenCount ?? 0} tokens`,
+      );
+
+      return cachedContent;
+    } catch (error: unknown) {
+      this.logger.error('Gemini cachedContents API call failed', {
+        model,
+        error: error instanceof Error ? error.message : String(error),
+        response: axios.isAxiosError(error) ? error.response?.data : undefined,
+      });
+      return this.createCachedContentFallback(content, model, ttlHours);
+    }
+  }
+
+  /**
+   * Fallback when API is unavailable - stores locally and returns shape compatible with generateContent.
+   * Callers should handle that cached content may not be recognized by Gemini in this case.
+   */
+  private async createCachedContentFallback(
+    content: GeminiCacheContent[],
+    model: string,
+    ttlHours: number,
+  ): Promise<GeminiCachedContent> {
     const cacheId = this.generateCacheId();
     const now = new Date();
     const expireTime = new Date(now.getTime() + ttlHours * 60 * 60 * 1000);
-
-    // Calculate total tokens
     let totalTokens = 0;
     for (const msg of content) {
       for (const part of msg.parts) {
-        if (part.text) {
-          totalTokens += Math.ceil(part.text.length / 4);
-        }
+        if (part.text) totalTokens += Math.ceil(part.text.length / 4);
       }
     }
 
@@ -249,40 +347,26 @@ export class GooglePromptCachingService {
       createTime: now.toISOString(),
       updateTime: now.toISOString(),
       expireTime: expireTime.toISOString(),
-      content: content[0], // Gemini typically caches one content block
-      usageMetadata: {
-        totalTokenCount: totalTokens,
-      },
+      content: content[0],
+      usageMetadata: { totalTokenCount: totalTokens },
     };
 
-    // Store in database
-    try {
-      const cacheDoc = new this.geminiCacheModel({
-        id: cacheId,
-        content: Array.isArray(cachedContent.content)
-          ? cachedContent.content
-          : [cachedContent.content],
-        modelName: cachedContent.model,
-        displayName: cachedContent.displayName,
-        createdAt: now,
-        expiresAt: expireTime,
-        usageCount: 0,
-        metadata: cachedContent.usageMetadata,
-      });
+    await this.geminiCacheModel.create({
+      id: cacheId,
+      content: Array.isArray(cachedContent.content)
+        ? cachedContent.content
+        : [cachedContent.content],
+      modelName: cachedContent.model,
+      displayName: cachedContent.displayName,
+      createdAt: now,
+      expiresAt: expireTime,
+      usageCount: 0,
+      metadata: cachedContent.usageMetadata,
+    });
 
-      await cacheDoc.save();
-
-      this.logger.log(
-        `Created cached content: ${cacheId}, ${totalTokens} tokens, TTL: ${ttlHours}h`,
-      );
-    } catch (error) {
-      this.logger.error('Failed to save cached content to database', {
-        cacheId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
-
+    this.logger.warn(
+      `Used fallback cache creation (not recognized by Gemini): ${cacheId}`,
+    );
     return cachedContent;
   }
 

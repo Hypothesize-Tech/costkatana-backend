@@ -344,11 +344,11 @@ export class TokenCounterService {
     // Estimate reading time (words per minute)
     const estimatedReadingTime = Math.max(0.1, words / 200);
 
-    // Rough token estimation using different strategies
+    // Use model-specific tokenizer for accurate counts
     const tokens = this.estimateTokenCount(text, options.model);
 
-    // Breakdown (simplified - in reality would use proper tokenization)
-    const breakdown = this.analyzeTokenBreakdown(text);
+    // Per-segment breakdown using gpt-tokenizer (tiktoken-compatible) for OpenAI/Claude
+    const breakdown = this.analyzeTokenBreakdown(text, options.model);
 
     return {
       tokens,
@@ -474,50 +474,63 @@ export class TokenCounterService {
   }
 
   /**
-   * Analyze token breakdown by content type using proper tokenization
-   * Now uses gpt-tokenizer for accurate token counting with pattern-based classification
+   * Analyze token breakdown by content type using provider-appropriate tokenizers.
+   * Uses gpt-tokenizer (tiktoken-compatible) for OpenAI and Anthropic models.
    */
-  private analyzeTokenBreakdown(text: string): TokenCountResult['breakdown'] {
-    // Use proper tokenizer to get actual token array
-    let tokenArray: number[] = [];
-    try {
-      tokenArray = gptEncode(text);
-    } catch (error) {
-      this.logger.warn('Failed to tokenize text, using heuristic breakdown');
-      return this.heuristicTokenBreakdown(text);
+  private analyzeTokenBreakdown(
+    text: string,
+    model?: string,
+  ): TokenCountResult['breakdown'] {
+    const useTokenizer =
+      !model || this.isOpenAIModel(model) || this.isAnthropicModel(model);
+    if (useTokenizer) {
+      try {
+        const tokens = gptEncode(text);
+        if (tokens.length === 0 && text.length > 0) {
+          return this.heuristicTokenBreakdown(text);
+        }
+        return this.tokenizeAndClassifyBreakdown(text, tokens);
+      } catch (error) {
+        this.logger.warn('Tokenizer failed, using heuristic breakdown', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
+    return this.heuristicTokenBreakdown(text);
+  }
 
-    // Pattern-based classification with actual token positions
+  private tokenizeAndClassifyBreakdown(
+    text: string,
+    tokenArray: number[],
+  ): TokenCountResult['breakdown'] {
+
     const codePatterns = [
-      /```[\s\S]*?```/g, // Code blocks
-      /`[^`\n]+`/g, // Inline code
+      /```[\s\S]*?```/g,
+      /`[^`\n]+`/g,
       /\b(function|class|const|let|var|import|export|async|await|try|catch|for|while|if|else|return|throw)\b\s+\w+/g,
-      /\b\d+\.\d+|\b\d+\b/g, // Numbers
+      /\b\d+\.\d+|\b\d+\b/g,
     ];
 
     const markupPatterns = [
-      /^#{1,6}\s.*$/gm, // Headers
-      /^>\s.*$/gm, // Blockquotes
-      /\*\*[^*]+\*\*/g, // Bold
-      /\*[^*]+\*/g, // Italic
-      /_.*?_/g, // Underlined/italic
-      /^[-*+]\s.*$/gm, // List items
-      /^\d+\.\s.*$/gm, // Numbered lists
-      /\[([^\]]+)\]\(([^)]+)\)/g, // Links
-      /\|[^\n]*\|/g, // Tables
+      /^#{1,6}\s.*$/gm,
+      /^>\s.*$/gm,
+      /\*\*[^*]+\*\*/g,
+      /\*[^*]+\*/g,
+      /_.*?_/g,
+      /^[-*+]\s.*$/gm,
+      /^\d+\.\s.*$/gm,
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      /\|[^\n]*\|/g,
     ];
 
-    // Calculate character positions for each pattern type
     const codeRanges = this.extractPatternRanges(text, codePatterns);
     const markupRanges = this.extractPatternRanges(text, markupPatterns);
 
-    // Count tokens by type based on character positions
     let codeTokens = 0;
     let markupTokens = 0;
     let whitespaceTokens = 0;
     let textTokens = 0;
 
-    // Tokenize by segments for accurate classification
     const segments = this.segmentTextByRanges(text, codeRanges, markupRanges);
 
     for (const segment of segments) {

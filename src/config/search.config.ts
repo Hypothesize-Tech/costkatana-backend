@@ -1,49 +1,80 @@
 /**
  * Google Search API Configuration
- * All settings are hardcoded for simplicity - only API key and Engine ID are from env
+ * Values from environment variables with sensible defaults
  */
 
+const DEFAULT_COST_DOMAINS = [
+  'aws.amazon.com',
+  'cloud.google.com',
+  'learn.microsoft.com',
+  'azure.microsoft.com',
+  'pricing.aws.amazon.com',
+  'azure.microsoft.com/pricing',
+  'openai.com',
+  'anthropic.com',
+  'cohere.com',
+  'ai.meta.com',
+  'ai.google.dev',
+  'mistral.ai',
+  'huggingface.co',
+  'replicate.com',
+  'together.ai',
+  'perplexity.ai',
+  'claude.ai',
+  'gemini.google.com',
+];
+
+function getCostDomains(): string[] {
+  const env = process.env.SEARCH_COST_DOMAINS;
+  if (env && env.trim()) {
+    return env.split(',').map((d) => d.trim()).filter(Boolean);
+  }
+  return DEFAULT_COST_DOMAINS;
+}
+
 export const SEARCH_CONFIG = {
-  // Cache configuration
-  CACHE_TTL: 3600, // 1 hour in seconds
+  // Cache configuration (env: SEARCH_CACHE_TTL)
+  CACHE_TTL: parseInt(
+    process.env.SEARCH_CACHE_TTL ?? '3600',
+    10,
+  ) as number,
 
-  // Search limits
-  MAX_RESULTS: 10,
-  DAILY_QUOTA_LIMIT: 100,
-  DEEP_CONTENT_PAGES: 5,
+  // Search limits (env: SEARCH_MAX_RESULTS, SEARCH_DAILY_QUOTA_LIMIT, SEARCH_DEEP_CONTENT_PAGES)
+  MAX_RESULTS: parseInt(process.env.SEARCH_MAX_RESULTS ?? '10', 10) as number,
+  DAILY_QUOTA_LIMIT: parseInt(
+    process.env.SEARCH_DAILY_QUOTA_LIMIT ?? '100',
+    10,
+  ) as number,
+  DEEP_CONTENT_PAGES: parseInt(
+    process.env.SEARCH_DEEP_CONTENT_PAGES ?? '5',
+    10,
+  ) as number,
 
-  // Cost intelligence domains (auto-filtered for pricing/cost queries)
-  COST_DOMAINS: [
-    'aws.amazon.com',
-    'cloud.google.com',
-    'learn.microsoft.com',
-    'azure.microsoft.com',
-    'pricing.aws.amazon.com',
-    'azure.microsoft.com/pricing',
-    'openai.com',
-    'anthropic.com',
-    'cohere.com',
-    'ai.meta.com',
-    'ai.google.dev',
-    'mistral.ai',
-    'huggingface.co',
-    'replicate.com',
-    'together.ai',
-    'perplexity.ai',
-    'claude.ai',
-    'gemini.google.com',
-  ],
+  // Cost intelligence domains (env: SEARCH_COST_DOMAINS, comma-separated)
+  COST_DOMAINS: getCostDomains(),
 
-  // API configuration
-  GOOGLE_SEARCH_API_URL: 'https://www.googleapis.com/customsearch/v1',
+  // API configuration (env: SEARCH_API_URL)
+  GOOGLE_SEARCH_API_URL:
+    process.env.SEARCH_API_URL ??
+    'https://www.googleapis.com/customsearch/v1',
 
-  // Quota tracking
-  QUOTA_WARNING_THRESHOLD: 0.8, // Warn at 80%
-  QUOTA_BLOCK_THRESHOLD: 0.9, // Block at 90%
+  // Quota tracking (env: SEARCH_QUOTA_WARNING_THRESHOLD, SEARCH_QUOTA_BLOCK_THRESHOLD)
+  QUOTA_WARNING_THRESHOLD: parseFloat(
+    process.env.SEARCH_QUOTA_WARNING_THRESHOLD ?? '0.8',
+  ) as number,
+  QUOTA_BLOCK_THRESHOLD: parseFloat(
+    process.env.SEARCH_QUOTA_BLOCK_THRESHOLD ?? '0.9',
+  ) as number,
 
-  // Content extraction
-  CONTENT_TIMEOUT: 10000, // 10 seconds per page
-  MAX_CONTENT_LENGTH: 50000, // 50KB max per page
+  // Content extraction (env: SEARCH_CONTENT_TIMEOUT, SEARCH_MAX_CONTENT_LENGTH)
+  CONTENT_TIMEOUT: parseInt(
+    process.env.SEARCH_CONTENT_TIMEOUT ?? '10000',
+    10,
+  ) as number,
+  MAX_CONTENT_LENGTH: parseInt(
+    process.env.SEARCH_MAX_CONTENT_LENGTH ?? '50000',
+    10,
+  ) as number,
 };
 
 export interface SearchResult {

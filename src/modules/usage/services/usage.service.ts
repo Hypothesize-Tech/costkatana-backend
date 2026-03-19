@@ -2398,17 +2398,13 @@ Identify any anomalies in cost or token usage patterns. Return a JSON object wit
         throw new Error('No billing accounts found');
       }
 
-      const billingAccountId = billingAccounts.data.accounts[0].name;
-
-      // Query usage reports (this is a simplified example)
-      // Note: The actual Cloud Billing API structure may be different
-      const usageReports = await billing.billingAccounts.usageReports.list({
-        auth: authClient,
-        parent: billingAccountId,
-        filter: `usage_start_time >= "${startDate.toISOString()}" AND usage_start_time <= "${endDate.toISOString()}"`,
-      });
-
-      return usageReports.data.usageReports || [];
+      // Cloud Billing API v1 does not provide usage/cost data. Cost data requires
+      // BigQuery billing export: https://cloud.google.com/billing/docs/how-to/export-data-bigquery
+      this.logger.debug(
+        'GCP billing accounts listed; cost sync requires BigQuery export',
+        { accountCount: billingAccounts.data.accounts?.length ?? 0 },
+      );
+      return [];
     } catch (error) {
       // Fallback or error handling
       if (

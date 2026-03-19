@@ -2,7 +2,7 @@ import { createClient, RedisClientType } from 'redis';
 import * as dotenv from 'dotenv';
 import * as crypto from 'crypto';
 import { loggingService } from './logging.service';
-import { ChatBedrockConverse } from '@langchain/aws';
+import { createSafeBedrockEmbeddings } from './safeBedrockEmbeddings';
 import {
   resolveRedisUrl,
   getRedisOptions,
@@ -68,7 +68,7 @@ export class RedisService {
   private static instance: RedisService;
   public client!: RedisClientType;
   private readerClient!: RedisClientType;
-  private embeddingModel: ChatBedrockConverse;
+  private embeddingModel: ReturnType<typeof createSafeBedrockEmbeddings> | null;
   private _isConnected: boolean = false;
   private inMemoryCache: LRUCache<string, { value: string; expiry: number }>;
   private isLocalDev: boolean = false;
@@ -97,8 +97,9 @@ export class RedisService {
     });
 
     // Use in-memory cache only for local development without Redis configuration
-    // Production and staging environments MUST use Redis
+    // Production MUST use real Redis - never allow mock in NODE_ENV=production
     this.isLocalDev =
+      process.env.NODE_ENV !== 'production' &&
       process.env.NODE_ENV === 'development' &&
       !process.env.REDIS_HOST &&
       !process.env.REDIS_URL &&
@@ -129,13 +130,16 @@ export class RedisService {
       this.setupRedisClients();
     }
 
-    // Initialize embedding model for semantic caching
-    this.embeddingModel = new ChatBedrockConverse({
-      model: 'amazon.nova-micro-v1:0',
-      region: process.env.AWS_REGION || 'us-east-1',
-      temperature: 0,
-      maxTokens: 100,
-    });
+    // Initialize embedding model for semantic caching (real Bedrock Titan embeddings)
+    try {
+      this.embeddingModel = createSafeBedrockEmbeddings({
+        model:
+          process.env.RAG_EMBEDDING_MODEL || 'amazon.titan-embed-text-v2:0',
+        region: process.env.AWS_REGION || process.env.AWS_BEDROCK_REGION || 'us-east-1',
+      });
+    } catch {
+      this.embeddingModel = null;
+    }
 
     this.setupEventHandlers();
   }
@@ -537,7 +541,7 @@ export class RedisService {
         loggingService.warn(
           'Empty text provided to generateEmbedding, returning zero vector',
         );
-        return new Array(384).fill(0);
+        return new Array(1024).fill(0); // Match Titan embed v2 dimensions
       }
 
       const cleanText = text.trim();
@@ -549,25 +553,17 @@ export class RedisService {
         return JSON.parse(cachedEmbedding);
       }
 
-      // Try to use AWS Bedrock embedding model first
+      // Use AWS Bedrock Titan embedding model for real semantic embeddings
       let embedding: number[] = [];
 
       try {
         if (this.embeddingModel && process.env.AWS_ACCESS_KEY_ID) {
-          // Use AWS Bedrock for embeddings (simplified approach)
-          const response = await this.embeddingModel.invoke(cleanText);
-          // For now, create a deterministic embedding from the response
-          const responseText = JSON.stringify(response);
-          const hash = crypto
-            .createHash('sha256')
-            .update(responseText)
-            .digest();
-
-          for (let i = 0; i < 384; i++) {
-            embedding.push(hash[i % hash.length] / 255);
+          embedding = await this.embeddingModel.embedQuery(cleanText);
+          if (!embedding || embedding.length === 0) {
+            throw new Error('Empty embedding returned from Bedrock');
           }
         } else {
-          throw new Error('AWS Bedrock not available');
+          throw new Error('AWS Bedrock not available (missing embedding model or credentials)');
         }
       } catch (awsError) {
         loggingService.warn('AWS Bedrock embedding failed, using fallback:', {
@@ -575,10 +571,10 @@ export class RedisService {
             awsError instanceof Error ? awsError.message : String(awsError),
         });
 
-        // Fallback: Using a simple hash-based pseudo-embedding
+        // Fallback only when Bedrock unavailable: deterministic hash-based pseudo-embedding
+        // Semantic search with this fallback will not be meaningful - prefer configuring AWS
         const hash = crypto.createHash('sha256').update(cleanText).digest();
-
-        for (let i = 0; i < 384; i++) {
+        for (let i = 0; i < 1024; i++) {
           embedding.push(hash[i % hash.length] / 255);
         }
       }

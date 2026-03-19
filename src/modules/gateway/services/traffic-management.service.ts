@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Usage } from '../../../schemas/core/usage.schema';
+import { TrafficPredictionService } from '../../analytics/services/traffic-prediction.service';
 
 /**
  * Traffic Management Service
@@ -41,7 +42,10 @@ export class TrafficManagementService {
     }
   >();
 
-  constructor(@InjectModel(Usage.name) private usageModel: Model<any>) {
+  constructor(
+    @InjectModel(Usage.name) private usageModel: Model<any>,
+    private readonly trafficPredictionService: TrafficPredictionService,
+  ) {
     // Start background traffic monitoring
     this.startTrafficMonitoring();
   }
@@ -486,30 +490,46 @@ export class TrafficManagementService {
     maxRPM: number;
     maxLoadFactor: number;
   }> {
-    // Base thresholds
+    // Try to get dynamic thresholds from historical traffic data
+    const historical = this.trafficPredictionService.getHistoricalAverages(
+      3600000,
+    ); // last hour
     const baseThresholds = {
-      maxResponseTime: 5000, // 5 seconds
-      maxErrorRate: 0.1, // 10% error rate
-      maxRPM: 100, // 100 requests per minute
+      maxResponseTime: 5000, // 5 seconds default
+      maxErrorRate: 0.1, // 10% default
+      maxRPM: 100, // 100 RPM default
       maxLoadFactor: 2.0, // 2x normal load
     };
 
-    // In a real implementation, these would be calculated from historical data
-    // For now, use configurable values with environment variable overrides
+    let maxResponseTime = parseInt(String(baseThresholds.maxResponseTime),
+      10,
+    );
+    let maxErrorRate = parseFloat(String(baseThresholds.maxErrorRate),
+    );
+    let maxRPM = parseInt( String(baseThresholds.maxRPM),
+      10,
+    );
+
+    if (historical && historical.dataPoints >= 5) {
+      // Use historical averages as baseline, with 2x headroom for spikes
+      maxResponseTime = Math.max(
+        baseThresholds.maxResponseTime,
+        Math.ceil(historical.avgResponseTimeMs * 2) || baseThresholds.maxResponseTime,
+      );
+      maxErrorRate = Math.max(
+        baseThresholds.maxErrorRate,
+        Math.min(0.5, historical.avgErrorRate * 2) || baseThresholds.maxErrorRate,
+      );
+      maxRPM = Math.max(
+        baseThresholds.maxRPM,
+        Math.ceil(historical.avgRpm * 2) || baseThresholds.maxRPM,
+      );
+    }
 
     return {
-      maxResponseTime: parseInt(
-        process.env.MAX_RESPONSE_TIME_MS ||
-          String(baseThresholds.maxResponseTime),
-        10,
-      ),
-      maxErrorRate: parseFloat(
-        process.env.MAX_ERROR_RATE || String(baseThresholds.maxErrorRate),
-      ),
-      maxRPM: parseInt(
-        process.env.MAX_REQUESTS_PER_MINUTE || String(baseThresholds.maxRPM),
-        10,
-      ),
+      maxResponseTime,
+      maxErrorRate,
+      maxRPM,
       maxLoadFactor: parseFloat(
         process.env.MAX_LOAD_FACTOR || String(baseThresholds.maxLoadFactor),
       ),
@@ -870,23 +890,48 @@ export class TrafficManagementService {
   }
 
   /**
-   * Detect suspicious request body patterns
+   * Detect suspicious request body patterns using comprehensive WAF-style rules
    */
   private detectSuspiciousBody(body?: any): boolean {
     if (!body) return false;
 
-    // Check for suspicious patterns in request body
-    // This could include SQL injection patterns, XSS attempts, etc.
-
     const bodyString = typeof body === 'string' ? body : JSON.stringify(body);
+    const normalized = bodyString.toLowerCase();
 
-    // Simple pattern checks (in production, use more sophisticated detection)
     const suspiciousPatterns = [
-      /(\bUNION\b|\bSELECT\b|\bDROP\b|\bINSERT\b|\bUPDATE\b|\bDELETE\b)/i, // SQL injection
-      /<script[^>]*>.*?<\/script>/i, // XSS attempts
-      /javascript:/i, // JavaScript URLs
-      /data:\s*text\/html/i, // Data URLs with HTML
+      // SQL injection
+      /\b(UNION|SELECT|DROP|INSERT|UPDATE|DELETE|EXEC|EXECUTE|TRUNCATE)\b/i,
+      /;\s*--|\/\*|\*\/|' OR '1'='1|" OR "1"="1|1=1|OR 1=1/i,
+      /\b(SLEEP|BENCHMARK|WAITFOR)\s*\(/i,
+      /INTO\s+(OUTFILE|DUMPFILE)/i,
+      // XSS
+      /<script[^>]*>[\s\S]*?<\/script>/i,
+      /javascript:/i,
+      /vbscript:/i,
+      /data:\s*text\/html/i,
+      /on\w+\s*=\s*["']?[^"'\s>]*/i, // onerror=, onload=, onclick=, etc.
+      /<img[^>]+onerror/i,
+      /<iframe[^>]*>/i,
+      /expression\s*\(/i, // CSS expression
+      // NoSQL injection
+      /\$\s*(gt|gte|lt|lte|ne|in|exists|regex)\s*:/i,
+      /\{\s*"\$[a-z]+"\s*:/i,
+      // Command injection
+      /[;&|`]\s*(curl|wget|nc|bash|sh|cmd|powershell)/i,
+      /\$\([^)]*\)|`[^`]*`/, // Command substitution
+      // Path traversal
+      /\.\.\/(\.\.\/)+/,
+      /%2e%2e%2f|%2e%2e\//i,
+      // LDAP injection (filter injection)
+      /\*\)\s*\(|\)\s*\(\s*\*/i,
+      // XML/XXE
+      /<!ENTITY|<!DOCTYPE\s+[^\s[]+\[/i,
+      /SYSTEM\s+["'](?:file|expect|php):/i,
     ];
+
+    const highEntropySuspicious =
+      /(eval\s*\(|Function\s*\(|setTimeout\s*\([^,]*\)|setInterval\s*\([^,]*\))/i;
+    if (highEntropySuspicious.test(bodyString)) return true;
 
     return suspiciousPatterns.some((pattern) => pattern.test(bodyString));
   }

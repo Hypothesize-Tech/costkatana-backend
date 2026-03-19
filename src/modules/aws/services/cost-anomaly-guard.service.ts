@@ -648,7 +648,9 @@ export class CostAnomalyGuardService {
   /**
    * Get customer's budget limit from configuration or use default
    *
-   * In production, this would query customer settings or billing system
+   * Uses tier-based defaults (enterprise/pro/standard) and customerThresholds
+   * for per-connection overrides. A BillingSettingsService can be injected
+   * for external billing system integration.
    */
   private async getCustomerBudgetLimit(connectionId: string): Promise<number> {
     // Check if there's a custom budget limit stored

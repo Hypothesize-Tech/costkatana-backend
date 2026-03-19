@@ -23,6 +23,7 @@ import { GithubAnalysisService } from './services/github-analysis.service';
 import { GithubCodeGeneratorService } from './services/github-code-generator.service';
 import { GithubPRIntegrationService } from './services/github-pr-integration.service';
 import { GithubCacheInvalidationService } from './services/github-cache-invalidation.service';
+import { GithubConnectionService } from './services/github-connection.service';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { GithubCacheInvalidationService } from './services/github-cache-invalida
     GithubCodeGeneratorService,
     GithubPRIntegrationService,
     GithubCacheInvalidationService,
+    GithubConnectionService,
   ],
   exports: [
     GitHubService,

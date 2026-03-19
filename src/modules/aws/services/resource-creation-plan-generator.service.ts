@@ -377,6 +377,8 @@ export class ResourceCreationPlanGeneratorService {
         CreatedBy: userId,
         ManagedBy: 'CostKatana',
       },
+      estimatedMonthlyRequests: config.estimatedMonthlyRequests,
+      region,
     };
 
     const steps: ResourceCreationStep[] = [
@@ -875,20 +877,22 @@ export class ResourceCreationPlanGeneratorService {
     };
   }
 
+  /** Default monthly requests for cost projection when not provided by caller */
+  private static readonly DEFAULT_LAMBDA_MONTHLY_REQUESTS = 1_000_000;
+
   private async calculateLambdaCost(config: any): Promise<CostEstimate> {
+    const estimatedRequests =
+      config.estimatedMonthlyRequests ??
+      ResourceCreationPlanGeneratorService.DEFAULT_LAMBDA_MONTHLY_REQUESTS;
+
     try {
-      // Try to get pricing from AWS Pricing API
       const pricing = await this.awsPricingService.getLambdaPricing(
         config.region || 'us-east-1',
       );
 
       if (pricing) {
-        // Use real pricing data
         const requestCost = pricing.pricePerRequest || 0.2; // per 1M requests
         const gbSecondCost = pricing.pricePerGBSecond || 0.0000166667;
-
-        // Estimate for typical usage: 1M requests/month with 128MB memory, 100ms duration
-        const estimatedRequests = 1000000; // 1M requests
         const estimatedMemoryMB = config.memorySize || 128;
         const estimatedDurationMs = config.timeout || 3000; // 3 seconds
         const gbSeconds =
@@ -927,14 +931,10 @@ export class ResourceCreationPlanGeneratorService {
       );
     }
 
-    // Fallback to hardcoded pricing if API fails
     const fallbackPricing =
       this.awsPricingService.getFallbackPricing('AWSLambda');
     const requestCost = fallbackPricing.pricePerRequest || 0.2;
     const gbSecondCost = fallbackPricing.pricePerGBSecond || 0.0000166667;
-
-    // Estimate for typical usage
-    const estimatedRequests = 1000000;
     const estimatedMemoryMB = config.memorySize || 128;
     const estimatedDurationMs = config.timeout || 3000;
     const gbSeconds =

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import * as math from 'mathjs';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Usage, UsageDocument } from '../../../schemas/core/usage.schema';
@@ -756,35 +757,63 @@ export class BackgroundVectorizationService {
     covariance: number[][],
     numComponents: number,
   ): number[][] {
-    // Simplified eigenvector computation using power iteration
-    // In production, you'd use a proper linear algebra library
+    const size = covariance.length;
+    if (size === 0) return [];
+
+    try {
+      const result = math.eigs(covariance, {
+        eigenvectors: true,
+        precision: 1e-9,
+      });
+      const eigenVectors = result.eigenvectors as Array<{
+        value: number;
+        vector: number[];
+      }>;
+      if (!eigenVectors || eigenVectors.length === 0) {
+        return this.fallbackPowerIteration(covariance, numComponents);
+      }
+      // Eigenvalues sorted by absolute value ascending; take top numComponents (largest)
+      const sorted = [...eigenVectors].sort(
+        (a, b) => Math.abs(b.value) - Math.abs(a.value),
+      );
+      return sorted
+        .slice(0, numComponents)
+        .map((ev) =>
+          Array.isArray(ev.vector) ? [...ev.vector] : [...(ev.vector as any)],
+        );
+    } catch {
+      return this.fallbackPowerIteration(covariance, numComponents);
+    }
+  }
+
+  private fallbackPowerIteration(
+    covariance: number[][],
+    numComponents: number,
+  ): number[][] {
     const eigenvectors: number[][] = [];
     const size = covariance.length;
-
     for (let k = 0; k < numComponents; k++) {
-      // Start with a random vector
-      let vector = Array.from({ length: size }, () => Math.random() - 0.5);
-
-      // Power iteration (simplified - just a few iterations)
-      for (let iter = 0; iter < 10; iter++) {
-        // Matrix-vector multiplication
+      // Use standard basis vector e_k for deterministic, reproducible PCA.
+      // Power iteration converges to dominant eigenvector; deterministic init avoids
+      // non-deterministic embeddings that would pollute the vector store.
+      let vector = Array.from(
+        { length: size },
+        (_, i) => (i === k % size ? 1 : 0),
+      );
+      for (let iter = 0; iter < 15; iter++) {
         const newVector = new Array(size).fill(0);
         for (let i = 0; i < size; i++) {
           for (let j = 0; j < size; j++) {
             newVector[i] += covariance[i][j] * vector[j];
           }
         }
-
-        // Normalize
         const norm = Math.sqrt(
           newVector.reduce((sum, val) => sum + val * val, 0),
         );
-        vector = newVector.map((val) => val / norm);
+        vector = norm > 1e-12 ? newVector.map((val) => val / norm) : vector;
       }
-
       eigenvectors.push([...vector]);
     }
-
     return eigenvectors;
   }
 

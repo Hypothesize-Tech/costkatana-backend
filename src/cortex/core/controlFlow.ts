@@ -92,11 +92,31 @@ export interface ParallelFrame extends CortexFrame {
   waitAll?: boolean;
 }
 
+/** Executor for non-control-flow expressions (e.g. LLM calls, context lookups) */
+export type ExpressionExecutor = (
+  expression: CortexExpression,
+  context: Map<string, any>,
+) => Promise<any>;
+
+/** Control flow frame types that this processor handles */
+const CONTROL_FLOW_TYPES = [
+  'control_if',
+  'control_switch',
+  'control_foreach',
+  'control_while',
+  'control_try',
+  'control_parallel',
+] as const;
+
 /**
  * Control Flow Processor
  * Executes control flow logic within Cortex expressions
  */
 export class ControlFlowProcessor {
+  constructor(
+    private readonly expressionExecutor?: ExpressionExecutor,
+  ) {}
+
   /**
    * Process a control flow frame
    */
@@ -343,19 +363,77 @@ export class ControlFlowProcessor {
   }
 
   /**
-   * Evaluate an expression
+   * Evaluate an expression - recursively processes control flow and delegates
+   * non-control-flow expressions to the optional expressionExecutor.
    */
   private async evaluateExpression(
     expression: CortexExpression,
     context: Map<string, any>,
   ): Promise<any> {
-    // This would integrate with the main Cortex processor
-    // For now, return a placeholder
-    loggingService.debug('Evaluating expression', {
-      expression,
-      contextSize: context.size,
+    if (expression == null) return null;
+
+    // Primitives pass through
+    if (
+      typeof expression === 'string' ||
+      typeof expression === 'number' ||
+      typeof expression === 'boolean'
+    ) {
+      return expression;
+    }
+
+    // Must be object for frame handling
+    if (typeof expression !== 'object') return expression;
+
+    const frameType =
+      (expression as CortexFrame).type ??
+      (expression as { frame?: string }).frame;
+
+    // Recursively process nested control flow frames
+    if (frameType && CONTROL_FLOW_TYPES.includes(frameType as any)) {
+      return this.processControlFlow(expression as CortexFrame, context);
+    }
+
+    // Expression with simple value - resolve via context
+    if (
+      'value' in expression &&
+      expression.value !== undefined
+    ) {
+      return this.evaluateValue(expression.value, context);
+    }
+
+    // Frames array - evaluate first frame if it's control flow
+    if (
+      expression.frames &&
+      Array.isArray(expression.frames) &&
+      expression.frames.length > 0
+    ) {
+      const firstFrame = expression.frames[0];
+      if (
+        firstFrame &&
+        firstFrame.type &&
+        CONTROL_FLOW_TYPES.includes(firstFrame.type as any)
+      ) {
+        return this.processControlFlow(firstFrame, context);
+      }
+    }
+
+    // Non-control-flow expression (LLM call, context, etc.) - delegate to executor
+    if (this.expressionExecutor) {
+      loggingService.debug('Delegating expression to executor', {
+        type: frameType,
+        contextSize: context.size,
+      });
+      return this.expressionExecutor(expression, context);
+    }
+
+    // No executor - fail loudly instead of returning raw expression
+    loggingService.warn('Cortex control flow: expression requires executor', {
+      type: frameType,
     });
-    return expression;
+    throw new Error(
+      'Cortex control flow: non-control-flow expressions (e.g. LLM calls, context lookups) require an ExpressionExecutor. ' +
+        'Wire ControlFlowProcessor with an executor for full support.',
+    );
   }
 }
 

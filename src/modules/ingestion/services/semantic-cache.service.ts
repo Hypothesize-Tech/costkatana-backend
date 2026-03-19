@@ -8,6 +8,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
+import * as crypto from 'crypto';
 import { SafeBedrockEmbeddingsService } from './safe-bedrock-embeddings.service';
 import { ConfigService } from '@nestjs/config';
 
@@ -444,7 +445,9 @@ export class SemanticCacheService {
   }
 
   /**
-   * Fallback method to convert simple hash to vector when embeddings fail
+   * Fallback method when Bedrock embeddings fail.
+   * Returns 1024-dim vector (matches Titan v2) so similarity comparisons work.
+   * Uses SHA-256 spread across dimensions - not semantically meaningful but dimension-compatible.
    */
   private fallbackHashToVector(prompt: string): number[] {
     const normalized = prompt
@@ -452,38 +455,14 @@ export class SemanticCacheService {
       .replace(/[^\w\s]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
-
-    let hash = 0;
-    for (let i = 0; i < normalized.length; i++) {
-      const char = normalized.charCodeAt(i);
-      hash = (hash << 5) - hash + char;
-      hash = hash & hash; // Convert to 32-bit integer
+    const hash = crypto.createHash('sha256').update(normalized).digest();
+    const embedding: number[] = [];
+    for (let i = 0; i < 1024; i++) {
+      embedding.push(hash[i % hash.length] / 255);
     }
-
-    // Convert hash to a simple vector (not ideal but better than nothing)
-    return [hash, hash * 31, hash * 7, hash * 13, hash * 17];
+    return embedding;
   }
 
-  /**
-   * Calculates cosine similarity between two vectors
-   */
-  private calculateCosineSimilarity(vecA: number[], vecB: number[]): number {
-    if (vecA.length !== vecB.length) return 0;
-
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-
-    for (let i = 0; i < vecA.length; i++) {
-      dotProduct += vecA[i] * vecB[i];
-      normA += vecA[i] * vecA[i];
-      normB += vecB[i] * vecB[i];
-    }
-
-    if (normA === 0 || normB === 0) return 0;
-
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-  }
 
   /**
    * Generates a hash for exact matching (for cache keys)

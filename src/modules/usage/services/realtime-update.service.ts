@@ -287,9 +287,12 @@ export class RealtimeUpdateService implements OnModuleDestroy {
       // Check for budget warnings
       await this.checkAndEmitBudgetWarnings(userId);
 
-      // Send proactive suggestions occasionally
-      if (Math.random() < 0.1) {
-        // 10% chance
+      // Send proactive suggestions when cost is significant (condition-based, not random)
+      const costThreshold = 0.1; // $0.10
+      const shouldSuggest =
+        (usageData.cost ?? 0) >= costThreshold &&
+        (await this.shouldEmitProactiveSuggestion(userId));
+      if (shouldSuggest) {
         await this.emitProactiveSuggestion(userId);
       }
     } catch (error) {
@@ -360,6 +363,19 @@ export class RealtimeUpdateService implements OnModuleDestroy {
   }
 
   /**
+   * Rate limit: at most one proactive suggestion per user per hour
+   */
+  private async shouldEmitProactiveSuggestion(userId: string): Promise<boolean> {
+    const key = `proactive_suggestion:${userId}`;
+    try {
+      const lastEmitted = await this.cacheService.get<string>(key);
+      return !lastEmitted;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Emit proactive optimization suggestion
    */
   async emitProactiveSuggestion(userId: string): Promise<void> {
@@ -384,6 +400,11 @@ export class RealtimeUpdateService implements OnModuleDestroy {
         };
 
         await this.sendEvent(userId, update);
+        await this.cacheService.set(
+          `proactive_suggestion:${userId}`,
+          Date.now().toString(),
+          3600,
+        ); // 1 hour rate limit
         this.logger.log(
           `Proactive suggestion emitted for user ${userId}`,
           suggestion,

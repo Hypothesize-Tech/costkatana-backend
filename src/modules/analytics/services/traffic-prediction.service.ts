@@ -789,6 +789,37 @@ export class TrafficPredictionService {
   }
 
   /**
+   * Get rolling historical averages for dynamic threshold computation.
+   * Used by TrafficManagementService to replace hardcoded thresholds.
+   *
+   * @param windowMs - Time window in ms (default: last hour)
+   * @returns Averages or null if insufficient data
+   */
+  getHistoricalAverages(windowMs: number = 3600000): {
+    avgResponseTimeMs: number;
+    avgErrorRate: number;
+    avgRpm: number;
+    dataPoints: number;
+  } | null {
+    const cutoff = Date.now() - windowMs;
+    const recent = this.trafficHistory.filter((dp) => dp.timestamp > cutoff);
+    if (recent.length < 5) return null;
+    const avgResponseTimeMs =
+      recent.reduce((s, dp) => s + dp.responseTime, 0) / recent.length;
+    const avgErrorRate =
+      recent.reduce((s, dp) => s + dp.errorRate, 0) / recent.length;
+    const avgRps =
+      recent.reduce((s, dp) => s + dp.requestsPerSecond, 0) / recent.length;
+    const avgRpm = avgRps * 60;
+    return {
+      avgResponseTimeMs,
+      avgErrorRate,
+      avgRpm,
+      dataPoints: recent.length,
+    };
+  }
+
+  /**
    * Manually trigger prediction
    */
   async triggerPrediction(): Promise<TrafficPrediction[]> {

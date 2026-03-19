@@ -45,6 +45,17 @@ export const USER_INDEX_SOURCES: VectorSource[] = [
   'user-upload',
 ];
 
+/** Sentinel marker for FAISS index initialization - FAISS requires ≥1 doc to create. Filter at query time. */
+export const FAISS_SENTINEL_MARKER = '_faiss_sentinel' as const;
+
+/** Check if a document is the FAISS init sentinel (must be filtered from search results). Supports legacy _dummy marker. */
+export function isFaissSentinelDocument(
+  doc: { metadata?: Record<string, unknown> },
+): boolean {
+  const m = doc.metadata;
+  return m?.[FAISS_SENTINEL_MARKER] === true || m?._dummy === true;
+}
+
 export interface VectorSearchOptions {
   k?: number; // Number of results to return
   filter?: Record<string, any>; // Metadata filters
@@ -333,16 +344,22 @@ export class FaissVectorService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Create a new empty FAISS index
+   * Create a new empty FAISS index.
+   * FAISS/LangChain requires at least one document to create an index.
+   * We use a sentinel document marked with FAISS_SENTINEL_MARKER; filter via isFaissSentinelDocument() at query time.
    */
   private async createNewIndex(): Promise<FaissStore> {
-    // Create with a dummy document (FAISS requires at least one document)
-    const dummyDoc = new LangchainDocument({
-      pageContent: 'FAISS index initialized',
-      metadata: { _dummy: true, timestamp: new Date().toISOString() },
+    const sentinelDoc = new LangchainDocument({
+      pageContent: '',
+      metadata: {
+        [FAISS_SENTINEL_MARKER]: true,
+        _createdAt: new Date().toISOString(),
+      },
     });
-
-    return await FaissStore.fromDocuments([dummyDoc], this.embeddingsService);
+    return await FaissStore.fromDocuments(
+      [sentinelDoc],
+      this.embeddingsService,
+    );
   }
 
   /**
@@ -622,10 +639,11 @@ export class FaissVectorService implements OnModuleInit, OnModuleDestroy {
       // Perform similarity search with scores
       const results = await index.similaritySearchWithScore(query, k);
 
-      // Filter dummy documents and apply score threshold
+      // Filter sentinel document and apply score threshold
       const filteredResults: VectorSearchResult[] = results
         .filter(
-          ([doc, score]) => !doc.metadata._dummy && score >= scoreThreshold,
+          ([doc, score]) =>
+            !isFaissSentinelDocument(doc) && score >= scoreThreshold,
         )
         .map(([doc, score]) => ({
           document: doc,
@@ -803,7 +821,7 @@ export class FaissVectorService implements OnModuleInit, OnModuleDestroy {
           // We'll search with a dummy query and high k to estimate
           const results = await index.similaritySearch('', 1000);
           status.documentCount = results.filter(
-            (doc) => !doc.metadata._dummy,
+            (doc) => !isFaissSentinelDocument(doc),
           ).length;
         } catch {
           // Can't load index

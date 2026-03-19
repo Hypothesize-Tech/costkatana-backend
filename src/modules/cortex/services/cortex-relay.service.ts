@@ -5,7 +5,9 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { estimateTokenCount } from '../../../utils/token-count.utils';
 import { BedrockService } from '../../bedrock/bedrock.service';
+import { PricingRegistryService } from '../../pricing/services/pricing-registry.service';
 import { CortexModelRouterService } from './cortex-model-router.service';
 import { CortexEncoderService } from './cortex-encoder.service';
 import { CortexDecoderService } from './cortex-decoder.service';
@@ -38,6 +40,7 @@ export class CortexRelayService {
   constructor(
     private readonly configService: ConfigService,
     private readonly bedrockService: BedrockService,
+    private readonly pricingRegistry: PricingRegistryService,
     private readonly modelRouter: CortexModelRouterService,
     private readonly encoder: CortexEncoderService,
     private readonly decoder: CortexDecoderService,
@@ -371,35 +374,25 @@ export class CortexRelayService {
   }
 
   /**
-   * Estimate tokens used (simplified calculation)
+   * Estimate tokens used via tiktoken when available, else 4-char heuristic.
    */
   private estimateTokens(input: string, output: string): number {
-    // Rough estimation: ~4 characters per token for English text
-    const totalChars = input.length + output.length;
-    return Math.ceil(totalChars / 4);
+    return estimateTokenCount(input || '') + estimateTokenCount(output || '');
   }
 
   /**
-   * Calculate cost (simplified calculation)
-   */
-  /**
-   * Calculate cost based on modelId and tokens used.
-   * If modelId is recognized, use its specific pricing; otherwise use default.
+   * Calculate cost using central PricingRegistryService.
+   * Falls back to heuristic when model not in registry.
    */
   private calculateCost(modelId: string, tokensUsed: number): number {
-    // Example per-1K-token pricing by model; extend as needed.
-    const modelPricing: Record<string, number> = {
-      'anthropic.claude-v2': 0.008,
-      'anthropic.claude-instant-v1': 0.002,
-      'ai21.j2-mid': 0.005,
-      'ai21.j2-ultra': 0.009,
-      // Add more modelIds and prices as desired
-    };
-    // Default price if model not listed
-    const defaultCostPerThousandTokens = 0.001; // $0.001 per 1K tokens
-
-    const costPerThousandTokens =
-      modelPricing[modelId] ?? defaultCostPerThousandTokens;
-    return (tokensUsed / 1000) * costPerThousandTokens;
+    const inputTokens = Math.round(tokensUsed * 0.7);
+    const outputTokens = Math.round(tokensUsed * 0.3);
+    const result = this.pricingRegistry.calculateCost({
+      modelId,
+      inputTokens,
+      outputTokens,
+    });
+    if (result) return result.totalCost;
+    return (tokensUsed / 1000) * 0.001;
   }
 }

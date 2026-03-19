@@ -783,10 +783,7 @@ export class S3Service {
     let objectCount = 0;
     let totalSizeBytes = 0;
     let continuationToken: string | undefined;
-
-    // Sample a subset of objects for estimation
-    // In production, this would be more sophisticated
-    const maxKeys = 1000; // Limit to avoid excessive API calls
+    const maxKeys = 1000; // Per-request limit (AWS max is 1000)
 
     do {
       const command = new ListObjectsV2Command({
@@ -806,26 +803,20 @@ export class S3Service {
       }
 
       continuationToken = response.NextContinuationToken;
-      // Limit sampling for performance
-      if (objectCount >= maxKeys) break;
     } while (continuationToken);
 
-    // If we hit the limit, estimate total based on sample
-    const isEstimate = objectCount >= maxKeys;
+    const isEstimate = false; // Full pagination complete
 
-    this.logger.log('Bucket size estimate calculated', {
+    this.logger.log('Bucket size calculated', {
       connectionId: connection._id.toString(),
       bucketName,
       objectCount,
       totalSizeBytes,
-      isEstimate,
     });
 
     return {
-      objectCount: isEstimate ? Math.round(objectCount * 1.1) : objectCount, // Rough estimate
-      totalSizeBytes: isEstimate
-        ? Math.round(totalSizeBytes * 1.1)
-        : totalSizeBytes,
+      objectCount,
+      totalSizeBytes,
     };
   }
 

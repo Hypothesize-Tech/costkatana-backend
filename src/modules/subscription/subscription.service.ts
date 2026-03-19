@@ -18,6 +18,7 @@ import { SubscriptionHistory } from '../../schemas/billing/subscription-history.
 import { PaymentGatewayService } from '../payment-gateway/payment-gateway.service';
 import type { PaymentGatewayType } from '../payment-gateway/payment-gateway.interface';
 import { SubscriptionNotificationService } from './subscription-notification.service';
+import { getPlanPriceOrNull } from '../../config/plan-pricing.config';
 
 // Subscription plan limits based on new pricing structure
 export const SUBSCRIPTION_PLAN_LIMITS = {
@@ -3090,6 +3091,19 @@ export class SubscriptionService {
   }
 
   /**
+   * Get plan price from config (with env override). Throws NotFoundException if plan unknown.
+   */
+  private getPlanPriceFallback(plan: string): number {
+    const price = getPlanPriceOrNull(plan);
+    if (price === null) {
+      throw new NotFoundException(
+        `Unknown subscription plan: ${plan}. Valid plans: free, starter, professional, enterprise.`,
+      );
+    }
+    return price;
+  }
+
+  /**
    * Calculate subscription amount for retry
    */
   private async calculateSubscriptionAmount(
@@ -3115,39 +3129,24 @@ export class SubscriptionService {
         }
       }
 
-      // Fallback to plan-based pricing if gateway lookup fails
+      const price = this.getPlanPriceFallback(subscription.plan);
       this.logger.warn('Using fallback pricing calculation', {
         subscriptionId: subscription._id?.toString(),
         gateway: subscription.gateway,
         hasGatewaySubscriptionId: !!subscription.gatewaySubscriptionId,
+        metric: 'subscription.plan_price_fallback',
       });
-
-      const planPrices = {
-        free: 0,
-        starter: 29,
-        professional: 99,
-        enterprise: 299,
-      };
-
-      return planPrices[subscription.plan as keyof typeof planPrices] || 29;
+      return price;
     } catch (error) {
       this.logger.error(
         'Failed to calculate subscription amount from gateway',
         {
           subscriptionId: subscription._id?.toString(),
           error: error instanceof Error ? error.message : String(error),
+          metric: 'subscription.plan_price_fallback',
         },
       );
-
-      // Final fallback to hardcoded values
-      const planPrices = {
-        free: 0,
-        starter: 29,
-        professional: 99,
-        enterprise: 299,
-      };
-
-      return planPrices[subscription.plan as keyof typeof planPrices] || 29;
+      return this.getPlanPriceFallback(subscription.plan);
     }
   }
 }

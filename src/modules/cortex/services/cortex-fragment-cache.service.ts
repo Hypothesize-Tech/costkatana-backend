@@ -121,9 +121,14 @@ export class CortexFragmentCacheService {
   }
 
   /**
-   * Check cache for existing fragment
+   * Check cache for existing fragment.
+   * @param hash - Content hash of the fragment
+   * @param options - Optional semantic tags extracted from content at lookup time (use instead of hash-as-base64-decode)
    */
-  public checkCache(hash: string): FragmentCacheResult {
+  public checkCache(
+    hash: string,
+    options?: { semanticTags?: string[] },
+  ): FragmentCacheResult {
     const startTime = Date.now();
     this.stats.totalRequests++;
 
@@ -156,8 +161,9 @@ export class CortexFragmentCacheService {
       };
     }
 
-    // Check for partial matches (similar fragments)
-    const partialHits = this.findPartialMatches(hash);
+    // Check for partial matches using tags from content (stored at write time)
+    const semanticTags = options?.semanticTags ?? [];
+    const partialHits = this.findPartialMatchesByTags(semanticTags);
 
     this.stats.misses++;
     return {
@@ -173,88 +179,53 @@ export class CortexFragmentCacheService {
     };
   }
 
-  private findPartialMatches(hash: string): CortexFragment[] {
+  /**
+   * Find partial matches using semantic tags (extracted from content at lookup time).
+   * Tags must be passed by the caller; fragments store tags at write time.
+   */
+  private findPartialMatchesByTags(queryTags: string[]): CortexFragment[] {
     const partialHits: CortexFragment[] = [];
+    if (queryTags.length === 0) return partialHits;
 
-    // Simple partial matching - find fragments with similar semantic tags
     for (const fragment of this.fragmentCache.values()) {
-      const similarity = this.calculateFragmentSimilarity(hash, fragment);
+      const storedTags = fragment.metadata.semanticTags ?? [];
+      if (storedTags.length === 0) continue;
+      const similarity = this.jaccardSimilarity(
+        new Set(queryTags),
+        new Set(storedTags),
+      );
       if (similarity >= this.config.semanticSimilarityThreshold) {
         partialHits.push(fragment);
       }
-
-      if (partialHits.length >= 5) break; // Limit results
+      if (partialHits.length >= 5) break;
     }
-
     return partialHits;
   }
 
-  /**
-   * Calculate semantic similarity between a hash (representing fragment content)
-   * and a candidate fragment in the cache.
-   *
-   * Uses production-level semantic similarity based on MinHash and token overlap.
-   */
-  private calculateFragmentSimilarity(
-    hash1: string,
-    fragment2: CortexFragment,
-  ): number {
-    // Attempt to extract semantic tags/keywords from the hash
-    const tags1 = this.extractTagsFromHash(hash1);
-    const tags2 = fragment2.metadata.semanticTags ?? [];
-
-    if (tags1.length === 0 || tags2.length === 0) {
-      // Fallback: similarity is zero if tags are missing
-      return 0;
-    }
-
-    // Use Jaccard similarity as a robust set-based similarity metric
-    const set1 = new Set(tags1);
-    const set2 = new Set(tags2);
-
-    const intersection = new Set([...set1].filter((t) => set2.has(t)));
-    const union = new Set([...set1, ...set2]);
-
+  private jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+    const intersection = new Set([...a].filter((t) => b.has(t)));
+    const union = new Set([...a, ...b]);
     return union.size > 0 ? intersection.size / union.size : 0;
   }
 
   /**
-   * Extract semantic tags from a hash.
-   *
-   * In production, prefer a deterministic hash-to-tag mapping.
-   * Assumes the hash encodes information about the fragment content.
+   * Extract semantic tags from a Cortex frame (same logic as when writing fragments).
+   * Callers should use this and pass tags to checkCache for partial matching.
    */
-  private extractTagsFromHash(hash: string): string[] {
-    // Production: try to decode hash as base64, then extract n-grams or keywords.
-    // Fallback: use a hash->tags lookup if available or fallback to character n-grams.
-
-    try {
-      // Attempt to decode if hash is base64 and recover original content
-      const maybeDecoded = Buffer.from(hash, 'base64').toString('utf-8');
-      // Basic heuristics: extract alphanumeric sequences as candidate tags
-      // Remove most symbols, lowercase, and split on whitespace
-      const content = maybeDecoded
-        .replace(/[^a-zA-Z0-9\s]/g, ' ')
-        .toLowerCase();
-      // Extract unigrams and bigrams for robust semantic overlap
-      const unigrams = content.split(/\s+/).filter(Boolean);
-      const bigrams = [];
-      for (let i = 0; i < unigrams.length - 1; i++) {
-        bigrams.push(`${unigrams[i]}_${unigrams[i + 1]}`);
-      }
-
-      // Limit tags to avoid huge sets (for performance)
-      const tags = Array.from(new Set([...unigrams, ...bigrams])).slice(0, 12);
-      return tags;
-    } catch {
-      // Fallback: if not base64 or decoding fails, return character-2grams of hash
-      const hash2grams = [];
-      for (let i = 0; i < hash.length - 1; i++) {
-        hash2grams.push(hash.slice(i, i + 2));
-      }
-      // Limit to first 10 hash-2grams
-      return hash2grams.slice(0, 10);
+  public extractTagsFromFrame(frame: CortexFrame): string[] {
+    const tags: string[] = [];
+    if ('action' in frame && frame.action) {
+      tags.push('action', String(frame.action));
     }
+    if ('entity' in frame && frame.entity) {
+      tags.push('entity', String(frame.entity));
+    }
+    for (const key of Object.keys(frame)) {
+      if (key !== 'frameType' && key !== 'action' && key !== 'entity') {
+        tags.push(key);
+      }
+    }
+    return [...new Set(tags)];
   }
 
   /**
@@ -282,6 +253,30 @@ export class CortexFragmentCacheService {
       category: fragment.metadata.category,
       reusability: fragment.metadata.reusability,
     });
+  }
+
+  /**
+   * Query fragment cache by frame (used by gateway).
+   * Extracts tags from frame and checks cache with hash + tags for partial matching.
+   */
+  public async queryFragmentCache(
+    frame: CortexFrame,
+  ): Promise<FragmentCacheResult> {
+    const hash = this.generateHash(frame);
+    const semanticTags = this.extractTagsFromFrame(frame);
+    return this.checkCache(hash, { semanticTags });
+  }
+
+  /**
+   * Cache fragments from a processed frame (used by gateway).
+   * Stores fragments with semantic tags at write time.
+   */
+  public async cacheFragments(
+    frame: CortexFrame,
+    _result: unknown,
+    _time: number,
+  ): Promise<void> {
+    this.extractFragments(frame);
   }
 
   /**
@@ -587,7 +582,7 @@ export class CortexFragmentCacheService {
 
   private getHitRate(): number {
     return this.stats.totalRequests > 0
-      ? (this.stats.hits / this.stats.totalRequests) * 100
+      ? this.stats.hits / this.stats.totalRequests
       : 0;
   }
 

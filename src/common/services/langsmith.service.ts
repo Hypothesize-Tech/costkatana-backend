@@ -28,7 +28,7 @@ export class LangSmithService {
     );
 
     if (this.isEnabled) {
-      this.logger.log('🔗 LangSmith service initialized (simplified mode)');
+      this.logger.log('🔗 LangSmith tracing active');
     } else {
       this.logger.warn(
         '⚠️ LangSmith not configured - using local tracing only',

@@ -3,6 +3,7 @@ import {
   BedrockRuntimeClient,
   InvokeModelCommand,
 } from '@aws-sdk/client-bedrock-runtime';
+import * as crypto from 'crypto';
 import { CacheService } from '../../../common/cache/cache.service';
 import { LRUCache } from 'lru-cache';
 
@@ -137,41 +138,17 @@ export class VectorMemoryService {
         error: error instanceof Error ? error.message : String(error),
       });
 
-      // Fallback: generate a deterministic hash-based embedding
-      return this.generateHashBasedEmbedding(text);
+      // Do not use hash-based fallback - it produces semantically meaningless vectors
+      // that break similarity search. Callers must configure AWS Bedrock or another
+      // real embedding provider (e.g. OpenAI text-embedding-ada-002) for production.
+      throw new Error(
+        `Embedding generation failed: ${error instanceof Error ? error.message : String(error)}. ` +
+          'Configure AWS Bedrock (or OpenAI embeddings) for vector memory. Hash-based fallback is disabled.',
+      );
     }
   }
 
-  /**
-   * Generate hash-based embedding as fallback
-   */
-  private generateHashBasedEmbedding(text: string): number[] {
-    const embedding: number[] = [];
-    const words = text.toLowerCase().split(/\s+/);
 
-    // Create a 384-dimensional embedding based on text characteristics
-    for (let i = 0; i < 384; i++) {
-      let value = 0;
-
-      // Use various text features
-      if (i < words.length) {
-        value += this.hashString(words[i]) / 1000000;
-      }
-
-      // Add character-based features
-      if (i < text.length) {
-        value += text.charCodeAt(i % text.length) / 1000;
-      }
-
-      // Add position-based features
-      value += Math.sin(i * 0.1) * 0.1;
-      value += Math.cos(i * 0.05) * 0.1;
-
-      embedding.push(value);
-    }
-
-    return this.normalizeVector(embedding);
-  }
 
   /**
    * Hash string to number
@@ -818,8 +795,7 @@ export class VectorMemoryService {
         vectorsByType[dataType] = vectorSet.size;
       }
 
-      // Calculate cache hit rate (approximate)
-      const cacheHitRate = this.embeddingCache.size > 0 ? 0.85 : 0; // Estimated based on usage
+      const cacheHitRate = this.embeddingCache.size > 0 ? 0.85 : 0;
 
       return {
         totalVectors,
@@ -827,6 +803,10 @@ export class VectorMemoryService {
         vectorsByUser,
         cacheHitRate,
         avgEmbeddingDimensions: this.EMBEDDING_DIMENSIONS,
+        _meta: {
+          cacheHitRateEstimated: this.embeddingCache.size > 0,
+          note: 'cacheHitRate is estimated; implement hit/miss tracking for real values',
+        },
       };
     } catch (error) {
       this.logger.error('Failed to get cross-model stats:', {

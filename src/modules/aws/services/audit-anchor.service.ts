@@ -108,7 +108,8 @@ export class AuditAnchorService implements OnModuleInit, OnModuleDestroy {
 
     this.signingKey = randomBytes(32).toString('hex');
     this.logger.warn(
-      'AUDIT_ANCHOR_SIGNING_KEY not configured; using ephemeral development key',
+      'AUDIT_ANCHOR_SIGNING_KEY not configured; using ephemeral development key. ' +
+        'Note: Audit chains cannot be verified across restarts; persist key to .env.local for consistent dev verification.',
     );
   }
 
@@ -164,7 +165,7 @@ export class AuditAnchorService implements OnModuleInit, OnModuleDestroy {
       });
     }
 
-    // Publish to S3 (in production)
+    // Publish anchor to S3 for external verification
     try {
       const s3Location = await this.publishToS3(record);
       record.publishedAt = new Date();

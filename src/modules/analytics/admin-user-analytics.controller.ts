@@ -32,7 +32,7 @@ import {
 } from './dto/admin-user-analytics.dto';
 import type { UserSpendingSummary } from './admin-user-analytics.service';
 
-@Controller('api/admin/user-spending')
+@Controller('api/admin/users')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('admin')
 export class AdminUserAnalyticsController {
@@ -103,7 +103,7 @@ export class AdminUserAnalyticsController {
    * Get all users spending summary
    * GET /api/admin/users/spending
    */
-  @Get()
+  @Get('spending')
   async getAllUsersSpending(
     @CurrentUser() user: { id: string },
     @Query() query: AdminUserAnalyticsQueryDto,
@@ -191,7 +191,7 @@ export class AdminUserAnalyticsController {
    * Get users filtered by service
    * GET /api/admin/users/spending/by-service/:service
    */
-  @Get('by-service/:service')
+  @Get('spending/by-service/:service')
   async getUsersByService(
     @CurrentUser() user: { id: string },
     @Param('service') service: string,
@@ -248,7 +248,7 @@ export class AdminUserAnalyticsController {
    * Get spending trends
    * GET /api/admin/users/spending/trends
    */
-  @Get('trends')
+  @Get('spending/trends')
   async getSpendingTrends(
     @CurrentUser() user: { id: string },
     @Query() query: SpendingTrendsQueryDto,
@@ -305,7 +305,7 @@ export class AdminUserAnalyticsController {
    * Get platform summary statistics
    * GET /api/admin/users/spending/summary
    */
-  @Get('summary')
+  @Get('spending/summary')
   async getPlatformSummary(
     @CurrentUser() user: { id: string },
     @Query() query: AdminUserAnalyticsQueryDto,
@@ -347,7 +347,7 @@ export class AdminUserAnalyticsController {
    * Export user spending data
    * GET /api/admin/users/spending/export
    */
-  @Get('export')
+  @Get('spending/export')
   async exportUserSpending(
     @CurrentUser() user: { id: string },
     @Res() res: Response,
@@ -459,10 +459,10 @@ export class AdminUserAnalyticsController {
 
   /**
    * Get detailed spending for a specific user
-   * GET /api/admin/user-spending/:userId
+   * GET /api/admin/users/spending/:userId
    * Must be declared after specific paths (trends, summary, export, by-service) to avoid route conflicts.
    */
-  @Get(':userId')
+  @Get('spending/:userId')
   async getUserDetailedSpending(
     @CurrentUser() user: { id: string },
     @Param('userId') userId: string,

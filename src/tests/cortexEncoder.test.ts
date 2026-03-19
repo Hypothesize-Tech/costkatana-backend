@@ -151,9 +151,8 @@ describe('Cortex Encoder Service', () => {
       expect(cacheInfo.averageConfidence).toBeGreaterThanOrEqual(0);
     });
 
-    // Note: clearCache method not implemented in current version
-    it.skip('should clear cache when requested', () => {
-      // encoderService.clearCache();
+    it('should clear cache when requested', () => {
+      encoderService.clearCache();
       const cacheInfo = encoderService.getCacheInfo();
       expect(cacheInfo).toBeDefined();
     });

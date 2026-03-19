@@ -339,8 +339,12 @@ export class AgentController {
         'Configure model settings for my content generation project',
       ];
 
-      // Shuffle and take 4 suggestions
-      const shuffled = suggestions.sort(() => 0.5 - Math.random());
+      // Fisher-Yates shuffle for unbiased random order
+      const shuffled = [...suggestions];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
 
       this.logger.log(
         `Generated ${shuffled.slice(0, 4).length} suggestions for user ${user.id}`,

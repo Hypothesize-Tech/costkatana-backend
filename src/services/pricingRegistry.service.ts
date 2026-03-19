@@ -1,6 +1,7 @@
 /**
- * Bridge: Re-exports PricingRegistryService for legacy Express middleware.
- * For NestJS usage, inject PricingRegistryService from PricingModule.
+ * @deprecated Use PricingRegistryService from PricingModule via DI.
+ * This stub is only for legacy code that cannot use DI.
+ * RequestInterceptorMiddleware now uses the real PricingRegistryService.
  */
 import {
   PricingRegistryService as NestPricingRegistryService,

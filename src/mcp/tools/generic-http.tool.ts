@@ -215,7 +215,7 @@ export class GenericHTTPTool {
     ToolRegistry.registerTool(
       createToolSchema(
         'http_request',
-        'github', // Using github as placeholder integration type
+        'generic',
         'Make HTTP requests to external APIs',
         'POST',
         [
@@ -258,7 +258,7 @@ export class GenericHTTPTool {
                 recoverable: false,
               },
               {
-                integration: 'github',
+                integration: 'generic',
                 operation: 'http_request',
                 latency: Date.now() - startTime,
                 httpMethod: 'POST',
@@ -280,7 +280,7 @@ export class GenericHTTPTool {
                 retryAfter: rateLimitCheck.retryAfter,
               },
               {
-                integration: 'github',
+                integration: 'generic',
                 operation: 'http_request',
                 latency: Date.now() - startTime,
                 httpMethod: 'POST',
@@ -306,7 +306,7 @@ export class GenericHTTPTool {
                 recoverable: false,
               },
               {
-                integration: 'github',
+                integration: 'generic',
                 operation: 'http_request',
                 latency: Date.now() - startTime,
                 httpMethod: 'POST',
@@ -368,7 +368,7 @@ export class GenericHTTPTool {
               data: response.data,
             },
             {
-              integration: 'github',
+              integration: 'generic',
               operation: 'http_request',
               latency: Date.now() - startTime,
               httpMethod: 'POST',
@@ -387,7 +387,7 @@ export class GenericHTTPTool {
           });
 
           return createErrorResponse(createMCPError(error), {
-            integration: 'github',
+            integration: 'generic',
             operation: 'http_request',
             latency: Date.now() - startTime,
             httpMethod: 'POST',

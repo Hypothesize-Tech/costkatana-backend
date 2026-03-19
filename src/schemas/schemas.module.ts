@@ -54,6 +54,10 @@ import {
   TeamMemberSchema,
 } from './team-project/team-member.schema';
 import { Project, ProjectSchema } from './team-project/project.schema';
+import {
+  Organization,
+  OrganizationSchema,
+} from './team-project/organization.schema';
 import { Activity, ActivitySchema } from './team-project/activity.schema';
 
 // Integration schemas
@@ -233,6 +237,10 @@ import {
   McpPermissionAuditLog,
   McpPermissionAuditLogSchema,
 } from './security/mcp-permission-audit-log.schema';
+import {
+  McpSecurityEventLog,
+  McpSecurityEventLogSchema,
+} from './security/mcp-security-event-log.schema';
 import { AuditAnchor, AuditAnchorSchema } from './security/audit-anchor.schema';
 import {
   DailyAnchorSummary,
@@ -365,6 +373,12 @@ import {
   DocsPageViewSchema,
 } from './docs-analytics/docs-page-view.schema';
 
+// Gateway schemas
+import {
+  GatewayProviderMetrics,
+  GatewayProviderMetricsSchema,
+} from './gateway/gateway-provider-metrics.schema';
+
 // Auto-simulation schemas
 import {
   AutoSimulationSettings,
@@ -405,6 +419,7 @@ import {
       },
 
       // Team & Project schemas
+      { name: Organization.name, schema: OrganizationSchema },
       { name: Team.name, schema: TeamSchema },
       { name: TeamMember.name, schema: TeamMemberSchema },
       { name: Project.name, schema: ProjectSchema },
@@ -477,6 +492,7 @@ import {
       { name: AWSAuditLog.name, schema: AWSAuditLogSchema },
       { name: McpPermission.name, schema: McpPermissionSchema },
       { name: McpPermissionAuditLog.name, schema: McpPermissionAuditLogSchema },
+      { name: McpSecurityEventLog.name, schema: McpSecurityEventLogSchema },
       { name: AuditAnchor.name, schema: AuditAnchorSchema },
       { name: DailyAnchorSummary.name, schema: DailyAnchorSummarySchema },
       { name: RootOfTrust.name, schema: RootOfTrustSchema },
@@ -536,6 +552,12 @@ import {
       { name: DocsPageRating.name, schema: DocsPageRatingSchema },
       { name: DocsUserPreference.name, schema: DocsUserPreferenceSchema },
       { name: DocsPageView.name, schema: DocsPageViewSchema },
+
+      // Gateway schemas
+      {
+        name: GatewayProviderMetrics.name,
+        schema: GatewayProviderMetricsSchema,
+      },
 
       // Auto-simulation schemas
       {

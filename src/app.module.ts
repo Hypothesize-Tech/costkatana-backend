@@ -47,6 +47,7 @@ import { ReferenceImageModule } from './modules/reference-image/reference-image.
 import { RagEvalModule } from './modules/rag-eval/rag-eval.module';
 import { PromptTemplateModule } from './modules/prompt-template/prompt-template.module';
 import { ProjectModule } from './modules/project/project.module';
+import { OrganizationModule } from './modules/organization/organization.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { OAuthModule } from './modules/oauth/oauth.module';
 import { NotebookModule } from './modules/notebook/notebook.module';
@@ -98,6 +99,13 @@ import { AutoSimulationModule } from './modules/auto-simulation/auto-simulation.
 // Agent trace module
 import { AgentTraceModule } from './modules/agent-trace/agent-trace.module';
 
+// Unregistered modules (BedrockModule must precede IngestionModule)
+import { BedrockModule } from './modules/bedrock/bedrock.module';
+import { IngestionModule } from './modules/ingestion/ingestion.module';
+import { AgentIdentityModule } from './modules/agent-identity/agent-identity.module';
+import { AlertModule } from './modules/alert/alert.module';
+import { SharedPreferencesModule } from './modules/shared-preferences/shared-preferences.module';
+
 // Agent and RAG modules
 import { AgentModule } from './modules/agent/agent.module';
 import { RagModule } from './modules/rag/rag.module';
@@ -116,6 +124,9 @@ import { EnterpriseSecurityModule } from './modules/enterprise-security/enterpri
 
 // Request Scoring module
 import { RequestScoringModule } from './modules/request-scoring/request-scoring.module';
+
+// ROI Evaluator module
+import { RoiEvaluatorModule } from './modules/roi-evaluator/roi-evaluator.module';
 
 // Community module
 import { CommunityModule } from './modules/community/community.module';
@@ -201,6 +212,7 @@ import { ComprehensiveTrackingMiddleware } from './modules/usage/middleware/comp
     RagEvalModule,
     PromptTemplateModule,
     ProjectModule,
+    OrganizationModule,
     OnboardingModule,
     OAuthModule,
     NotebookModule,
@@ -244,6 +256,17 @@ import { ComprehensiveTrackingMiddleware } from './modules/usage/middleware/comp
     AutoSimulationModule,
     AgentTraceModule,
 
+    // Bedrock (required by IngestionModule and others)
+    BedrockModule,
+
+    // Ingestion (document ingestion, vector storage - was dead route)
+    IngestionModule,
+
+    // Agent identity, alert, shared preferences
+    AgentIdentityModule,
+    AlertModule,
+    SharedPreferencesModule,
+
     // AI Agent and RAG modules
     AgentModule,
     RagModule,
@@ -268,6 +291,9 @@ import { ComprehensiveTrackingMiddleware } from './modules/usage/middleware/comp
 
     // Request Scoring module
     RequestScoringModule,
+
+    // ROI Evaluator module
+    RoiEvaluatorModule,
   ],
   controllers: [AppController],
   providers: [

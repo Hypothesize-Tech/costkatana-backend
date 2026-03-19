@@ -4,6 +4,7 @@ import {
   Get,
   Body,
   Param,
+  Query,
   Logger,
   HttpException,
   HttpStatus,
@@ -31,6 +32,40 @@ export class PricingController {
     private readonly realtimePricingService: RealtimePricingService,
     private readonly webScraperService: WebScraperService,
   ) {}
+
+  /**
+   * Get budget recommendations based on usage tier and optimization best practices
+   * Matches Express GET /cost-estimation/budget-recommendations
+   */
+  @Get('budget-recommendations')
+  async getBudgetRecommendations(
+    @Query('userId') userId?: string,
+    @Query('projectId') projectId?: string,
+  ) {
+    const tiers = [
+      { min: 0, max: 50, label: 'Starter', recommended: 25 },
+      { min: 50, max: 200, label: 'Growth', recommended: 100 },
+      { min: 200, max: 1000, label: 'Scale', recommended: 500 },
+      { min: 1000, max: Infinity, label: 'Enterprise', recommended: 2500 },
+    ];
+    return {
+      success: true,
+      data: {
+        tiers: tiers.map((t) => ({
+          ...t,
+          maxFormatted: t.max === Infinity ? 'unlimited' : `$${t.max}`,
+          suggestedAlerts: [60, 80, 95],
+        })),
+        recommendations: [
+          'Set alerts at 60%, 80%, and 95% of budget to avoid surprises',
+          'Use lower-cost models for high-volume, low-complexity tasks',
+          'Enable semantic caching to reduce repeated API costs by 70-80%',
+          'Consider reserved capacity or annual commits for predictable workloads',
+        ],
+        lastUpdated: new Date(),
+      },
+    };
+  }
 
   /**
    * Calculate costs for model usage

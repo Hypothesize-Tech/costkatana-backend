@@ -5,6 +5,8 @@
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
 
 export interface ProviderAdapter {
   providerId: string;
@@ -45,7 +47,10 @@ export class ProviderAdapterInitializerService implements OnModuleInit {
   private adapters: Map<string, ProviderAdapter> = new Map();
   private readonly healthCheckInterval: NodeJS.Timeout;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly httpService: HttpService,
+  ) {
     // Start health monitoring
     this.healthCheckInterval = setInterval(() => {
       this.performHealthChecks();
@@ -219,31 +224,114 @@ export class ProviderAdapterInitializerService implements OnModuleInit {
   }
 
   /**
-   * Test adapter connectivity and functionality
+   * Test adapter connectivity with a real lightweight provider API call.
    */
   private async testAdapter(adapter: ProviderAdapter): Promise<boolean> {
     try {
       const startTime = Date.now();
+      const apiKey = adapter.config.apiKey;
+      const baseUrl =
+        adapter.config.baseUrl?.replace(/\/$/, '') ?? this.getDefaultBaseUrl(adapter.type);
 
-      // Simple test request (would use actual provider SDK)
-      await new Promise((resolve) => setTimeout(resolve, 100)); // Mock delay
+      if (!apiKey) {
+        this.logger.warn('Adapter has no API key', {
+          providerId: adapter.providerId,
+        });
+        return false;
+      }
+
+      const url = this.getHealthCheckUrl(adapter.type, baseUrl, apiKey);
+      const headers = this.getHealthCheckHeaders(adapter.type, apiKey);
+
+      const response = await firstValueFrom(
+        this.httpService.get(url, {
+          headers,
+          timeout: 8000,
+          validateStatus: (status) => status < 500,
+        }),
+      );
 
       const responseTime = Date.now() - startTime;
       adapter.health.responseTime = responseTime;
-      adapter.health.successCount++;
       adapter.health.lastChecked = new Date();
 
+      if (response.status >= 400) {
+        adapter.health.errorCount++;
+        this.logger.warn('Adapter health check returned error status', {
+          providerId: adapter.providerId,
+          status: response.status,
+        });
+        return false;
+      }
+
+      adapter.health.successCount++;
       return true;
     } catch (error) {
       adapter.health.errorCount++;
       adapter.health.lastChecked = new Date();
 
-      this.logger.warn('Adapter test failed', {
+      this.logger.warn('Adapter health check failed', {
         providerId: adapter.providerId,
         error: error instanceof Error ? error.message : String(error),
       });
 
       return false;
+    }
+  }
+
+  private getDefaultBaseUrl(type: ProviderAdapter['type']): string {
+    switch (type) {
+      case 'openai':
+        return 'https://api.openai.com';
+      case 'anthropic':
+        return 'https://api.anthropic.com';
+      case 'google':
+        return 'https://generativelanguage.googleapis.com';
+      default:
+        return 'https://api.openai.com';
+    }
+  }
+
+  private getHealthCheckUrl(
+    type: ProviderAdapter['type'],
+    baseUrl: string,
+    apiKey: string,
+  ): string {
+    switch (type) {
+      case 'openai':
+        return `${baseUrl}/v1/models`;
+      case 'anthropic':
+        return `${baseUrl}/v1/models`;
+      case 'google':
+        return `${baseUrl}/v1beta/models?key=${encodeURIComponent(apiKey)}`;
+      default:
+        return `${baseUrl}/v1/models`;
+    }
+  }
+
+  private getHealthCheckHeaders(
+    type: ProviderAdapter['type'],
+    apiKey: string,
+  ): Record<string, string> {
+    switch (type) {
+      case 'openai':
+        return {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        };
+      case 'anthropic':
+        return {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        };
+      case 'google':
+        return { 'Content-Type': 'application/json' };
+      default:
+        return {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        };
     }
   }
 

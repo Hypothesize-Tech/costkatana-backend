@@ -76,7 +76,7 @@ export class PlanGeneratorService {
     action: string,
     resourceDetails?: any,
     region: string = 'us-east-1',
-  ): Promise<{ hourly: number; monthly: number }> {
+  ): Promise<{ hourly: number; monthly: number; dataSource: 'live' | 'fallback' }> {
     try {
       // Extract service and operation from action
       const [service, operation] = action.split('.');
@@ -126,10 +126,10 @@ export class PlanGeneratorService {
         return {
           hourly: operation === 'stop' ? -hourly : hourly, // Negative for savings
           monthly: operation === 'stop' ? -monthly : monthly,
+          dataSource: 'live',
         };
       }
 
-      // Fallback to hardcoded values if pricing API fails
       this.logger.warn(
         'AWS Pricing API unavailable, using fallback estimates',
         {
@@ -138,7 +138,9 @@ export class PlanGeneratorService {
         },
       );
 
-      return FALLBACK_COST_ESTIMATES[action] || { hourly: 0, monthly: 0 };
+      const fallback =
+        FALLBACK_COST_ESTIMATES[action] || { hourly: 0, monthly: 0 };
+      return { ...fallback, dataSource: 'fallback' as const };
     } catch (error) {
       this.logger.error('Failed to get action cost estimate', {
         action,
@@ -146,7 +148,9 @@ export class PlanGeneratorService {
         error: error instanceof Error ? error.message : String(error),
       });
 
-      return FALLBACK_COST_ESTIMATES[action] || { hourly: 0, monthly: 0 };
+      const fallback =
+        FALLBACK_COST_ESTIMATES[action] || { hourly: 0, monthly: 0 };
+      return { ...fallback, dataSource: 'fallback' as const };
     }
   }
 
@@ -544,6 +548,7 @@ export class PlanGeneratorService {
 
     // Calculate hourly cost impact using AWS Pricing API
     let estimatedHourlyCost = 0;
+    let costDataSource: 'live' | 'fallback' = 'live';
     for (const step of steps) {
       const actionKey = `${step.service}.${step.action}`;
       const costEstimate = await this.getActionCostEstimate(
@@ -552,6 +557,7 @@ export class PlanGeneratorService {
         region,
       );
       estimatedHourlyCost += costEstimate.hourly;
+      if (costEstimate.dataSource === 'fallback') costDataSource = 'fallback';
     }
 
     const riskScore = this.calculateRiskScore(steps);
@@ -610,6 +616,7 @@ export class PlanGeneratorService {
       servicesAffected,
       requiresApproval,
       reversible,
+      costDataSource,
     };
   }
 

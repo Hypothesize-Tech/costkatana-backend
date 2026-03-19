@@ -1,6 +1,14 @@
 import { Injectable, NestMiddleware, Logger } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { ConfigService } from '@nestjs/config';
+import type { TrafficPredictionService } from '../../modules/analytics/services/traffic-prediction.service';
+import type { CacheService } from '../cache/cache.service';
+import { randomUUID } from 'crypto';
+
+/** Sliding window duration in ms (1 second for RPS calculation) */
+const TRAFFIC_WINDOW_MS = 1000;
+const TRAFFIC_RPS_KEY = 'traffic:rps:window';
+const TRAFFIC_USERS_KEY = 'traffic:users:window';
 
 /**
  * Enterprise Traffic Management Middleware
@@ -23,17 +31,25 @@ export class EnterpriseTrafficManagementMiddleware implements NestMiddleware {
   private maxConcurrentRequests: number;
   private activeRequests = 0;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private trafficPredictionService?: TrafficPredictionService,
+    private cacheService?: CacheService,
+  ) {
     this.maxConcurrentRequests = parseInt(
       this.configService.get('ENTERPRISE_MAX_CONCURRENT_REQUESTS', '10'),
     );
   }
 
   async use(req: Request, res: Response, next: NextFunction) {
+    // Update sliding window for all requests (used by TrafficPredictionService)
+    this.updateTrafficSlidingWindow(req).catch(() => {});
+
     const user = (req as any).user;
     const isEnterpriseUser = user?.subscription?.plan === 'enterprise';
 
     if (!isEnterpriseUser) {
+      this.attachTrafficRecordHandler(res, req);
       return next();
     }
 
@@ -64,7 +80,7 @@ export class EnterpriseTrafficManagementMiddleware implements NestMiddleware {
 
     // Process request immediately
     this.activeRequests++;
-    this.attachCleanupHandler(res);
+    this.attachCleanupHandler(res, req);
     next();
   }
 
@@ -102,7 +118,7 @@ export class EnterpriseTrafficManagementMiddleware implements NestMiddleware {
       }
 
       this.activeRequests++;
-      this.attachCleanupHandler(queuedRequest.res);
+      this.attachCleanupHandler(queuedRequest.res, queuedRequest.req);
 
       this.logger.log('Processing queued enterprise request', {
         userId: (queuedRequest.req as any).user?.id,
@@ -154,16 +170,122 @@ export class EnterpriseTrafficManagementMiddleware implements NestMiddleware {
   /**
    * Attach cleanup handler to track when request completes
    */
-  private attachCleanupHandler(res: Response) {
+  private attachCleanupHandler(res: Response, req?: Request) {
+    const startTime = Date.now();
     res.on('finish', () => {
       this.activeRequests = Math.max(0, this.activeRequests - 1);
-      // Process any queued requests now that capacity is available
+      if (this.trafficPredictionService && req) {
+        this.recordTrafficData(req, startTime, res.statusCode).catch(() => {});
+      }
       setImmediate(() => this.processQueuedRequests());
     });
 
     res.on('close', () => {
       this.activeRequests = Math.max(0, this.activeRequests - 1);
+      if (this.trafficPredictionService && req) {
+        this.recordTrafficData(req, startTime, res.statusCode).catch(() => {});
+      }
       setImmediate(() => this.processQueuedRequests());
+    });
+  }
+
+  /**
+   * Attach handler to record traffic on completion (for non-enterprise requests)
+   */
+  private attachTrafficRecordHandler(res: Response, req: Request): void {
+    const startTime = Date.now();
+    const recordTraffic = () => {
+      if (this.trafficPredictionService) {
+        this.recordTrafficData(req, startTime, res.statusCode).catch(() => {});
+      }
+    };
+    res.once('finish', recordTraffic);
+    res.once('close', recordTraffic);
+  }
+
+  /**
+   * Update Redis sliding window with this request (for RPS and unique user count)
+   */
+  private async updateTrafficSlidingWindow(req: Request): Promise<void> {
+    if (!this.cacheService) return;
+    try {
+      const now = Date.now();
+      const userId = (req as any).user?.id;
+      const userKey = userId ? `u:${userId}` : `ip:${req.ip || (req.headers['x-forwarded-for'] as string) || 'unknown'}`;
+
+      await this.cacheService.zadd(TRAFFIC_RPS_KEY, now, `${now}:${randomUUID()}`);
+      await this.cacheService.zadd(TRAFFIC_USERS_KEY, now, userKey);
+      await this.cacheService.zremrangebyscore(
+        TRAFFIC_RPS_KEY,
+        0,
+        now - TRAFFIC_WINDOW_MS,
+      );
+      await this.cacheService.zremrangebyscore(
+        TRAFFIC_USERS_KEY,
+        0,
+        now - TRAFFIC_WINDOW_MS,
+      );
+    } catch {
+      // Non-critical; sliding window is best-effort
+    }
+  }
+
+  /**
+   * Get current requests-per-second and unique users from Redis sliding window
+   */
+  private async getTrafficSlidingWindowMetrics(): Promise<{
+    requestsPerSecond: number;
+    uniqueUsers: number;
+  }> {
+    if (!this.cacheService) {
+      return { requestsPerSecond: 1, uniqueUsers: 1 };
+    }
+    try {
+      const now = Date.now();
+      await this.cacheService.zremrangebyscore(
+        TRAFFIC_RPS_KEY,
+        0,
+        now - TRAFFIC_WINDOW_MS,
+      );
+      await this.cacheService.zremrangebyscore(
+        TRAFFIC_USERS_KEY,
+        0,
+        now - TRAFFIC_WINDOW_MS,
+      );
+      const rps = await this.cacheService.zcard(TRAFFIC_RPS_KEY);
+      const uniqueUsers = await this.cacheService.zcard(TRAFFIC_USERS_KEY);
+      return {
+        requestsPerSecond: rps,
+        uniqueUsers: Math.max(1, uniqueUsers),
+      };
+    } catch {
+      return { requestsPerSecond: 1, uniqueUsers: 1 };
+    }
+  }
+
+  private async recordTrafficData(
+    req: Request,
+    startTime: number,
+    statusCode: number,
+  ): Promise<void> {
+    if (!this.trafficPredictionService) return;
+    const responseTime = Date.now() - startTime;
+    const { requestsPerSecond, uniqueUsers } =
+      await this.getTrafficSlidingWindowMetrics();
+    await this.trafficPredictionService.recordTrafficData({
+      requestsPerSecond,
+      uniqueUsers,
+      responseTime,
+      errorRate: statusCode >= 400 ? 1 : 0,
+      cpuUsage: 0,
+      memoryUsage: 0,
+      endpointDistribution: { [req.path]: 1 },
+      userTierDistribution: {
+        [(req as any).user?.subscription?.plan || 'free']: 1,
+      },
+      geographicDistribution: {
+        [(req.headers['x-forwarded-for'] as string) || 'unknown']: 1,
+      },
     });
   }
 }

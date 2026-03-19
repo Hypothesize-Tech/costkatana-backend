@@ -13,6 +13,10 @@ import {
   AIProviderAuditSchema,
 } from '../../schemas/security/ai-provider-audit.schema';
 import {
+  UserDataConsent,
+  UserDataConsentSchema,
+} from '../../schemas/security/user-data-consent.schema';
+import {
   ComprehensiveAudit,
   ComprehensiveAuditSchema,
 } from '../../schemas/security/comprehensive-audit.schema';
@@ -39,6 +43,7 @@ import { SecurityController } from './security.controller';
       { name: ThreatLog.name, schema: ThreatLogSchema },
       { name: TraceSpan.name, schema: TraceSpanSchema },
       { name: AIProviderAudit.name, schema: AIProviderAuditSchema },
+      { name: UserDataConsent.name, schema: UserDataConsentSchema },
       { name: ComprehensiveAudit.name, schema: ComprehensiveAuditSchema },
       { name: SecurityAlert.name, schema: SecurityAlertSchema },
     ]),

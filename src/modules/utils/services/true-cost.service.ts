@@ -4,6 +4,8 @@ import { Model } from 'mongoose';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Usage } from '../../../schemas/core/usage.schema';
+import { calculateCost, getModelPricing } from '../../../utils/pricing';
+import { getHardcodedFallbackPricing } from '../../../config/pricing-fallback.config';
 
 interface TrueCostComponents {
   // Provider API costs
@@ -295,7 +297,32 @@ export class TrueCostService {
       return this.calculateCostFromPricingData(metrics, pricingData);
     }
 
-    // Use hardcoded pricing as fallback
+    // Use dynamic pricing registry (utils/pricing) as fallback before hardcoded
+    try {
+      const modelPricing = getModelPricing(metrics.provider, metrics.model);
+      if (modelPricing) {
+        const totalCost = calculateCost(
+          metrics.inputTokens,
+          metrics.outputTokens,
+          metrics.provider,
+          metrics.model,
+        );
+        return {
+          cost: totalCost,
+          details:
+            `${metrics.provider}/${metrics.model}: ` +
+            `Input: ${(metrics.inputTokens / 1000).toFixed(2)}K, ` +
+            `Output: ${(metrics.outputTokens / 1000).toFixed(2)}K, ` +
+            `Total: $${totalCost.toFixed(6)} (from pricing registry)`,
+        };
+      }
+    } catch (err) {
+      this.logger.debug('Pricing registry lookup failed, using hardcoded', {
+        provider: metrics.provider,
+        model: metrics.model,
+      });
+    }
+
     return this.calculateHardcodedPricing(metrics);
   }
 
@@ -357,51 +384,26 @@ export class TrueCostService {
   }
 
   /**
-   * Calculate hardcoded pricing (fallback)
+   * Calculate hardcoded pricing (last-resort fallback).
+   * Uses config/pricing-fallback.config.ts. Emits metric for monitoring.
    */
   private calculateHardcodedPricing(metrics: RequestMetrics): {
     cost: number;
     details: string;
   } {
-    let inputCostPer1K = 0.0015; // Default input cost
-    let outputCostPer1K = 0.002; // Default output cost
+    this.logger.warn(
+      `Using hardcoded pricing fallback for ${metrics.provider}/${metrics.model} - pricing registry/DB lookup unavailable. Consider syncing model_pricing collection.`,
+      {
+        provider: metrics.provider,
+        model: metrics.model,
+        metric: 'pricing.hardcoded_fallback',
+      },
+    );
 
-    // Provider-specific pricing
-    if (metrics.provider === 'openai') {
-      if (
-        metrics.model.includes('gpt-4-turbo') ||
-        metrics.model.includes('gpt-4-1106')
-      ) {
-        inputCostPer1K = 0.01;
-        outputCostPer1K = 0.03;
-      } else if (metrics.model.includes('gpt-4')) {
-        inputCostPer1K = 0.03;
-        outputCostPer1K = 0.06;
-      } else if (metrics.model.includes('gpt-3.5-turbo')) {
-        inputCostPer1K = 0.0015;
-        outputCostPer1K = 0.002;
-      }
-    } else if (metrics.provider === 'anthropic') {
-      if (metrics.model.includes('claude-3-opus')) {
-        inputCostPer1K = 0.015;
-        outputCostPer1K = 0.075;
-      } else if (metrics.model.includes('claude-3-sonnet')) {
-        inputCostPer1K = 0.003;
-        outputCostPer1K = 0.015;
-      } else if (metrics.model.includes('claude-3-haiku')) {
-        inputCostPer1K = 0.00025;
-        outputCostPer1K = 0.00125;
-      }
-    } else if (metrics.provider === 'google') {
-      if (metrics.model.includes('gemini-pro')) {
-        inputCostPer1K = 0.00025;
-        outputCostPer1K = 0.0005;
-      }
-    } else if (metrics.provider === 'groq') {
-      // Groq typically has lower costs
-      inputCostPer1K = 0.0005;
-      outputCostPer1K = 0.0005;
-    }
+    const { inputCostPer1K, outputCostPer1K } = getHardcodedFallbackPricing(
+      metrics.provider,
+      metrics.model,
+    );
 
     const inputCost = (metrics.inputTokens / 1000) * inputCostPer1K;
     const outputCost = (metrics.outputTokens / 1000) * outputCostPer1K;
@@ -410,7 +412,7 @@ export class TrueCostService {
     return {
       cost: totalCost,
       details:
-        `${metrics.provider}/${metrics.model}: ` +
+        `${metrics.provider}/${metrics.model} (hardcoded fallback): ` +
         `Input: ${(metrics.inputTokens / 1000).toFixed(2)}K @ $${inputCostPer1K.toFixed(4)}/1K = $${inputCost.toFixed(6)}, ` +
         `Output: ${(metrics.outputTokens / 1000).toFixed(2)}K @ $${outputCostPer1K.toFixed(4)}/1K = $${outputCost.toFixed(6)}, ` +
         `Total: $${totalCost.toFixed(6)}`,

@@ -503,13 +503,13 @@ export class ROIMetricsService {
       const averageCostPerExecution =
         totalExecutions > 0 ? totalCost / totalExecutions : 0;
 
-      // Calculate efficiency score (simplified)
       const efficiencyFactors = {
         costPerExecution: averageCostPerExecution,
         orchestrationOverhead:
           totalOrchestrationCost / Math.max(totalCost, 0.01),
-        modelEfficiency: 0.8, // Would need model performance data
-        cachingUtilization: 0.3, // Would need caching data
+        modelEfficiency: 0.8,
+        cachingUtilization: 0.3,
+        _estimatedFields: ['modelEfficiency', 'cachingUtilization'] as const,
       };
 
       const efficiencyScore = Math.min(

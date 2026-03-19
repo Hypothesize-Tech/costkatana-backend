@@ -25,6 +25,7 @@ interface RawAggregateData {
   successCount: number;
   errorCount: number;
   cacheHits: number;
+  retryCounts: number[];
   totalRequests: number;
   uniqueTenants: Set<string>;
 }
@@ -310,6 +311,7 @@ export class GlobalBenchmarksService {
       successCount: 0,
       errorCount: 0,
       cacheHits: 0,
+      retryCounts: [],
       totalRequests: 0,
       uniqueTenants: new Set(),
     };
@@ -345,7 +347,7 @@ export class GlobalBenchmarksService {
         createdAt: { $gte: startDate, $lte: endDate },
       })
       .select(
-        'userId responseTime cost promptTokens completionTokens totalTokens errorOccurred',
+        'userId responseTime cost promptTokens completionTokens totalTokens errorOccurred metadata promptCaching',
       )
       .limit(50000)
       .lean();
@@ -357,6 +359,12 @@ export class GlobalBenchmarksService {
       rawData.inputTokens.push(u.promptTokens || 0);
       rawData.outputTokens.push(u.completionTokens || 0);
       rawData.totalTokens.push(u.totalTokens || 0);
+
+      const cacheHits = (u as any).promptCaching?.cacheHits ?? (u as any).metadata?.cacheHits ?? 0;
+      rawData.cacheHits += cacheHits;
+
+      const retryCount = (u as any).metadata?.retryCount ?? (u as any).metadata?.retryAttempts ?? 0;
+      rawData.retryCounts.push(typeof retryCount === 'number' ? retryCount : 0);
 
       if (!u.errorOccurred) rawData.successCount++;
       else rawData.errorCount++;
@@ -384,6 +392,7 @@ export class GlobalBenchmarksService {
       successCount: 0,
       errorCount: 0,
       cacheHits: 0,
+      retryCounts: [],
       totalRequests: 0,
       uniqueTenants: new Set(),
     };
@@ -421,7 +430,7 @@ export class GlobalBenchmarksService {
         createdAt: { $gte: startDate, $lte: endDate },
       })
       .select(
-        'userId responseTime cost promptTokens completionTokens totalTokens errorOccurred',
+        'userId responseTime cost promptTokens completionTokens totalTokens errorOccurred metadata promptCaching',
       )
       .limit(50000)
       .lean();
@@ -433,6 +442,12 @@ export class GlobalBenchmarksService {
       rawData.inputTokens.push(u.promptTokens || 0);
       rawData.outputTokens.push(u.completionTokens || 0);
       rawData.totalTokens.push(u.totalTokens || 0);
+
+      const cacheHits = (u as any).promptCaching?.cacheHits ?? (u as any).metadata?.cacheHits ?? 0;
+      rawData.cacheHits += cacheHits;
+
+      const retryCount = (u as any).metadata?.retryCount ?? (u as any).metadata?.retryAttempts ?? 0;
+      rawData.retryCounts.push(typeof retryCount === 'number' ? retryCount : 0);
 
       if (!u.errorOccurred) rawData.successCount++;
       else rawData.errorCount++;
@@ -524,7 +539,11 @@ export class GlobalBenchmarksService {
           : 0,
       successRate,
       errorRate,
-      avgRetryCount: 0, // Simplified
+      avgRetryCount:
+        rawData.retryCounts.length > 0
+          ? rawData.retryCounts.reduce((a, b) => a + b, 0) /
+            rawData.retryCounts.length
+          : 0,
       avgCacheHitRate:
         totalRequests > 0 ? rawData.cacheHits / totalRequests : 0,
     };

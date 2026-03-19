@@ -1176,28 +1176,37 @@ export class OptimizationManagerTool extends Tool {
     volume: string,
     complexity: string,
   ): number {
-    // Simplified scoring algorithm
-    let score = 70; // Base score
-
     const modelPricing = getModelPricing(modelId);
     if (!modelPricing || modelPricing.length === 0) return 0;
 
-    // Adjust based on model characteristics
-    if (modelPricing[0].category === 'fast' && volume === 'high') score += 15;
-    if (modelPricing[0].category === 'premium' && complexity === 'complex')
-      score += 10;
-    if (modelPricing[0].category === 'balanced') score += 5;
+    const p = modelPricing[0];
+    let score = 50;
 
-    // Use case specific adjustments
-    if (
-      useCase === 'content-generation' &&
-      modelPricing[0].features.includes('creative-writing')
-    )
-      score += 10;
-    if (useCase === 'api-integration' && modelPricing[0].inputPrice < 1.0)
-      score += 10;
+    // Cost efficiency (lower input+output price = better for high volume)
+    const avgPrice = (p.inputPrice + p.outputPrice) / 2;
+    if (volume === 'high' && avgPrice < 0.001) score += 20;
+    else if (volume === 'high' && avgPrice < 0.01) score += 10;
+    else if (volume === 'low' && p.category === 'premium') score += 15;
 
-    return Math.min(score, 100);
+    // Category match
+    if (p.category === 'fast' && volume === 'high') score += 15;
+    if (p.category === 'premium' && complexity === 'complex') score += 12;
+    if (p.category === 'balanced') score += 8;
+
+    // Feature match (use actual features from pricing)
+    const useCaseFeatures: Record<string, string[]> = {
+      'content-generation': ['creative-writing', 'text-generation'],
+      'api-integration': ['text-generation', 'efficient'],
+      'data-analysis': ['analysis', 'reasoning'],
+      'chatbot': ['text-generation', 'efficient'],
+    };
+    const needed = useCaseFeatures[useCase] || ['text-generation'];
+    const matchCount = needed.filter((f) =>
+      p.features.some((x) => x.toLowerCase().includes(f.toLowerCase())),
+    ).length;
+    score += matchCount * 5;
+
+    return Math.min(100, Math.max(0, score));
   }
 
   private calculateProjectedCost(
@@ -1299,11 +1308,27 @@ export class OptimizationManagerTool extends Tool {
   }
 
   private calculateConfidence(
-    _currentModel: string,
-    _alternativeModel: string,
+    currentModel: string,
+    alternativeModel: string,
   ): number {
-    // Simplified confidence calculation
-    return 75; // Base confidence
+    const currentP = getModelPricing(currentModel)?.[0];
+    const altP = getModelPricing(alternativeModel)?.[0];
+    if (!currentP || !altP) return 50;
+
+    let confidence = 60;
+    const priceDelta = Math.abs(
+      currentP.inputPrice + currentP.outputPrice - altP.inputPrice - altP.outputPrice,
+    );
+    const avgPrice = (currentP.inputPrice + altP.inputPrice) / 2;
+    if (avgPrice > 0 && priceDelta / avgPrice > 0.2) confidence += 15;
+    if (currentP.category === altP.category) confidence += 10;
+    if (
+      currentP.contextWindow >= 100000 &&
+      altP.contextWindow >= 100000
+    )
+      confidence += 5;
+
+    return Math.min(95, confidence);
   }
 
   private generateReasoningForSwitch(
@@ -1326,10 +1351,23 @@ export class OptimizationManagerTool extends Tool {
   }
 
   private assessRiskLevel(
-    _currentModel: string,
-    _alternativeModel: string,
+    currentModel: string,
+    alternativeModel: string,
   ): string {
-    return 'medium'; // Simplified risk assessment
+    const currentP = getModelPricing(currentModel)?.[0];
+    const altP = getModelPricing(alternativeModel)?.[0];
+    if (!currentP || !altP) return 'medium';
+
+    const currentCost = currentP.inputPrice + currentP.outputPrice;
+    const altCost = altP.inputPrice + altP.outputPrice;
+    const savingsRatio = (currentCost - altCost) / (currentCost || 1);
+
+    if (savingsRatio > 0.5 && altP.category === 'fast') return 'low';
+    if (savingsRatio < 0.1) return 'medium';
+    if (currentP.category === 'premium' && altP.category === 'fast')
+      return 'high';
+
+    return 'medium';
   }
 
   private getOptimizationNextSteps(type: string): string[] {

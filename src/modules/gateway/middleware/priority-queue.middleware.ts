@@ -137,6 +137,9 @@ export class PriorityQueueMiddleware implements NestMiddleware {
       const stats = await this.priorityQueueService.getQueueStats();
       res.setHeader('CostKatana-Queue-Depth', stats.queueDepth.toString());
 
+      // Acquire a processing slot (concurrency limit) - releases on res finish
+      await this.priorityQueueService.acquireSlot(req, res, explicitPriority ?? PriorityLevel.NORMAL);
+
       this.logger.debug('Priority queue middleware processed', {
         component: 'PriorityQueueMiddleware',
         operation: 'use',

@@ -2,10 +2,12 @@ import { EventEmitter } from 'events';
 import { loggingService } from '../common/services/logging.service';
 import { LRUCache } from 'lru-cache';
 import { ServiceHelper } from '../utils/serviceHelper';
+import { circuitBreakerStore } from './circuit-breaker.store';
 
 /**
  * Base service class with common patterns and utilities
  * Provides standardized error handling, caching, circuit breaker patterns, retry logic, and monitoring
+ * Uses shared circuitBreakerStore for unified state with ErrorBoundaryMiddleware
  */
 export abstract class BaseService extends EventEmitter {
   protected readonly serviceName: string;
@@ -14,7 +16,7 @@ export abstract class BaseService extends EventEmitter {
   protected failureCount = 0;
   protected lastFailureTime = 0;
 
-  // Circuit breaker configuration
+  // Circuit breaker configuration (shared store uses these)
   protected readonly maxFailures = 5;
   protected readonly resetTimeout = 60000; // 1 minute
   protected readonly halfOpenMaxCalls = 3;
@@ -44,41 +46,28 @@ export abstract class BaseService extends EventEmitter {
   }
 
   /**
-   * Execute operation with circuit breaker protection
+   * Execute operation with circuit breaker protection.
+   * Uses shared circuitBreakerStore for unified state with ErrorBoundaryMiddleware.
    */
   protected async executeWithCircuitBreaker<T>(
     operation: () => Promise<T>,
     operationName: string,
   ): Promise<T> {
-    // Check circuit breaker state
-    if (this.circuitBreakerState === 'open') {
-      if (Date.now() - this.lastFailureTime > this.resetTimeout) {
-        this.circuitBreakerState = 'half-open';
-        this.failureCount = 0;
-        loggingService.info(
-          `Circuit breaker half-open for ${this.serviceName}.${operationName}`,
-        );
-      } else {
-        throw new ServiceError(
-          `Circuit breaker is open for ${this.serviceName}.${operationName}`,
-          'CIRCUIT_BREAKER_OPEN',
-          503,
-        );
-      }
+    const key = `${this.serviceName}.${operationName}`;
+
+    if (circuitBreakerStore.isOpen(key, this.resetTimeout)) {
+      throw new ServiceError(
+        `Circuit breaker is open for ${this.serviceName}.${operationName}`,
+        'CIRCUIT_BREAKER_OPEN',
+        503,
+      );
     }
 
     try {
       const result = await operation();
-
-      // Success - reset circuit breaker
-      if (this.circuitBreakerState === 'half-open') {
-        this.circuitBreakerState = 'closed';
-        this.failureCount = 0;
-        loggingService.info(
-          `Circuit breaker closed for ${this.serviceName}.${operationName}`,
-        );
-      }
-
+      circuitBreakerStore.recordSuccess(key);
+      this.circuitBreakerState = 'closed';
+      this.failureCount = 0;
       return result;
     } catch (error) {
       this.handleFailure(operationName, error);
@@ -87,14 +76,23 @@ export abstract class BaseService extends EventEmitter {
   }
 
   /**
-   * Handle operation failure and update circuit breaker state
+   * Handle operation failure and update shared circuit breaker state
    */
   private handleFailure(operationName: string, error: any): void {
+    const key = `${this.serviceName}.${operationName}`;
+    circuitBreakerStore.recordFailure(key, {
+      maxFailures: this.maxFailures,
+      resetTimeoutMs: this.resetTimeout,
+    });
+
     this.failureCount++;
     this.lastFailureTime = Date.now();
+    const entry = circuitBreakerStore.getState(key);
+    if (entry) {
+      this.circuitBreakerState = entry.state as 'closed' | 'open' | 'half-open';
+    }
 
     if (this.failureCount >= this.maxFailures) {
-      this.circuitBreakerState = 'open';
       loggingService.warn(
         `Circuit breaker opened for ${this.serviceName}.${operationName} after ${this.failureCount} failures`,
         {

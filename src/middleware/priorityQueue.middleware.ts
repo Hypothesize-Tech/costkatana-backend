@@ -43,9 +43,9 @@ function parsePriorityHeader(priorityHeader?: string): number | undefined {
 /**
  * Priority Queue Middleware
  *
- * Can be used in two modes:
- * 1. Queue mode: Enqueues requests for later processing (not implemented yet - requires worker system)
- * 2. Passthrough mode: Just tracks priority metadata without actual queuing
+ * Can be used in two modes (configured via GATEWAY_QUEUE_MODE env):
+ * 1. Queue mode: Enqueues to Redis sorted set, acquires slot when at front (priority-ordered processing)
+ * 2. Passthrough mode: Tracks priority metadata, simple concurrency limit via acquireSlot
  */
 export async function priorityQueueMiddleware(
   req: Request,
@@ -74,7 +74,7 @@ export async function priorityQueueMiddleware(
 
     const priorityLevel = explicitPriority ?? PriorityLevel.NORMAL;
 
-    if (priorityQueueService.isQueueOverCapacity()) {
+    if (await priorityQueueService.isQueueOverCapacity()) {
       loggingService.warn('Priority queue over capacity', {
         requestId: requestId || 'unknown',
         userTier,
@@ -102,7 +102,7 @@ export async function priorityQueueMiddleware(
       res.setHeader('CostKatana-Queue-Status', 'over-capacity');
     }
 
-    if (priorityQueueService.wouldExceedMaxWaitTime()) {
+    if (await priorityQueueService.wouldExceedMaxWaitTime()) {
       loggingService.warn('Priority queue max wait time would be exceeded', {
         requestId: requestId || 'unknown',
         userTier,
@@ -121,7 +121,7 @@ export async function priorityQueueMiddleware(
       res.setHeader('CostKatana-Request-Priority', explicitPriority.toString());
     }
 
-    const stats = priorityQueueService.getQueueStats();
+    const stats = await priorityQueueService.getQueueStats();
     res.setHeader('CostKatana-Queue-Depth', stats.queueDepth.toString());
 
     // Enforce concurrency limit with priority ordering - wait for slot if needed
@@ -157,14 +157,18 @@ export async function getQueueStatus(
   res: Response,
 ): Promise<void> {
   try {
-    const stats = priorityQueueService.getQueueStats();
+    const [stats, isOverCapacity, wouldExceedMaxWait] = await Promise.all([
+      priorityQueueService.getQueueStats(),
+      priorityQueueService.isQueueOverCapacity(),
+      priorityQueueService.wouldExceedMaxWaitTime(),
+    ]);
 
     res.status(200).json({
       success: true,
       data: {
         ...stats,
-        isOverCapacity: priorityQueueService.isQueueOverCapacity(),
-        wouldExceedMaxWait: priorityQueueService.wouldExceedMaxWaitTime(),
+        isOverCapacity,
+        wouldExceedMaxWait,
         timestamp: new Date().toISOString(),
       },
     });

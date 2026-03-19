@@ -8,6 +8,7 @@ import { AdminAiCostMonitoringModule } from '../admin-ai-cost-monitoring/admin-a
 import { UsageModule } from '../usage/usage.module';
 import { ProactiveSuggestionsModule } from '../proactive-suggestions/proactive-suggestions.module';
 import { AuthModule } from '../auth/auth.module';
+import { OnboardingModule } from '../onboarding/onboarding.module';
 import {
   Workspace,
   WorkspaceSchema,
@@ -27,6 +28,7 @@ import {
     forwardRef(() => UsageModule),
     forwardRef(() => ProactiveSuggestionsModule),
     AuthModule, // JwtService, User model, UserSessionService for JwtAuthGuard
+    OnboardingModule, // MagicLinkService for secure magic link generation
   ],
   controllers: [CursorController],
   providers: [CursorService],

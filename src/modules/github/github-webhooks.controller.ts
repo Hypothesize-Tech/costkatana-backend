@@ -196,9 +196,6 @@ export class GitHubWebhooksController {
         },
       );
 
-      // Basic duplicate prevention - log delivery ID for monitoring
-      // In production, you might want to store processed delivery IDs in Redis/cache
-
       // Collect all changed files from all commits
       const changedFiles = new Set<string>();
 

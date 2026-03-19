@@ -19,6 +19,7 @@ import { HumanMessage, AIMessage } from '@langchain/core/messages';
 import { AgentExecutor, createToolCallingAgent } from 'langchain/agents';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { Tool, DynamicTool } from '@langchain/core/tools';
+import { z } from 'zod';
 import {
   LangchainChatStateAnnotation,
   LangchainChatStateGraphType,
@@ -52,6 +53,39 @@ interface LangchainAgentConfig {
   systemPrompt: string;
   autonomyLevel: 'low' | 'medium' | 'high' | 'full';
 }
+
+/** Zod schemas for structured output validation */
+const AutonomyActionSchema = z.object({
+  action: z.string(),
+  priority: z.number(),
+  reasoning: z.string(),
+  parameters: z.record(z.unknown()).optional().default({}),
+});
+const AutonomyActionsSchema = z.array(AutonomyActionSchema);
+
+const InsightsSchema = z.array(z.string());
+
+const ModelRecommendationSchema = z.object({
+  model: z.string(),
+  cost_per_token: z.number(),
+  quality_score: z.number(),
+  use_case: z.string(),
+  savings_estimate: z.string(),
+});
+const ModelRecommendationsSchema = z.array(ModelRecommendationSchema);
+
+const StrategicOptionSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  value: z.string(),
+  description: z.string(),
+});
+const StrategicOptionsSchema = z.array(StrategicOptionSchema);
+
+const GetUserAnalyticsInputSchema = z.object({
+  userId: z.string().optional().default(''),
+  timeRange: z.string().optional().default('all time'),
+});
 
 /**
  * Main Langchain Orchestrator Service
@@ -519,20 +553,16 @@ Your capabilities:
             description: `Fetch the user's AI spending and usage analytics. Use for cost, spending, usage, breakdown, or analytics queries. Input must be JSON: {"userId":"<user_id>","timeRange":"this month"|"last week"|"last 30 days"|"yesterday"|"all time"}. Use userId from context and timeRange from user's natural language.`,
             func: async (input: string): Promise<string> => {
               try {
-                let userId: string;
-                let timeRange: string;
-                try {
-                  const parsed =
-                    typeof input === 'string' ? JSON.parse(input) : input;
-                  userId = parsed?.userId ?? '';
-                  timeRange = parsed?.timeRange ?? 'all time';
-                } catch {
+                const raw = typeof input === 'string' ? JSON.parse(input) : input;
+                const parsed = GetUserAnalyticsInputSchema.safeParse(raw);
+                if (!parsed.success) {
                   return JSON.stringify({
                     error: 'Invalid input',
                     message:
                       'Pass JSON: {"userId":"<id>","timeRange":"this month"|"all time"}',
                   });
                 }
+                const { userId, timeRange } = parsed.data;
                 if (!userId) {
                   return JSON.stringify({
                     error: 'userId is required',
@@ -1197,7 +1227,7 @@ Format as JSON array with: {id, label, value, description, icon}`,
         });
         const optionsContent = optionsResult.output;
 
-        // Parse options (in production, use proper JSON parsing)
+        // Parse options with JSON.parse and Zod validation
         const options = this.parseOptionsFromResponse(optionsContent);
 
         // Create IntegrationSelector-compatible response
@@ -1758,31 +1788,31 @@ Return ONLY the JSON array, no other text.`);
       const response = await llm.invoke([analysisPrompt]);
       const responseText = response.content.toString().trim();
 
-      let actions: Array<{
-        action: string;
-        priority: number;
-        reasoning: string;
-        parameters: any;
-      }> = [];
+      let actions: z.infer<typeof AutonomyActionsSchema> = [];
 
-      try {
-        const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          actions = JSON.parse(jsonMatch[0]);
+      const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          const result = AutonomyActionsSchema.safeParse(parsed);
+          if (result.success) {
+            actions = result.data;
+          } else {
+            this.logger.warn('AI action response failed Zod validation', {
+              error: result.error.message,
+            });
+          }
+        } catch (parseError) {
+          this.logger.warn('Failed to parse AI action response', {
+            error:
+              parseError instanceof Error
+                ? parseError.message
+                : String(parseError),
+          });
         }
-      } catch (parseError) {
-        this.logger.warn('Failed to parse AI action response, using fallback', {
-          error:
-            parseError instanceof Error
-              ? parseError.message
-              : String(parseError),
-        });
       }
 
       actions = actions
-        .filter(
-          (a) => a.action && typeof a.priority === 'number' && a.reasoning,
-        )
         .sort((a, b) => b.priority - a.priority)
         .slice(0, 5);
 
@@ -1884,7 +1914,7 @@ Return ONLY the JSON array, no other text.`);
             };
             break;
 
-          case 'analyze_usage_patterns':
+          case 'analyze_usage_patterns': {
             const analysisPrompt =
               new HumanMessage(`Analyze AI usage patterns and provide insights:
 
@@ -1895,16 +1925,18 @@ Provide 3-5 actionable insights about usage patterns, cost optimization, and eff
 Format as JSON array of strings.`);
 
             const analysisResponse = await llm.invoke([analysisPrompt]);
-            const analysisText = analysisResponse.content.toString();
+            const analysisText = String(analysisResponse.content ?? '');
 
-            let insights = ['Usage pattern analysis in progress'];
-            try {
-              const jsonMatch = analysisText.match(/\[[\s\S]*\]/);
-              if (jsonMatch) {
-                insights = JSON.parse(jsonMatch[0]);
+            let insights: string[] = ['Usage pattern analysis in progress'];
+            const jsonMatch = analysisText.match(/\[[\s\S]*\]/);
+            if (jsonMatch) {
+              try {
+                const parsed = JSON.parse(jsonMatch[0]);
+                const result = InsightsSchema.safeParse(parsed);
+                insights = result.success ? result.data : insights;
+              } catch {
+                // Use fallback insights
               }
-            } catch (e) {
-              // Use fallback insights
             }
 
             executionResult = {
@@ -1916,6 +1948,7 @@ Format as JSON array of strings.`);
               recommendations: insights.slice(0, 3),
             };
             break;
+          }
 
           case 'suggest_aws_integration':
             executionResult = {
@@ -1980,7 +2013,7 @@ Format as JSON array of strings.`);
             };
             break;
 
-          case 'optimize_model_selection':
+          case 'optimize_model_selection': {
             const optimizationPrompt =
               new HumanMessage(`Based on the conversation context, recommend the most cost-effective AI model configuration:
 
@@ -1991,9 +2024,9 @@ Recommend 2-3 optimal model configurations that balance cost, quality, and speed
 Format as JSON array of objects with: model, cost_per_token, quality_score, use_case, savings_estimate.`);
 
             const optimizationResponse = await llm.invoke([optimizationPrompt]);
-            const optimizationText = optimizationResponse.content.toString();
+            const optimizationText = String(optimizationResponse.content ?? '');
 
-            let recommendations = [
+            let recommendations: z.infer<typeof ModelRecommendationsSchema> = [
               {
                 model: 'claude-haiku',
                 cost_per_token: 0.0001,
@@ -2002,13 +2035,16 @@ Format as JSON array of objects with: model, cost_per_token, quality_score, use_
                 savings_estimate: '60%',
               },
             ];
-            try {
-              const jsonMatch = optimizationText.match(/\[[\s\S]*\]/);
-              if (jsonMatch) {
-                recommendations = JSON.parse(jsonMatch[0]);
+            const recMatch = optimizationText.match(/\[[\s\S]*\]/);
+            if (recMatch) {
+              try {
+                const parsed = JSON.parse(recMatch[0]);
+                const result = ModelRecommendationsSchema.safeParse(parsed);
+                recommendations =
+                  result.success ? result.data : recommendations;
+              } catch {
+                // Use fallback recommendations
               }
-            } catch (e) {
-              // Use fallback recommendations
             }
 
             executionResult = {
@@ -2021,6 +2057,7 @@ Format as JSON array of objects with: model, cost_per_token, quality_score, use_
                 recommendations[0]?.savings_estimate || '30-50%',
             };
             break;
+          }
 
           default:
             executionResult = {
@@ -2103,18 +2140,20 @@ Return ONLY a JSON array of predicted needs as strings.`);
 
       let predictions: string[] = [];
 
-      try {
-        const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          predictions = JSON.parse(jsonMatch[0]);
+      const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          const result = InsightsSchema.safeParse(parsed);
+          predictions = result.success ? result.data : predictions;
+        } catch (parseError) {
+          this.logger.warn('Failed to parse AI predictions', {
+            error:
+              parseError instanceof Error
+                ? parseError.message
+                : String(parseError),
+          });
         }
-      } catch (parseError) {
-        this.logger.warn('Failed to parse AI predictions, using fallback', {
-          error:
-            parseError instanceof Error
-              ? parseError.message
-              : String(parseError),
-        });
       }
 
       predictions = predictions
@@ -2153,7 +2192,7 @@ Return ONLY a JSON array of predicted needs as strings.`);
 
   // Helper methods for strategy formation
   private extractStrategicQuestions(strategyContent: string): string[] {
-    // Simple extraction - in production, use AI parsing
+    // Extract question-like lines (numbered lists, ?-ending, what/how/which)
     const lines = strategyContent.split('\n');
     return lines
       .filter(
@@ -2197,26 +2236,15 @@ Return ONLY a JSON array of predicted needs as strings.`);
     return optionKeywords.some((keyword) => lowerQuestion.includes(keyword));
   }
 
-  private parseOptionsFromResponse(content: string): any[] {
-    // Simplified parsing - in production, use proper JSON parsing with error handling
+  private parseOptionsFromResponse(content: string): z.infer<typeof StrategicOptionsSchema> {
     try {
-      return JSON.parse(content);
+      const parsed = JSON.parse(content);
+      const result = StrategicOptionsSchema.safeParse(
+        Array.isArray(parsed) ? parsed : [parsed],
+      );
+      return result.success ? result.data : [];
     } catch {
-      // Fallback options
-      return [
-        {
-          id: '1',
-          label: 'Option 1',
-          value: 'option1',
-          description: 'First choice',
-        },
-        {
-          id: '2',
-          label: 'Option 2',
-          value: 'option2',
-          description: 'Second choice',
-        },
-      ];
+      return [];
     }
   }
 

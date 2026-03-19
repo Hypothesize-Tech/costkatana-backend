@@ -1,10 +1,13 @@
 import { Controller, Get, UseGuards, Logger } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { ControllerHelper } from '../../../common/services/controller-helper.service';
 import { BackgroundVectorizationService } from '../services/background-vectorization.service';
 import { SmartSamplingService } from '../services/smart-sampling.service';
+import { Usage } from '../../../schemas/core/usage.schema';
 
 @Controller('api/admin/dashboard')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -16,6 +19,7 @@ export class AdminDashboardController {
     private readonly backgroundVectorizationService: BackgroundVectorizationService,
     private readonly smartSamplingService: SmartSamplingService,
     private readonly controllerHelper: ControllerHelper,
+    @InjectModel(Usage.name) private readonly usageModel: Model<Usage>,
   ) {}
 
   /**
@@ -59,6 +63,18 @@ export class AdminDashboardController {
           sampleData.sample,
         );
 
+      // Real averageProcessingTime from Usage aggregation
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const avgResult = await this.usageModel
+        .aggregate<{ avgResponseTime: number }>([
+          { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+          { $match: { responseTime: { $gt: 0, $ne: null } } },
+          { $group: { _id: null, avgResponseTime: { $avg: '$responseTime' } } },
+        ])
+        .exec();
+      const averageProcessingTime =
+        avgResult?.[0]?.avgResponseTime ?? 0;
+
       // Prepare dashboard data
       const dashboardData = {
         health: {
@@ -84,7 +100,7 @@ export class AdminDashboardController {
           lastOptimized: new Date(),
         },
         processingStats: {
-          averageProcessingTime: 0, // Placeholder
+          averageProcessingTime,
           totalProcessedItems: jobs.reduce(
             (sum: number, job: any) => sum + (job.processedItems || 0),
             0,

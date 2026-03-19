@@ -947,4 +947,100 @@ export class GoogleService {
       };
     }
   }
+
+  /**
+   * Send email via Gmail API. Requires gmail.send scope.
+   */
+  async sendGmail(
+    connection: GoogleConnectionWithTokens,
+    params: {
+      to: string;
+      subject: string;
+      body: string;
+      cc?: string;
+      bcc?: string;
+    },
+  ): Promise<{ messageId: string; threadId: string }> {
+    return this.executeWithRetry(
+      async () => {
+        const auth = await this.createAuthenticatedClient(connection);
+        const gmail = google.gmail({ version: 'v1', auth });
+        const utf8Subject = `=?utf-8?B?${Buffer.from(params.subject, 'utf-8').toString('base64')}?=`;
+        const raw = [
+          `To: ${params.to}`,
+          params.cc ? `Cc: ${params.cc}` : '',
+          params.bcc ? `Bcc: ${params.bcc}` : '',
+          `Subject: ${utf8Subject}`,
+          'MIME-Version: 1.0',
+          'Content-Type: text/plain; charset=utf-8',
+          '',
+          params.body,
+        ]
+          .filter(Boolean)
+          .join('\r\n');
+        const encoded = Buffer.from(raw)
+          .toString('base64')
+          .replace(/\+/g, '-')
+          .replace(/\//g, '_')
+          .replace(/=+$/, '');
+        const { data } = await gmail.users.messages.send({
+          userId: 'me',
+          requestBody: { raw: encoded },
+        });
+        return {
+          messageId: data.id!,
+          threadId: data.threadId!,
+        };
+      },
+      true,
+      'gmail',
+      'send',
+    );
+  }
+
+  /**
+   * List calendar events. Requires calendar.readonly or calendar scope.
+   */
+  async listCalendarEvents(
+    connection: GoogleConnectionWithTokens,
+    params: {
+      calendarId?: string;
+      timeMin?: Date;
+      timeMax?: Date;
+      maxResults?: number;
+    } = {},
+  ): Promise<
+    Array<{
+      id: string;
+      summary?: string;
+      start?: string;
+      end?: string;
+      htmlLink?: string;
+    }>
+  > {
+    return this.executeWithRetry(
+      async () => {
+        const auth = await this.createAuthenticatedClient(connection);
+        const calendar = google.calendar({ version: 'v3', auth });
+        const { data } = await calendar.events.list({
+          calendarId: params.calendarId ?? 'primary',
+          timeMin: params.timeMin?.toISOString(),
+          timeMax: params.timeMax?.toISOString(),
+          maxResults: params.maxResults ?? 20,
+          singleEvents: true,
+          orderBy: 'startTime',
+        });
+        return (data.items ?? []).map((e) => ({
+          id: e.id!,
+          summary: e.summary,
+          start: e.start?.dateTime ?? e.start?.date,
+          end: e.end?.dateTime ?? e.end?.date,
+          htmlLink: e.htmlLink,
+        }));
+      },
+      true,
+      'calendar',
+      'list',
+    );
+  }
 }

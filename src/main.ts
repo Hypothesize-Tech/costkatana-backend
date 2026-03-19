@@ -8,7 +8,15 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { MixpanelTrackingMiddleware } from './common/middleware/mixpanel-tracking.middleware';
 import { AiLoggingMiddleware } from './common/middleware/ai-logging.middleware';
 import { PricingRegistryService } from './modules/pricing/services/pricing-registry.service';
+import { PriorityQueueService } from './modules/gateway/services/priority-queue.service';
+import { CortexModelRouterService } from './modules/cortex/services/cortex-model-router.service';
+import { GatewayCortexService } from './modules/gateway/services/gateway-cortex.service';
+import { getModelToken } from '@nestjs/mongoose';
+import { InterventionLog } from './schemas/misc/intervention-log.schema';
+import { RequestInterceptorMiddleware } from './common/middleware/request-interceptor.middleware';
 import { EnterpriseTrafficManagementMiddleware } from './common/middleware/enterprise-traffic-management.middleware';
+import { TrafficPredictionService } from './modules/analytics/services/traffic-prediction.service';
+import { CacheService } from './common/cache/cache.service';
 import { GracefulDegradationMiddleware } from './common/middleware/graceful-degradation.middleware';
 import { AgentSandboxMiddleware } from './common/middleware/agent-sandbox.middleware';
 import helmet from 'helmet';
@@ -127,8 +135,23 @@ async function bootstrap() {
     app.get(PricingRegistryService),
   );
   app.use(aiLoggingMiddleware.use.bind(aiLoggingMiddleware));
+  const trafficPredictionService = app.get(TrafficPredictionService);
+  const cacheService = app.get(CacheService);
+  try {
+    const { setTrafficPredictionBridge } = await import(
+      './services/traffic-prediction-bridge'
+    );
+    setTrafficPredictionBridge(trafficPredictionService, cacheService);
+    logger.log('Traffic prediction bridge wired successfully');
+  } catch (e) {
+    logger.warn('Traffic prediction bridge wiring skipped', {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
   const enterpriseTrafficMiddleware = new EnterpriseTrafficManagementMiddleware(
     configService,
+    trafficPredictionService,
+    cacheService,
   );
   app.use(enterpriseTrafficMiddleware.use.bind(enterpriseTrafficMiddleware));
   const gracefulDegradationMiddleware = new GracefulDegradationMiddleware(
@@ -139,6 +162,88 @@ async function bootstrap() {
   );
   const agentSandboxMiddleware = new AgentSandboxMiddleware(configService);
   app.use(agentSandboxMiddleware.use.bind(agentSandboxMiddleware));
+
+  const requestInterceptorMiddleware = new RequestInterceptorMiddleware(
+    app.get(CortexModelRouterService),
+    app.get(PricingRegistryService),
+    app.get(GatewayCortexService),
+    app.get(getModelToken(InterventionLog.name)),
+  );
+  app.use(requestInterceptorMiddleware.use.bind(requestInterceptorMiddleware));
+
+  // Wire legacy bridges to real NestJS services
+  try {
+    const { setPermissionServiceInstance } = await import(
+      './services/permission.service'
+    );
+    const { PermissionService } = await import(
+      './modules/team/services/permission.service'
+    );
+    setPermissionServiceInstance(app.get(PermissionService));
+    logger.log('Permission service bridge wired successfully');
+  } catch (e) {
+    logger.warn(
+      'Permission bridge wiring skipped (TeamModule may not be loaded)',
+      { error: e instanceof Error ? e.message : String(e) },
+    );
+  }
+
+  try {
+    const { setPriorityQueueServiceInstance } = await import(
+      './services/priorityQueue.service'
+    );
+    setPriorityQueueServiceInstance(app.get(PriorityQueueService));
+    logger.log('Priority queue service bridge wired successfully');
+  } catch (e) {
+    logger.warn(
+      'Priority queue bridge wiring skipped (GatewayModule may not be loaded)',
+      { error: e instanceof Error ? e.message : String(e) },
+    );
+  }
+
+  try {
+    const { setPreemptiveThrottlingInstance } = await import(
+      './services/preemptiveThrottling.service'
+    );
+    const { PreemptiveThrottlingService } = await import(
+      './common/services/preemptive-throttling.service'
+    );
+    setPreemptiveThrottlingInstance(app.get(PreemptiveThrottlingService));
+    logger.log('Preemptive throttling bridge wired successfully');
+  } catch (e) {
+    logger.warn(
+      'Preemptive throttling bridge wiring skipped',
+      { error: e instanceof Error ? e.message : String(e) },
+    );
+  }
+
+  try {
+    const { setAiLoggerInstance } = await import('./services/aiLogger.service');
+    const { AILoggerService } = await import(
+      './common/services/ai-logger.service'
+    );
+    setAiLoggerInstance(app.get(AILoggerService));
+    logger.log('AI logger bridge wired successfully');
+  } catch (e) {
+    logger.warn('AI logger bridge wiring skipped', {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+
+  try {
+    const { setMixpanelInstance } = await import(
+      './services/mixpanel.service'
+    );
+    const { MixpanelService } = await import(
+      './common/services/mixpanel.service'
+    );
+    setMixpanelInstance(app.get(MixpanelService));
+    logger.log('Mixpanel bridge wired successfully');
+  } catch (e) {
+    logger.warn('Mixpanel bridge wiring skipped', {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
 
   await app.listen(port);
   logger.log(`Cost Katana Backend (NestJS) listening on port ${port}`);

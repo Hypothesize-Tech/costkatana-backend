@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import {
   Controller,
   Post,
@@ -39,7 +40,7 @@ export class TrackingController {
       const userId = user.id;
       this.logger.log(`Manual request tracking initiated`, { userId });
 
-      const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const requestId = crypto.randomUUID();
 
       this.logger.log('Manual request tracking parameters received', {
         requestId,

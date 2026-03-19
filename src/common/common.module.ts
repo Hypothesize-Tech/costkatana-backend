@@ -1,5 +1,7 @@
 import { Global, Module, forwardRef, type DynamicModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { MongooseModule } from '@nestjs/mongoose';
+import { HttpModule } from '@nestjs/axios';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { CacheModule } from '@nestjs/cache-manager';
 import { LoggerService } from './logger/logger.service';
@@ -17,6 +19,7 @@ import { UserNotificationController } from './controllers/user-notification.cont
 import { EnterpriseSecurityGuard } from './guards/enterprise-security.guard';
 import { ENTERPRISE_SECURITY_OPTIONS } from './guards/enterprise-security.guard';
 import { WebhookSignatureGuard } from './guards/webhook-signature.guard';
+import { SecurityDashboardGuard } from './guards/security-dashboard.guard';
 import { OtelBaggageInterceptor } from './interceptors/otel-baggage.interceptor';
 import { RequestMetricsInterceptor } from './interceptors/request-metrics.interceptor';
 import { GlobalTrackingInterceptor } from './interceptors/global-tracking.interceptor';
@@ -69,6 +72,8 @@ import { AuthModule } from '../modules/auth/auth.module';
 @Module({
   imports: [
     ConfigModule,
+    MongooseModule,
+    HttpModule.register({ timeout: 10000 }),
     EventEmitterModule.forRoot({ wildcard: true }),
     CacheModule.register() as DynamicModule,
     SecurityModule,
@@ -96,6 +101,7 @@ import { AuthModule } from '../modules/auth/auth.module';
     { provide: ENTERPRISE_SECURITY_OPTIONS, useValue: {} },
     EnterpriseSecurityGuard,
     WebhookSignatureGuard,
+    SecurityDashboardGuard,
     OtelBaggageInterceptor,
     RequestMetricsInterceptor,
     GlobalTrackingInterceptor,
@@ -148,6 +154,7 @@ import { AuthModule } from '../modules/auth/auth.module';
     UserNotificationService,
     EnterpriseSecurityGuard,
     WebhookSignatureGuard,
+    SecurityDashboardGuard,
     OtelBaggageInterceptor,
     RequestMetricsInterceptor,
     GlobalTrackingInterceptor,

@@ -17,10 +17,11 @@ interface ExchangeRateCache {
 // Cache duration: 1 hour (3600000 ms)
 const CACHE_DURATION = 60 * 60 * 1000;
 
-// Fallback rates (used if API fails)
+// Fallback rates (used if API fails). Reciprocals must match: INR_TO_USD = 1 / USD_TO_INR
+const USD_TO_INR_FALLBACK = 89.0;
 const FALLBACK_RATES: Record<string, number> = {
-  USD_TO_INR: 89.0,
-  INR_TO_USD: 1 / 83.0,
+  USD_TO_INR: USD_TO_INR_FALLBACK,
+  INR_TO_USD: 1 / USD_TO_INR_FALLBACK,
 };
 
 let rateCache: ExchangeRateCache | null = null;
@@ -184,26 +185,56 @@ export async function convertCurrency(
   }
 }
 
+/** ISO 3166-1 alpha-2 country code to ISO 4217 currency code */
+const COUNTRY_TO_CURRENCY: Record<string, string> = {
+  IN: 'INR',
+  US: 'USD',
+  GB: 'GBP',
+  JP: 'JPY',
+  CA: 'CAD',
+  AU: 'AUD',
+  AE: 'AED',
+  BR: 'BRL',
+  SG: 'SGD',
+  EU: 'EUR',
+  DE: 'EUR',
+  FR: 'EUR',
+  IT: 'EUR',
+  ES: 'EUR',
+  NL: 'EUR',
+  BE: 'EUR',
+  AT: 'EUR',
+  PT: 'EUR',
+  IE: 'EUR',
+  FI: 'EUR',
+  GR: 'EUR',
+  CH: 'CHF',
+  MX: 'MXN',
+  ZA: 'ZAR',
+  KR: 'KRW',
+  HK: 'HKD',
+  NZ: 'NZD',
+  MY: 'MYR',
+  TH: 'THB',
+  ID: 'IDR',
+  PH: 'PHP',
+  PL: 'PLN',
+  SE: 'SEK',
+  NO: 'NOK',
+  DK: 'DKK',
+};
+
 /**
  * Get currency for a country
  * @param countryCode - ISO 3166-1 alpha-2 country code
- * @returns Currency code
+ * @returns Currency code (ISO 4217)
  */
 export function getCurrencyForCountry(countryCode: string | null): string {
   if (!countryCode) {
-    return 'USD'; // Default
+    return 'USD';
   }
-
-  const upperCountryCode = countryCode.toUpperCase();
-
-  // India uses INR
-  if (upperCountryCode === 'IN') {
-    return 'INR';
-  }
-
-  // Add more country-to-currency mappings as needed
-  // For now, default to USD for all other countries
-  return 'USD';
+  const upper = countryCode.toUpperCase().trim();
+  return COUNTRY_TO_CURRENCY[upper] ?? 'USD';
 }
 
 /**

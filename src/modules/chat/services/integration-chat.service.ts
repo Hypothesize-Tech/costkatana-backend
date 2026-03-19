@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { LoggerService } from '../../../common/logger/logger.service';
 import { IntegrationService } from '../../integration/integration.service';
 import { JiraService } from '../../integration/services/jira.service';
@@ -119,6 +120,7 @@ interface ChannelInfo {
 export class IntegrationChatService {
   constructor(
     private readonly logger: LoggerService,
+    private readonly configService: ConfigService,
     private readonly integrationService: IntegrationService,
     private readonly jiraService: JiraService,
     private readonly linearService: LinearService,
@@ -2832,6 +2834,66 @@ export class IntegrationChatService {
               },
             };
           }
+          if (
+            (command.entity === 'calendar' || command.entity === 'event') &&
+            this.configService.get<string>('ENABLE_GOOGLE_GMAIL_CALENDAR') ===
+              'true'
+          ) {
+            const timeMin = command.params?.startDate
+              ? new Date(command.params.startDate as string)
+              : undefined;
+            const timeMax = command.params?.endDate
+              ? new Date(command.params.endDate as string)
+              : undefined;
+            const events = await this.googleService.listCalendarEvents(conn, {
+              timeMin,
+              timeMax,
+              maxResults: 20,
+            });
+            return {
+              success: true,
+              message: `Found ${events.length} calendar event(s)`,
+              data: events,
+              metadata: {
+                type: 'calendar',
+                count: events.length,
+                service: 'google',
+              },
+            };
+          }
+          break;
+
+        case 'send':
+          if (
+            command.entity === 'email' &&
+            this.configService.get<string>('ENABLE_GOOGLE_GMAIL_CALENDAR') ===
+              'true'
+          ) {
+            const to = command.params?.to as string;
+            const subject = (command.params?.subject as string) || '(no subject)';
+            const body = (command.params?.body as string) || '';
+            if (!to) {
+              return {
+                success: false,
+                message: 'Recipient email (to) is required.',
+                error: 'Missing params',
+                metadata: { service: 'google' },
+              };
+            }
+            const result = await this.googleService.sendGmail(conn, {
+              to,
+              subject,
+              body,
+              cc: command.params?.cc as string | undefined,
+              bcc: command.params?.bcc as string | undefined,
+            });
+            return {
+              success: true,
+              message: 'Email sent successfully',
+              data: { messageId: result.messageId, threadId: result.threadId },
+              metadata: { type: 'email', service: 'google' },
+            };
+          }
           break;
 
         case 'get':
@@ -3192,28 +3254,30 @@ export class IntegrationChatService {
           break;
       }
 
-      if (command.entity === 'email') {
+      const gmailCalendarEnabled = this.configService.get<string>(
+        'ENABLE_GOOGLE_GMAIL_CALENDAR',
+        'false',
+      ) === 'true';
+
+      if (command.entity === 'email' && !gmailCalendarEnabled) {
         return {
           success: false,
           message:
-            'Send email via Gmail is not yet supported. Use the Gmail app or web interface.',
-          error: 'Not yet supported',
-          metadata: {
-            service: 'google',
-            plannedFeatures: ['send email'],
-          },
+            'Gmail send is not enabled for this workspace. Set ENABLE_GOOGLE_GMAIL_CALENDAR=true and reconnect with Gmail scope.',
+          error: 'Feature not enabled',
+          metadata: { service: 'google' },
         };
       }
-      if (command.entity === 'calendar' || command.entity === 'event') {
+      if (
+        (command.entity === 'calendar' || command.entity === 'event') &&
+        !gmailCalendarEnabled
+      ) {
         return {
           success: false,
           message:
-            'List calendar / events is not yet supported. Use Google Calendar directly.',
-          error: 'Not yet supported',
-          metadata: {
-            service: 'google',
-            plannedFeatures: ['list calendar', 'list events'],
-          },
+            'Google Calendar is not enabled. Set ENABLE_GOOGLE_GMAIL_CALENDAR=true and reconnect with Calendar scope.',
+          error: 'Feature not enabled',
+          metadata: { service: 'google' },
         };
       }
 

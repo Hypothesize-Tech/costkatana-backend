@@ -758,14 +758,97 @@ export class CortexVocabularyService {
     return score;
   }
 
+  /**
+   * Contextual relevance using embedding-style cosine similarity and Jaccard tag overlap.
+   * Replaces confidence-delta-only approach with:
+   * - Cosine similarity on word-frequency vectors (domain + synonyms + name)
+   * - Jaccard similarity on tag sets (domain ∪ synonyms)
+   */
   private calculateContextualRelevance(
     p1: SemanticPrimitive,
     p2: SemanticPrimitive,
   ): number {
-    // Simplified contextual relevance
+    const jaccard = this.jaccardTagOverlap(p1, p2);
+    const cosine = this.cosineSimilarityFromPrimitives(p1, p2);
     const confidenceSimilarity =
       1 - Math.abs(p1.context.confidence - p2.context.confidence);
-    return confidenceSimilarity;
+    return jaccard * 0.45 + cosine * 0.45 + confidenceSimilarity * 0.1;
+  }
+
+  /** Jaccard similarity on tag sets: domain ∪ synonyms. */
+  private jaccardTagOverlap(p1: SemanticPrimitive, p2: SemanticPrimitive): number {
+    const tags1 = new Set([
+      ...(p1.context.domain ?? []),
+      ...(p1.synonyms ?? []),
+      p1.name,
+      p1.id,
+    ].map((s) => String(s).toLowerCase()));
+    const tags2 = new Set([
+      ...(p2.context.domain ?? []),
+      ...(p2.synonyms ?? []),
+      p2.name,
+      p2.id,
+    ].map((s) => String(s).toLowerCase()));
+    if (tags1.size === 0 && tags2.size === 0) return 1;
+    const intersection = new Set([...tags1].filter((t) => tags2.has(t)));
+    const union = new Set([...tags1, ...tags2]);
+    return union.size > 0 ? intersection.size / union.size : 0;
+  }
+
+  /** Cosine similarity on word-frequency vectors from primitive textual representation. */
+  private cosineSimilarityFromPrimitives(
+    p1: SemanticPrimitive,
+    p2: SemanticPrimitive,
+  ): number {
+    const text1 = [
+      p1.id,
+      p1.name,
+      ...(p1.synonyms ?? []),
+      ...(p1.context.domain ?? []),
+    ]
+      .join(' ')
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+    const text2 = [
+      p2.id,
+      p2.name,
+      ...(p2.synonyms ?? []),
+      ...(p2.context.domain ?? []),
+    ]
+      .join(' ')
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+    const v1 = this.createWordFrequencyVector(text1);
+    const v2 = this.createWordFrequencyVector(text2);
+    return this.cosineSimilarityVectors(v1, v2);
+  }
+
+  private createWordFrequencyVector(text: string): Map<string, number> {
+    const vector = new Map<string, number>();
+    const words = text.match(/\b\w+\b/g) || [];
+    for (const w of words) {
+      vector.set(w, (vector.get(w) ?? 0) + 1);
+    }
+    return vector;
+  }
+
+  private cosineSimilarityVectors(
+    v1: Map<string, number>,
+    v2: Map<string, number>,
+  ): number {
+    const allKeys = new Set([...v1.keys(), ...v2.keys()]);
+    let dot = 0,
+      n1 = 0,
+      n2 = 0;
+    for (const k of allKeys) {
+      const a = v1.get(k) ?? 0;
+      const b = v2.get(k) ?? 0;
+      dot += a * b;
+      n1 += a * a;
+      n2 += b * b;
+    }
+    if (n1 === 0 || n2 === 0) return 0;
+    return dot / (Math.sqrt(n1) * Math.sqrt(n2));
   }
 
   private scoreCandidate(

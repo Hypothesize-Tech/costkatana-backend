@@ -7,6 +7,7 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+import * as crypto from 'crypto';
 import {
   BedrockRuntimeClient,
   InvokeModelCommand,
@@ -651,7 +652,7 @@ export class AIRouterService {
             height: 512,
             width: 512,
             steps: 50,
-            seed: Math.floor(Math.random() * 1000000),
+            seed: crypto.randomInt(0, 1000000),
           }),
         };
 
@@ -871,7 +872,7 @@ export class AIRouterService {
   }
 
   private generateRequestId(): string {
-    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `req_${crypto.randomUUID()}`;
   }
 
   /**

@@ -525,19 +525,41 @@ export class ExecutionEngineService implements OnModuleInit {
     const awsRequestIds: string[] = [];
 
     try {
-      // Skip pre/post checks in simulation mode
+      // Pre/post checks: run lightweight AWS describe/head calls to verify state.
+      // No artificial delay - actual API calls provide latency.
       if (
         step.action.startsWith('precheck:') ||
         step.action.startsWith('postcheck:')
       ) {
-        await this.simulateDelay(500);
+        if (step.apiCalls?.length) {
+          for (const apiCall of step.apiCalls) {
+            const region = connection.allowedRegions?.[0] || 'us-east-1';
+            const permCheck = this.permissionBoundaryService.validateAction(
+              {
+                service: apiCall.service.toLowerCase(),
+                action: apiCall.operation,
+                region,
+              },
+              connection,
+            );
+            if (permCheck.allowed) {
+              const result = await this.executeAwsApiCall(
+                apiCall,
+                credentials,
+                step.resources || [],
+                region,
+              );
+              if (result.requestId) awsRequestIds.push(result.requestId);
+            }
+          }
+        }
 
         return {
           success: true,
           startedAt,
           completedAt: new Date(),
           duration: Date.now() - startedAt.getTime(),
-          awsRequestIds: [],
+          awsRequestIds,
         };
       }
 
@@ -1135,10 +1157,4 @@ export class ExecutionEngineService implements OnModuleInit {
     return executions;
   }
 
-  /**
-   * Simulate delay (for pre/post checks)
-   */
-  private simulateDelay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
 }

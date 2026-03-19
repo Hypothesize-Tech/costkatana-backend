@@ -39,6 +39,7 @@ export {
   ControlFlowBuilder,
   ControlFlowType,
   LogicalOperator,
+  type ExpressionExecutor,
   type IfThenElseFrame,
   type SwitchCaseFrame,
   type ForEachFrame,

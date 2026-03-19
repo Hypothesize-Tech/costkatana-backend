@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import {
   Injectable,
   NestInterceptor,
@@ -41,7 +42,7 @@ export class GlobalTrackingInterceptor implements NestInterceptor {
     const requestId =
       (request as any).requestId ||
       (request.headers['x-request-id'] as string) ||
-      `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      crypto.randomUUID();
 
     // Extract tracking information
     const trackingData = {

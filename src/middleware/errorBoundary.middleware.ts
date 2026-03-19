@@ -5,6 +5,7 @@ import {
   ErrorSeverity,
 } from '../errors/ErrorHandler';
 import { ServiceError } from '../shared/BaseService';
+import { circuitBreakerStore } from '../shared/circuit-breaker.store';
 import { loggingService } from '../common/services/logging.service';
 
 export interface ErrorBoundaryOptions {
@@ -87,10 +88,22 @@ export class ErrorBoundaryMiddleware {
         );
       }
 
-      // Check circuit breaker
+      // Record failure to shared circuit breaker store (unified with BaseService)
+      const component = context.component || 'API';
+      if (config.enableCircuitBreaker) {
+        circuitBreakerStore.recordFailureForWindow(`middleware.${component}`, {
+          maxFailures: 50,
+          windowMs: 300000,
+        });
+      }
+
+      // Check circuit breaker via shared store
       if (
         config.enableCircuitBreaker &&
-        ErrorBoundaryMiddleware.isCircuitBreakerOpen(context.component || 'API')
+        circuitBreakerStore.isOpenByWindow(`middleware.${component}`, {
+          maxFailures: 50,
+          windowMs: 300000,
+        })
       ) {
         return ErrorBoundaryMiddleware.sendErrorResponse(
           res,
@@ -329,29 +342,14 @@ export class ErrorBoundaryMiddleware {
   }
 
   /**
-   * Check if circuit breaker is open for a component
+   * Check if circuit breaker is open for a component.
+   * Uses shared circuitBreakerStore (unified with BaseService).
    */
   private static isCircuitBreakerOpen(component: string): boolean {
-    // This would integrate with the circuit breaker logic in BaseService
-    // For now, implement a simple version
-    const errorKey = `circuit_${component}`;
-    const componentErrors = ErrorBoundaryMiddleware.errorCounts.get(errorKey);
-
-    if (!componentErrors) {
-      return false;
-    }
-
-    const now = Date.now();
-    const fiveMinutesAgo = now - 300000; // 5 minutes
-
-    // Reset if it's been more than 5 minutes
-    if (componentErrors.resetTime < fiveMinutesAgo) {
-      ErrorBoundaryMiddleware.errorCounts.delete(errorKey);
-      return false;
-    }
-
-    // Open circuit breaker if more than 50 errors in 5 minutes
-    return componentErrors.count > 50;
+    return circuitBreakerStore.isOpenByWindow(`middleware.${component}`, {
+      maxFailures: 50,
+      windowMs: 300000,
+    });
   }
 
   /**
@@ -386,12 +384,11 @@ export class ErrorBoundaryMiddleware {
     const circuitBreakerStatus: Record<string, boolean> = {};
 
     for (const [key, value] of ErrorBoundaryMiddleware.errorCounts.entries()) {
-      if (key.startsWith('circuit_')) {
-        const component = key.replace('circuit_', '');
-        circuitBreakerStatus[component] = value.count > 50;
-      } else {
-        errorCounts[key] = value;
-      }
+      errorCounts[key] = value;
+    }
+
+    for (const [key, entry] of circuitBreakerStore.getAllEntries().entries()) {
+      circuitBreakerStatus[key] = entry.state === 'open' || entry.failureCount >= 50;
     }
 
     return {
@@ -406,5 +403,6 @@ export class ErrorBoundaryMiddleware {
    */
   public static resetErrorCounts(): void {
     ErrorBoundaryMiddleware.errorCounts.clear();
+    circuitBreakerStore.reset();
   }
 }
