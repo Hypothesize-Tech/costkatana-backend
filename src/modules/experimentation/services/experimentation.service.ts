@@ -505,7 +505,7 @@ export class ExperimentationService {
     model: ModelComparisonRequest['models'][0],
     prompt: string,
     executeOnBedrock: boolean,
-    _comparisonMode: string,
+    comparisonMode: string,
   ): Promise<RealTimeComparisonResult> {
     const startTime = Date.now();
     let modelResponse = '';
@@ -589,6 +589,7 @@ export class ExperimentationService {
             userId,
             model,
             prompt,
+            { executeOnBedrock, comparisonMode },
           );
           modelResponse =
             rawResponse ?? 'No response generated from model API call';
@@ -1139,6 +1140,7 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
     userId: string,
     model: ModelComparisonRequest['models'][0],
     prompt: string,
+    extraOptions?: { executeOnBedrock?: boolean; comparisonMode?: string },
   ): Promise<string | null> {
     try {
       // Check if real API calls are enabled - fail loudly instead of returning null
@@ -1162,19 +1164,22 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
 
       let response: string;
       const provider = this.extractProviderFromModel(model.model);
+      const temperature = this.getTemperatureFromComparisonMode(
+        extraOptions?.comparisonMode ?? 'balanced',
+      );
 
       switch (provider) {
         case 'openai':
-          response = await this.callOpenAIModel(model, prompt);
+          response = await this.callOpenAIModel(model, prompt, temperature);
           break;
         case 'anthropic':
-          response = await this.callAnthropicModel(model, prompt);
+          response = await this.callAnthropicModel(model, prompt, temperature);
           break;
         case 'google':
-          response = await this.callGoogleModel(model, prompt);
+          response = await this.callGoogleModel(model, prompt, temperature);
           break;
         case 'amazon':
-          response = await this.callAmazonModel(model, prompt);
+          response = await this.callAmazonModel(model, prompt, temperature);
           break;
         default:
           this.logger.warn('Unsupported model provider for real API call', {
@@ -1225,9 +1230,10 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   }> {
     const startTime = Date.now();
 
-    // Pass all params to performRealModelCall if necessary in future
-    // For now, just log or include in returned metadata
-    const rawResponse = await this.performRealModelCall(userId, model, prompt);
+    const rawResponse = await this.performRealModelCall(userId, model, prompt, {
+      executeOnBedrock: executeOnBedrock,
+      comparisonMode,
+    });
 
     const response = rawResponse ?? '';
     const actualCost = rawResponse
@@ -1267,9 +1273,21 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   /**
    * Call OpenAI model
    */
+  private getTemperatureFromComparisonMode(mode: string): number {
+    const map: Record<string, number> = {
+      quality: 0.2,
+      creativity: 0.9,
+      balanced: 0.7,
+      cost: 0.3,
+      speed: 0.5,
+    };
+    return map[mode.toLowerCase()] ?? 0.7;
+  }
+
   private async callOpenAIModel(
     model: ModelComparisonRequest['models'][0],
     prompt: string,
+    temperature = 0.7,
   ): Promise<string> {
     const apiKey = this.configService.get('OPENAI_API_KEY');
     if (!apiKey) throw new Error('OpenAI API key not configured');
@@ -1284,7 +1302,7 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
         model: model.model,
         messages: [{ role: 'user', content: prompt }],
         max_tokens: model.maxTokens || 1000,
-        temperature: 0.7,
+        temperature,
       }),
     });
 
@@ -1304,6 +1322,7 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   private async callAnthropicModel(
     model: ModelComparisonRequest['models'][0],
     prompt: string,
+    temperature = 0.7,
   ): Promise<string> {
     const apiKey = this.configService.get('ANTHROPIC_API_KEY');
     if (!apiKey) throw new Error('Anthropic API key not configured');
@@ -1319,6 +1338,7 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
         model: model.model,
         max_tokens: model.maxTokens || 1000,
         messages: [{ role: 'user', content: prompt }],
+        temperature,
       }),
     });
 
@@ -1338,6 +1358,7 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   private async callGoogleModel(
     model: ModelComparisonRequest['models'][0],
     prompt: string,
+    temperature = 0.7,
   ): Promise<string> {
     const apiKey = this.configService.get('GOOGLE_AI_API_KEY');
     if (!apiKey) throw new Error('Google AI API key not configured');
@@ -1360,6 +1381,7 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
           ],
           generationConfig: {
             maxOutputTokens: model.maxTokens || 1000,
+            temperature,
           },
         }),
       },
@@ -1381,10 +1403,10 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
   private async callAmazonModel(
     model: ModelComparisonRequest['models'][0],
     prompt: string,
+    temperature = 0.7,
   ): Promise<string> {
     const modelId = model.model;
     const maxTokens = getMaxTokensForModel(modelId, 4096);
-    const temperature = 0.7;
     const isNova = modelId.toLowerCase().includes('nova');
 
     const payload = isNova

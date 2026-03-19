@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface ClassificationRule {
   id: string;
@@ -165,7 +166,7 @@ export class DataClassificationService implements OnModuleInit {
 
   private initializeDefaultRules(): void {
     for (const template of DEFAULT_CLASSIFICATION_RULES) {
-      const id = `rule_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const id = generateSecureId('rule');
       this.classificationRules.set(id, {
         ...template,
         id,
@@ -331,7 +332,7 @@ export class DataClassificationService implements OnModuleInit {
   addRule(
     rule: Omit<ClassificationRule, 'id' | 'createdAt' | 'updatedAt'>,
   ): string {
-    const id = `rule_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const id = generateSecureId('rule');
     this.classificationRules.set(id, {
       ...rule,
       id,

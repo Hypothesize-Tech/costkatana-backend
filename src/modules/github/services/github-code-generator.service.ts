@@ -1074,7 +1074,7 @@ export function costKatanaMiddleware(request: NextRequest): NextResponse {
 }
 
 function generateRequestId(): string {
-  return \`req_\${Date.now()}_\${Math.random().toString(36).substr(2, 9)}\`;
+  return 'req_' + require('crypto').randomUUID();
 }
 `;
       } else {
@@ -1103,7 +1103,7 @@ function generateRequestId(): string {
 }
 
 function generateRequestId() {
-  return \`req_\${Date.now()}_\${Math.random().toString(36).substr(2, 9)}\`;
+  return 'req_' + require('crypto').randomUUID();
 }
 
 module.exports = { costKatanaMiddleware };

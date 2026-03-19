@@ -76,6 +76,7 @@ import { CostEstimator } from '../utils/cost-estimator';
 import { IntegrationDetector } from '../utils/integration-detector';
 import { ConnectionChecker } from '../utils/connection-checker';
 import { ParsedMention } from '../interceptors/chat-mentions.interceptor';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 import { ProcessingContext } from '../handlers/types/handler.types';
 import type { LangchainOrchestratorService } from '../langchain/langchain-orchestrator.service';
 import { CortexStreamingOrchestratorService } from './cortex-streaming-orchestrator.service';
@@ -2489,9 +2490,7 @@ export class ChatService {
       const type = a.type === 'google' ? 'google' : 'uploaded';
       const url = a.url || '';
       const fileId =
-        url ||
-        (a as any).fileId ||
-        `att-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        url || (a as any).fileId || generateSecureId('att').replace('_', '-');
       return {
         type,
         fileId,

@@ -1,6 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { setGenAITelemetryStore } from '../../utils/genaiTelemetry';
-import { TelemetryService } from '../../services/telemetry.service';
+import { TelemetryService } from './services/telemetry-store.service';
 
 /**
  * Wires the global GenAI telemetry store to TelemetryService on app startup

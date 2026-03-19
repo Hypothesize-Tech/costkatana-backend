@@ -22,6 +22,7 @@ import { marked } from 'marked';
 import { CKQLService } from './ckql.service';
 import { AIInsightsService } from './ai-insights.service';
 import { TelemetryService } from '../../../modules/utils/services/telemetry.service';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface NotebookCell {
   id: string;
@@ -1082,7 +1083,7 @@ Provide a single, valuable recommendation or observation. Keep it concise and ac
   }
 
   private generateExecutionId(): string {
-    return `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return generateSecureId('exec');
   }
 
   private renderMarkdown(content: string): string {

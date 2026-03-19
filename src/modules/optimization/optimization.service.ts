@@ -23,6 +23,7 @@ import { User } from '../../schemas/user/user.schema';
 import { Usage } from '../../schemas/core/usage.schema';
 import { Activity } from '../../schemas/logging/activity.schema';
 import { Alert } from '../../schemas/core/alert.schema';
+import { generateSecureId } from '../../common/utils/secure-id.util';
 
 // 🚀 NEW CORTEX IMPORTS - ADVANCED STREAMING
 import { CortexCoreService } from '../cortex/services/cortex-core.service';
@@ -274,7 +275,7 @@ export class OptimizationService implements OnModuleDestroy {
     const startTime = Date.now();
 
     // 🎯 Initialize training data collection (fire-and-forget)
-    const sessionId = `cortex_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const sessionId = generateSecureId('cortex');
     const trainingCollector = this.cortexTrainingDataCollector as any;
 
     trainingCollector.startSession?.(sessionId, userId, originalPrompt, {

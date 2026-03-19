@@ -11,6 +11,7 @@ import { CortexEncoderService } from './cortex-encoder.service';
 import { CortexDecoderService } from './cortex-decoder.service';
 import { CortexCoreService } from './cortex-core.service';
 import { CortexVocabularyService } from './cortex-vocabulary.service';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface CortexToken {
   id: string;
@@ -147,7 +148,7 @@ export class CortexStreamingOrchestratorService {
     sessionId: string,
     config: Partial<CortexStreamingConfig> = {},
   ): Promise<string> {
-    const executionId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const executionId = generateSecureId('stream');
     const executionConfig = { ...DEFAULT_STREAMING_CONFIG, ...config };
 
     const execution: CortexStreamingExecution = {
@@ -198,7 +199,7 @@ export class CortexStreamingOrchestratorService {
       streamingConfig?: Partial<CortexStreamingConfig>;
     },
   ): Promise<string> {
-    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const sessionId = generateSecureId('session');
     const config: Partial<CortexStreamingConfig> =
       options?.streamingConfig ?? {};
     if (options?.modelId) {
@@ -724,7 +725,7 @@ export class CortexStreamingOrchestratorService {
     token: any,
   ): void {
     const cortexToken: CortexToken = {
-      id: `token_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: generateSecureId('token'),
       content: token.content || '',
       type: 'encoding',
       timestamp: new Date(),
@@ -744,7 +745,7 @@ export class CortexStreamingOrchestratorService {
     token: any,
   ): void {
     const cortexToken: CortexToken = {
-      id: `token_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: generateSecureId('token'),
       content: token.content || '',
       type: 'processing',
       timestamp: new Date(),
@@ -764,7 +765,7 @@ export class CortexStreamingOrchestratorService {
     token: any,
   ): void {
     const cortexToken: CortexToken = {
-      id: `token_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: generateSecureId('token'),
       content: token.content || '',
       type: 'decoding',
       timestamp: new Date(),

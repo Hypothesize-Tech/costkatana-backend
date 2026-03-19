@@ -11,6 +11,7 @@ import {
   CortexToken,
   CortexStreamingExecution,
 } from './cortex-streaming-orchestrator.service';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface TrainingSample {
   id: string;
@@ -73,7 +74,7 @@ export class CortexTrainingDataCollectorService {
       }
 
       const sample: TrainingSample = {
-        id: `sample_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        id: generateSecureId('sample'),
         executionId: execution.id,
         timestamp: new Date(),
         input: execution.inputText,
@@ -167,7 +168,7 @@ export class CortexTrainingDataCollectorService {
     const averageQuality = this.calculateAverageQuality(anonymizedSamples);
 
     const dataset: TrainingDataset = {
-      id: `dataset_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: generateSecureId('dataset'),
       name,
       description,
       samples: anonymizedSamples,

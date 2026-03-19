@@ -12,6 +12,7 @@ import { TelemetryService } from '../utils/services/telemetry.service';
 import { BudgetService } from '../budget/budget.service';
 import { TokenCounterService } from '../utils/services/token-counter.service';
 import { AIProvider } from '../../utils/modelDiscovery.types';
+import { generateSecureId } from '../../common/utils/secure-id.util';
 
 export interface CostSimulation {
   requestId: string;
@@ -111,7 +112,7 @@ export class CostSimulatorService {
     workspaceId?: string,
     options: SimulateRequestCostOptions = {},
   ): Promise<CostSimulation> {
-    const requestId = `sim_${Date.now()}_${model}_${provider}_${Math.random().toString(36).substring(2, 10)}`;
+    const requestId = generateSecureId(`sim_${model}_${provider}`);
     const {
       includeAlternatives = true,
       maxOutputTokens = 1000,

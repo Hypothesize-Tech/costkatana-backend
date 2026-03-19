@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { TelemetryService } from '../../../services/telemetry.service';
+import { TelemetryService } from './telemetry-store.service';
 
 export interface RawSpanInput {
   traceId: string;

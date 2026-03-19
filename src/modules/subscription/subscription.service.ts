@@ -19,6 +19,7 @@ import { PaymentGatewayService } from '../payment-gateway/payment-gateway.servic
 import type { PaymentGatewayType } from '../payment-gateway/payment-gateway.interface';
 import { SubscriptionNotificationService } from './subscription-notification.service';
 import { getPlanPriceOrNull } from '../../config/plan-pricing.config';
+import { generateSecureId } from '../../common/utils/secure-id.util';
 
 // Subscription plan limits based on new pricing structure
 export const SUBSCRIPTION_PLAN_LIMITS = {
@@ -1044,7 +1045,7 @@ export class SubscriptionService {
       const taxAmount = totalAmount * 0.1; // 10% tax
       const finalAmount = totalAmount + taxAmount;
 
-      const invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substring(6).toUpperCase()}`;
+      const invoiceNumber = generateSecureId('INV').replace('_', '-');
 
       const invoice = new this.invoiceModel({
         invoiceNumber,
@@ -1231,7 +1232,7 @@ export class SubscriptionService {
                 await recentPaidInvoice.save();
 
                 const creditInvoice = new this.invoiceModel({
-                  invoiceNumber: `CR-${Date.now()}-${Math.random().toString(36).substring(6).toUpperCase()}`,
+                  invoiceNumber: generateSecureId('CR').replace('_', '-'),
                   userId,
                   subscriptionId,
                   lineItems: [

@@ -10,7 +10,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Logger } from '@nestjs/common';
 import { Usage } from '../schemas/core/usage.schema';
-import type { TelemetryStoreInput } from '../services/telemetry.service';
+import type { TelemetryStoreInput } from '../modules/telemetry/services/telemetry-store.service';
 
 const tracer = trace.getTracer('cost-katana-genai', '1.0.0');
 const meter = metrics.getMeter('cost-katana-genai', '1.0.0');

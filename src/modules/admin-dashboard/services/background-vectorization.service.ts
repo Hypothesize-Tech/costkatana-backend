@@ -13,6 +13,7 @@ import {
   VectorizationDocument,
   VectorizationDocumentDocument,
 } from '../../../schemas/vectorization/vectorization-document.schema';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 @Injectable()
 export class BackgroundVectorizationService {
@@ -36,7 +37,7 @@ export class BackgroundVectorizationService {
     targetDimensions: number = 128,
   ): Promise<string> {
     try {
-      const jobId = `vec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const jobId = generateSecureId('vec');
 
       const job = new this.vectorizationJobModel({
         jobId,

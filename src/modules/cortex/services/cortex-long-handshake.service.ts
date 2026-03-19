@@ -12,6 +12,7 @@ import { CortexCoreService } from './cortex-core.service';
 import { CortexEncoderService } from './cortex-encoder.service';
 import { CortexDecoderService } from './cortex-decoder.service';
 import type { CortexProcessingResult } from '../types/cortex.types';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface HandshakeSession {
   id: string;
@@ -158,7 +159,7 @@ export class CortexLongHandshakeService {
     if (!session) return;
 
     const step: HandshakeStep = {
-      id: `step_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: generateSecureId('step'),
       timestamp: new Date(),
       type,
       content,

@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import * as Sentry from '@sentry/node';
+import { metrics } from '@opentelemetry/api';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { Usage } from '../../../schemas/core/usage.schema';
@@ -399,6 +401,34 @@ export class TrueCostService {
         metric: 'pricing.hardcoded_fallback',
       },
     );
+
+    try {
+      const meter = metrics.getMeter('costkatana-backend', '1.0.0');
+      const fallbackCounter = meter.createCounter('pricing_fallback_used', {
+        description: 'Count of times hardcoded pricing fallback was used',
+      });
+      fallbackCounter.add(1, {
+        provider: metrics.provider,
+        model: metrics.model,
+      });
+    } catch {
+      // OTel may not be initialized
+    }
+
+    if (process.env.NODE_ENV === 'production') {
+      Sentry.captureMessage(
+        `Pricing fallback used for ${metrics.provider}/${metrics.model}`,
+        {
+          level: 'warning',
+          tags: {
+            component: 'true-cost',
+            metric: 'pricing_fallback_used',
+            provider: metrics.provider,
+            model: metrics.model,
+          },
+        },
+      );
+    }
 
     const { inputCostPer1K, outputCostPer1K } = getHardcodedFallbackPricing(
       metrics.provider,

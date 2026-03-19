@@ -18,6 +18,7 @@ import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { isRedisEnabled } from '../../../config/redis';
 import { ChatEventData, IChatEventsService } from './chat-events.interface';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 @Injectable()
 export class ChatEventsRedisService
@@ -32,7 +33,7 @@ export class ChatEventsRedisService
   private isInitialized = false;
 
   constructor(private configService: ConfigService) {
-    this.instanceId = `instance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    this.instanceId = generateSecureId('instance');
   }
 
   async onModuleInit() {

@@ -6,6 +6,7 @@
  */
 
 import { CortexFrame, CortexValue } from './cortex.types';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 // ============================================================================
 // SEMANTIC FRAME DEFINITIONS
@@ -474,7 +475,7 @@ export const createSemanticFrame = (
   metadata?: Partial<SemanticCortexFrame['metadata']>,
 ): SemanticCortexFrame => {
   return {
-    id: `frame_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    id: generateSecureId('frame'),
     frameType: frame.frameType,
     roles: Object.entries(frame).reduce(
       (acc, [key, value]) => {

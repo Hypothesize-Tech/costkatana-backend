@@ -24,6 +24,7 @@ import {
   ModelPerformance,
   ModelPerformanceDocument,
 } from '../../../schemas/analytics/model-performance.schema';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface UserContext {
   promptComplexity: number;
@@ -471,7 +472,7 @@ export class OptimizationFeedbackLoopService {
       // Record detailed outcome data for advanced learning
       const outcomeData = new this.suggestionOutcomeModel({
         userId,
-        suggestionId: `learning_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        suggestionId: generateSecureId('learning'),
         suggestionType: context.taskType || 'general',
         userAcceptance: signals.userAcceptance,
         costSaved: signals.costSaved,

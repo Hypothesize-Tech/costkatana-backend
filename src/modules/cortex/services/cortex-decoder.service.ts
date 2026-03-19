@@ -14,6 +14,7 @@ import {
 import { AIRouterService } from './ai-router.service';
 import { CortexCacheService } from './cortex-cache.service';
 import { DEFAULT_CORTEX_CONFIG } from '../types/cortex.types';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 // Cortex Decoder System Prompt - Source of Truth from Express Backend
 const CORTEX_DECODER_SYSTEM_PROMPT = `You are a Cortex Decoder - a specialized AI that converts LISP-encoded ANSWERS into natural, fluent language.
@@ -84,7 +85,7 @@ export class CortexDecoderService {
           maxTokens: 4000,
         },
         metadata: {
-          requestId: `decode_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          requestId: generateSecureId('decode'),
         },
       });
 

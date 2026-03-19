@@ -7,6 +7,7 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter } from 'events';
 import { LoggerService } from '../../../common/logger/logger.service';
 import { MCPMessage, SSEConnection } from '../types/mcp.types';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 @Injectable()
 export class SseTransportService
@@ -305,7 +306,7 @@ export class SseTransportService
    * Generate unique connection ID
    */
   private generateConnectionId(): string {
-    return `sse_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return generateSecureId('sse');
   }
 
   /**

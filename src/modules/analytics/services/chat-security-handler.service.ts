@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { LlmSecurityService } from '../../security/llm-security.service';
 import { randomUUID } from 'crypto';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface SecurityCheckResult {
   passed: boolean;
@@ -186,8 +187,7 @@ export class ChatSecurityHandlerService {
     maxTokens: number = 1000,
   ): SecurityContext {
     const requestId =
-      (req.headers['x-request-id'] as string) ||
-      `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      (req.headers['x-request-id'] as string) || generateSecureId('chat');
     const ipAddress =
       req.ip ||
       req.headers['x-forwarded-for']?.toString().split(',')[0] ||

@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ExperimentSession } from '../../../schemas/analytics/experiment-session.schema';
 import { Experiment } from '../../../schemas/analytics/experiment.schema';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface ExperimentResult {
   id: string;
@@ -501,13 +502,13 @@ export class ExperimentManagerService {
    * Generate unique session ID
    */
   private generateSessionId(): string {
-    return `exp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return generateSecureId('exp');
   }
 
   /**
    * Generate unique result ID
    */
   private generateResultId(): string {
-    return `res_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return generateSecureId('res');
   }
 }

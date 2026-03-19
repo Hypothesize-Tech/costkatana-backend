@@ -6,6 +6,8 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+// @ts-expect-error - compromise may not have full type definitions
+import nlp from 'compromise';
 import {
   SemanticPrimitive,
   VocabularyEntry,
@@ -269,7 +271,7 @@ export class CortexVocabularyService {
     // Enhanced semantic parsing with NLP-like processing
     const processedText = this.preprocessText(text);
     const tokens = this.tokenizeAdvanced(processedText);
-    const posTags = this.performPosTagging(tokens);
+    const posTags = this.performPosTagging(tokens, processedText);
     const entities = this.extractEntities(tokens, posTags);
     const dependencies = this.buildDependencyGraph(tokens, posTags);
     const primitives = this.identifyPrimitivesAdvanced(
@@ -931,14 +933,68 @@ export class CortexVocabularyService {
   }
 
   /**
-   * Simple POS tagging simulation
+   * POS tagging using compromise NLP library when available.
+   * Falls back to rule-based tagging if compromise fails or text is empty.
    */
-  private performPosTagging(tokens: Token[]): POSTag[] {
+  private performPosTagging(tokens: Token[], fullText: string): POSTag[] {
+    const tagMap: Record<string, string> = {
+      Noun: 'NOUN',
+      Verb: 'VERB',
+      Adjective: 'ADJ',
+      Adverb: 'ADV',
+      Preposition: 'PREP',
+      Determiner: 'DET',
+      Conjunction: 'CONJ',
+      Pronoun: 'PRON',
+      Auxiliary: 'AUX',
+      Value: 'NUM',
+      Cardinal: 'NUM',
+      Plural: 'NOUN',
+      Singular: 'NOUN',
+    };
+
+    let compromiseTags: Array<{ text: string; tag: string }> = [];
+    try {
+      if (fullText && fullText.trim().length > 0) {
+        const doc = nlp(fullText);
+        const json = doc.terms().json?.() ?? [];
+        for (const item of json) {
+          const termText = item.text ?? '';
+          const innerTags = item.terms?.[0]?.tags ?? [];
+          const firstTag = Array.isArray(innerTags)
+            ? (innerTags.find((t: string) => tagMap[t]) ?? innerTags[0])
+            : null;
+          const tag =
+            firstTag && tagMap[firstTag]
+              ? tagMap[firstTag]
+              : firstTag === 'Verb' ||
+                  String(firstTag).toLowerCase().includes('verb')
+                ? 'VERB'
+                : 'UNKNOWN';
+          compromiseTags.push({
+            text: termText,
+            tag: typeof tag === 'string' ? tag : 'UNKNOWN',
+          });
+        }
+      }
+    } catch {
+      compromiseTags = [];
+    }
+
+    const tagByWord = new Map<string, string>();
+    compromiseTags.forEach((c) => {
+      const k = c.text.toLowerCase().trim();
+      if (k && !tagByWord.has(k)) tagByWord.set(k, c.tag);
+    });
+
     return tokens.map((token) => {
       let tag: string;
+      const normToken = token.text.toLowerCase();
 
       if (token.isStopWord) {
         tag = 'STOP';
+      } else if (tagByWord.has(normToken)) {
+        tag = tagByWord.get(normToken)!;
       } else if (this.isVerb(token.text)) {
         tag = 'VERB';
       } else if (this.isNoun(token.text)) {
@@ -952,7 +1008,7 @@ export class CortexVocabularyService {
       return {
         token: token.text,
         tag,
-        confidence: 0.8,
+        confidence: compromiseTags.length > 0 ? 0.9 : 0.8,
       };
     });
   }

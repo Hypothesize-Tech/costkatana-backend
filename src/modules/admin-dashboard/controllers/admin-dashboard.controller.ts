@@ -68,7 +68,11 @@ export class AdminDashboardController {
       const avgResult = await this.usageModel
         .aggregate<{
           avgResponseTime: number;
-        }>([{ $match: { createdAt: { $gte: thirtyDaysAgo } } }, { $match: { responseTime: { $gt: 0, $ne: null } } }, { $group: { _id: null, avgResponseTime: { $avg: '$responseTime' } } }])
+        }>([
+          { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+          { $match: { responseTime: { $gt: 0, $ne: null } } },
+          { $group: { _id: null, avgResponseTime: { $avg: '$responseTime' } } },
+        ])
         .exec();
       const averageProcessingTime = avgResult?.[0]?.avgResponseTime ?? 0;
 

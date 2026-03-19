@@ -44,12 +44,12 @@ export type {
   RateLimitConfig,
 } from '../modules/governance/services/agent-rate-limit.service';
 
-// Middleware
+// Middleware - use common/middleware (AgentSandboxMiddleware for Nest; require* for Express)
 export {
-  agentSandboxMiddleware,
+  AgentSandboxMiddleware,
   requireAgentIdentity,
   requireAgentAction,
-} from '../middleware/agentSandbox.middleware';
+} from '../common/middleware/agent-sandbox.middleware';
 
 import { Logger } from '@nestjs/common';
 

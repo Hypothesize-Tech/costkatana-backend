@@ -8,6 +8,7 @@ import {
   RAGDocument,
 } from '../types/rag.types';
 import { DEFAULT_RAG_CONFIG } from '../config/default.config';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 @Injectable()
 export class RetrieveModule extends BaseRAGModule {
@@ -40,7 +41,7 @@ export class RetrieveModule extends BaseRAGModule {
 
       // Enhance results with RAG-specific processing
       const documents: RAGDocument[] = searchResults.map((result, index) => ({
-        id: `rag_doc_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 9)}`,
+        id: generateSecureId(`rag_doc_${index}`),
         content: result.content,
         metadata: {
           source: 'vector_store',

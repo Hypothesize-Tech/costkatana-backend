@@ -123,7 +123,7 @@ function createMockRagRedis(): Redis {
     // Redis client for MemoryModule (conversation memory). If Redis disabled or config fails, use in-memory mock.
     {
       provide: 'REDIS_CLIENT',
-      useFactory: (): Redis => {
+      useFactory: async (): Promise<Redis> => {
         const isProduction = process.env.NODE_ENV === 'production';
 
         if (!isRedisEnabled()) {
@@ -145,9 +145,10 @@ function createMockRagRedis(): Redis {
           );
           client.on('error', (err: Error) => {
             ragRedisLogger.warn(
-              `Redis error (RAG memory may use in-memory fallback): ${err?.message ?? err}`,
+              `Redis error (RAG memory): ${err?.message ?? err}`,
             );
           });
+          await client.ping();
           return client;
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);

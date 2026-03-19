@@ -10,6 +10,7 @@ import {
   CortexToken,
   CortexStreamingExecution,
 } from './cortex-streaming-orchestrator.service';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface StreamingLogEntry {
   id: string;
@@ -60,7 +61,7 @@ export class CortexStreamingLoggerService {
     performanceMetrics?: StreamingLogEntry['performanceMetrics'],
   ): void {
     const logEntry: StreamingLogEntry = {
-      id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: generateSecureId('log'),
       executionId,
       timestamp: new Date(),
       level,

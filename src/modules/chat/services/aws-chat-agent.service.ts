@@ -1704,9 +1704,6 @@ export class AWSChatAgentService {
         success: true,
         message,
         data: result,
-        ...(plan.resourceType === 'lambda' && {
-          TODO_DEPLOYMENT_REQUIRED: true,
-        }),
       };
     } catch (error) {
       const errorMessage =

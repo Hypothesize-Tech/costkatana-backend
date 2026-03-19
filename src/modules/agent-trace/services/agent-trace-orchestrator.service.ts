@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { AIRouterService } from '../../cortex/services/ai-router.service';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface WorkflowStep {
   id: string;
@@ -881,7 +882,7 @@ export class AgentTraceOrchestratorService {
   }
 
   private generateExecutionId(): string {
-    return `exec_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    return generateSecureId('exec');
   }
 
   async createWorkflowTemplate(
@@ -894,7 +895,7 @@ export class AgentTraceOrchestratorService {
     ) {
       throw new Error('Workflow template must have at least one step');
     }
-    const id = `template_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    const id = generateSecureId('template');
     const workflowTemplate: WorkflowTemplate = { ...template, id };
     this.workflowTemplates.set(id, workflowTemplate);
     this.logger.log(`Workflow template created: ${id}`, {

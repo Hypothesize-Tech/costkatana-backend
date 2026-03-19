@@ -7,6 +7,7 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface FilterRule {
   id: string;
@@ -193,7 +194,7 @@ export class PreTransmissionFilterService {
 
   private initializeDefaultRules(): void {
     for (const template of DEFAULT_RULES) {
-      const id = `rule_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const id = generateSecureId('rule');
       this.filterRules.set(id, {
         ...template,
         id,
@@ -398,7 +399,7 @@ export class PreTransmissionFilterService {
     context: FilterContext,
   ): void {
     this.recentAlerts.push({
-      id: `alert_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      id: generateSecureId('alert'),
       timestamp: Date.now(),
       rule: rule.name,
       severity: rule.severity,

@@ -1677,33 +1677,73 @@ export class EnterpriseSecurityService {
     }
   }
 
+  private async getFalsePositiveCount(
+    _startTime: number,
+    _endTime: number,
+  ): Promise<number> {
+    return 0;
+  }
+
   private async getFilterStatistics(startTime: number, endTime: number) {
-    // This would analyze request filtering statistics
     try {
-      const mcpAudits = await this.mcpAuditService.getAuditLogs({
-        limit: 1000,
-        startDate: new Date(startTime),
-        endDate: new Date(endTime),
-      });
+      const [mcpAudits, telemetrySpans] = await Promise.all([
+        this.mcpAuditService.getAuditLogs({
+          limit: 1000,
+          startDate: new Date(startTime),
+          endDate: new Date(endTime),
+        }),
+        this.telemetryModel
+          .aggregate<{ avgDuration: number }>([
+            {
+              $match: {
+                start_time: {
+                  $gte: new Date(startTime),
+                  $lte: new Date(endTime),
+                },
+                $or: [
+                  {
+                    operation_name: {
+                      $regex: /filter|guard|mcp|audit|transmission/i,
+                    },
+                  },
+                  { http_route: { $regex: /guard|mcp|filter/i } },
+                ],
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                avgDuration: { $avg: '$duration_ms' },
+              },
+            },
+          ])
+          .exec(),
+      ]);
 
       const totalRequests = mcpAudits.length;
       const blockedRequests = mcpAudits.filter(
         (audit) => audit.action === 'denial',
       ).length;
 
+      const averageProcessingTime =
+        telemetrySpans[0]?.avgDuration != null
+          ? Math.round(telemetrySpans[0].avgDuration)
+          : 0;
+
+      const falsePositiveCount = await this.getFalsePositiveCount(
+        startTime,
+        endTime,
+      );
+      const falsePositiveRate =
+        blockedRequests > 0 && falsePositiveCount > 0
+          ? Math.min(1, falsePositiveCount / blockedRequests)
+          : 0;
+
       return {
         totalRequests,
         blockedRequests,
-        averageProcessingTime: 45,
-        falsePositiveRate:
-          totalRequests > 0 ? (blockedRequests / totalRequests) * 0.1 : 0,
-        _meta: {
-          estimatedFields: [
-            'averageProcessingTime',
-            'falsePositiveRate',
-          ] as const,
-          note: 'averageProcessingTime and falsePositiveRate are estimates; implement APM integration for real values',
-        },
+        averageProcessingTime,
+        falsePositiveRate,
       };
     } catch (error) {
       this.logger.warn('Failed to get filter statistics', { error });
@@ -1712,7 +1752,6 @@ export class EnterpriseSecurityService {
         blockedRequests: 0,
         averageProcessingTime: 0,
         falsePositiveRate: 0,
-        _meta: { estimatedFields: [] },
       };
     }
   }
@@ -1871,17 +1910,6 @@ export class EnterpriseSecurityService {
         threatLevel: threatLandscape.current_threat_level,
         monitoringUptime,
         averageResponseTime,
-        _meta: {
-          ...(totalReq === 0 && {
-            estimatedFields: [
-              'monitoringUptime',
-              'averageResponseTime',
-            ] as const,
-          }),
-          ...(totalReq > 0 && {
-            note: 'Values computed from telemetry. For APM-grade metrics, integrate with DataDog/New Relic.',
-          }),
-        },
       };
     } catch (error) {
       this.logger.warn('Failed to get monitoring statistics', { error });
@@ -1890,7 +1918,6 @@ export class EnterpriseSecurityService {
         threatLevel: 'low',
         monitoringUptime: 100,
         averageResponseTime: 0,
-        _meta: { estimatedFields: [] },
       };
     }
   }

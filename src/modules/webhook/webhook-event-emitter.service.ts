@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { LoggerService } from '../../common/logger/logger.service';
+import { generateSecureId } from '../../common/utils/secure-id.util';
 import { WebhookService } from './webhook.service';
 import { WEBHOOK_EVENTS, WebhookEventData } from './webhook.types';
 
@@ -37,7 +38,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `cost_alert_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('cost_alert'),
       eventType: WEBHOOK_EVENTS.COST_ALERT,
       occurredAt: new Date(),
       userId,
@@ -77,7 +78,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `cost_threshold_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('cost_threshold'),
       eventType: WEBHOOK_EVENTS.COST_THRESHOLD_EXCEEDED,
       occurredAt: new Date(),
       userId,
@@ -121,7 +122,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `budget_warning_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('budget_warning'),
       eventType: WEBHOOK_EVENTS.BUDGET_WARNING,
       occurredAt: new Date(),
       userId,
@@ -168,7 +169,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `budget_exceeded_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('budget_exceeded'),
       eventType: WEBHOOK_EVENTS.BUDGET_EXCEEDED,
       occurredAt: new Date(),
       userId,
@@ -213,7 +214,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `optimization_completed_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('optimization_completed'),
       eventType: WEBHOOK_EVENTS.OPTIMIZATION_COMPLETED,
       occurredAt: new Date(),
       userId,
@@ -262,7 +263,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `optimization_suggested_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('optimization_suggested'),
       eventType: WEBHOOK_EVENTS.OPTIMIZATION_SUGGESTED,
       occurredAt: new Date(),
       userId,
@@ -311,7 +312,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `model_performance_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('model_performance'),
       eventType: WEBHOOK_EVENTS.MODEL_PERFORMANCE_DEGRADED,
       occurredAt: new Date(),
       userId,
@@ -355,7 +356,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `usage_spike_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('usage_spike'),
       eventType: WEBHOOK_EVENTS.USAGE_SPIKE,
       occurredAt: new Date(),
       userId,
@@ -398,7 +399,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `workflow_completed_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('workflow_completed'),
       eventType: WEBHOOK_EVENTS.WORKFLOW_COMPLETED,
       occurredAt: new Date(),
       userId,
@@ -443,7 +444,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `security_alert_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('security_alert'),
       eventType: WEBHOOK_EVENTS.SECURITY_ALERT,
       occurredAt: new Date(),
       userId,
@@ -487,7 +488,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `agent_task_completed_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('agent_task_completed'),
       eventType: WEBHOOK_EVENTS.AGENT_TASK_COMPLETED,
       occurredAt: new Date(),
       userId,
@@ -532,7 +533,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `quality_degraded_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('quality_degraded'),
       eventType: WEBHOOK_EVENTS.QUALITY_DEGRADED,
       occurredAt: new Date(),
       userId,
@@ -576,7 +577,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `subscription_payment_failed_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('subscription_payment_failed'),
       eventType: WEBHOOK_EVENTS.SUBSCRIPTION_PAYMENT_FAILED,
       occurredAt: new Date(),
       userId,
@@ -620,7 +621,7 @@ export class WebhookEventEmitterService {
     },
   ): Promise<void> {
     await this.emitEvent({
-      eventId: `system_error_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      eventId: generateSecureId('system_error'),
       eventType: WEBHOOK_EVENTS.SYSTEM_ERROR,
       occurredAt: new Date(),
       userId,

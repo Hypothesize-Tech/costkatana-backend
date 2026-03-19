@@ -5,6 +5,7 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 import { CacheService } from '../../../common/cache/cache.service';
 import { DataClassificationService } from './data-classification.service';
 import { EmailService } from '../../email/email.service';
@@ -227,7 +228,7 @@ export class ComplianceCheckService implements OnModuleInit, OnModuleDestroy {
 
   private initializeDefaultRules(): void {
     for (const template of DEFAULT_COMPLIANCE_RULES) {
-      const id = `rule_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const id = generateSecureId('rule');
       this.complianceRules.set(id, {
         ...template,
         id,
@@ -508,7 +509,7 @@ export class ComplianceCheckService implements OnModuleInit, OnModuleDestroy {
   addRule(
     rule: Omit<ComplianceRule, 'id' | 'createdAt' | 'updatedAt'>,
   ): string {
-    const id = `rule_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const id = generateSecureId('rule');
     this.complianceRules.set(id, {
       ...rule,
       id,
@@ -534,7 +535,7 @@ export class ComplianceCheckService implements OnModuleInit, OnModuleDestroy {
     details: { purpose?: string[]; dataTypes?: string[]; duration?: number },
     userInfo?: { ipAddress?: string; userAgent?: string },
   ): Promise<string> {
-    const consentId = `consent_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const consentId = generateSecureId('consent');
     const duration = (details.duration ?? 365) * 24 * 60 * 60 * 1000;
     const record: ConsentRecord = {
       consentId,
@@ -605,7 +606,7 @@ export class ComplianceCheckService implements OnModuleInit, OnModuleDestroy {
     summary: { checks: number; violations: number; compliantRate: number };
     riskAreas: Array<{ area: string; riskLevel: string }>;
   }> {
-    const reportId = `report_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const reportId = generateSecureId('report');
     const checks = this.complianceRules.size;
     const summary = {
       checks,

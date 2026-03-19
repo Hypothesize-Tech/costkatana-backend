@@ -20,6 +20,7 @@ import { VercelToolsService } from '../../agent/services/vercel-tools.service';
 import { getMaxTokensForModel } from '../../../utils/model-tokens';
 import { Usage, UsageDocument } from '../../../schemas/core/usage.schema';
 import { Tool } from 'openai/resources/responses/responses';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 export interface AgentQuery {
   userId: string;
@@ -142,7 +143,7 @@ export class AgentService {
       // Determine routing strategy (decide expects ConversationContext)
       const routingDecision = await this.routeDecider.decide(
         builtContext || {
-          conversationId: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          conversationId: generateSecureId('temp').replace('_', '-'),
           currentSubject: undefined,
           currentIntent: 'general',
           lastReferencedEntities: [],

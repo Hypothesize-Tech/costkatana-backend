@@ -5,6 +5,7 @@ import {
   QueueStats,
   PriorityRequest,
 } from '../interfaces/gateway.interfaces';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 @Injectable()
 export class PriorityQueueService {
@@ -350,7 +351,7 @@ export class PriorityQueueService {
       (Array.isArray(req.headers?.['x-request-id'])
         ? req.headers['x-request-id'][0]
         : req.headers?.['x-request-id']) ||
-      `pq-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      generateSecureId('pq').replace('_', '-');
     const slotId = `${requestId}:${Date.now()}`;
     const pollInterval = 50;
     const maxWaitMs = parseInt(
@@ -432,7 +433,7 @@ export class PriorityQueueService {
       (Array.isArray(req.headers?.['x-request-id'])
         ? req.headers['x-request-id'][0]
         : req.headers?.['x-request-id']) ||
-      `slot-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      generateSecureId('slot').replace('_', '-');
     const slotId = `${requestId}:${Date.now()}`;
     const pollInterval = 50;
     const maxWaitMs = parseInt(

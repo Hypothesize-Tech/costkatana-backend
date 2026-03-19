@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { createClient, RedisClientType } from 'redis';
 import * as crypto from 'crypto';
-import { createSafeBedrockEmbeddings } from '../../services/safeBedrockEmbeddings';
+import { createSafeBedrockEmbeddings } from '../../modules/agent/services/safe-bedrock-embeddings';
 import { LRUCache } from 'lru-cache';
 import { CostStreamingService } from '../../modules/telemetry/services/cost-streaming.service';
 import {

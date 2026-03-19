@@ -5,7 +5,7 @@ import {
   Telemetry,
   TelemetrySchema,
 } from '../../schemas/core/telemetry.schema';
-import { TelemetryService } from '../../services/telemetry.service';
+import { TelemetryService } from './services/telemetry-store.service';
 import { TelemetryBootstrapService } from './telemetry-bootstrap.service';
 import { UserTelemetryConfigController } from './user-telemetry-config.controller';
 import { UserTelemetryConfigService } from './services/user-telemetry-config.service';

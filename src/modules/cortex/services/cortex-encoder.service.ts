@@ -15,6 +15,7 @@ import { AIRouterService } from './ai-router.service';
 import { CortexVocabularyService } from './cortex-vocabulary.service';
 import { CortexCacheService } from './cortex-cache.service';
 import { getMaxTokensForModel } from '@/utils/model-tokens';
+import { generateSecureId } from '../../../common/utils/secure-id.util';
 
 @Injectable()
 export class CortexEncoderService {
@@ -56,7 +57,7 @@ export class CortexEncoderService {
           maxTokens: getMaxTokensForModel(encoderModel),
         },
         metadata: {
-          requestId: `encode_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          requestId: generateSecureId('encode'),
         },
       });
 
