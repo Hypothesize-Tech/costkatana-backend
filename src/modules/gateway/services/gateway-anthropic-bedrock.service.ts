@@ -14,8 +14,9 @@ import {
 } from '../utils/gateway-anthropic-bedrock.util';
 
 /**
- * Handles Anthropic Messages API requests via AWS Bedrock when the gateway has no
- * Anthropic API key (Cost Katana–hosted Claude).
+ * Serves Anthropic-shaped `POST /v1/messages` via AWS Bedrock when the gateway has no
+ * Anthropic API key (neither `ANTHROPIC_API_KEY` nor a resolved provider key). Uses the
+ * backend’s existing AWS credentials — no separate client or gateway env for this path.
  */
 @Injectable()
 export class GatewayAnthropicBedrockService {
@@ -72,7 +73,7 @@ export class GatewayAnthropicBedrockService {
         data: responseBody,
         status: result.status,
         statusText: 'OK',
-        headers: {},
+        headers: { 'content-type': 'application/json' },
         config: proxyRequest as AxiosResponse['config'],
       } as AxiosResponse;
     } catch (err) {

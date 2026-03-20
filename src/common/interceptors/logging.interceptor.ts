@@ -128,7 +128,7 @@ export class LoggingInterceptor implements NestInterceptor {
   }
 
   private sanitizeHeaders(headers: any): any {
-    const sanitized = { ...headers };
+    const sanitized = { ...(headers ?? {}) };
 
     // Remove sensitive headers
     const sensitiveHeaders = [

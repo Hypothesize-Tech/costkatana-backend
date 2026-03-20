@@ -19,7 +19,7 @@ export class RawBodyMiddleware implements NestMiddleware {
           requestId,
           method: req.method,
           url: req.originalUrl,
-          contentType: req.headers['content-type'],
+          contentType: (req.headers ?? {})['content-type'],
         });
 
         const chunks: Buffer[] = [];
@@ -95,7 +95,8 @@ export class RawBodyMiddleware implements NestMiddleware {
   }
 
   private shouldCaptureRawBody(req: Request): boolean {
-    const { method, originalUrl, headers } = req;
+    const { method, originalUrl } = req;
+    const headers = req.headers ?? {};
 
     // Webhook endpoints that need raw body for signature verification
     if (

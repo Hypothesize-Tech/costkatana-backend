@@ -7,6 +7,8 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 
+import { mapAnthropicApiModelToBedrockId } from '../../gateway/utils/gateway-anthropic-bedrock.util';
+
 export interface ModelPricing {
   /** Model identifier */
   model: string;
@@ -180,6 +182,84 @@ export class PricingService {
     },
     {
       model: 'anthropic.claude-sonnet-4-5-20250929-v1:0',
+      inputCostPerToken: 0.003,
+      outputCostPerToken: 0.015,
+      currency: 'USD',
+      provider: 'anthropic',
+      capabilities: ['text', 'code', 'analysis', 'reasoning', 'multimodal'],
+      tier: 'premium',
+      lastUpdated: new Date('2024-12-01'),
+      active: true,
+    },
+    /** Bedrock foundation IDs for Claude 4 (Messages API ids map here via gateway util). */
+    {
+      model: 'anthropic.claude-sonnet-4-20250514-v1:0',
+      inputCostPerToken: 0.003,
+      outputCostPerToken: 0.015,
+      currency: 'USD',
+      provider: 'anthropic',
+      capabilities: ['text', 'code', 'analysis', 'reasoning', 'multimodal'],
+      tier: 'premium',
+      lastUpdated: new Date('2025-05-01'),
+      active: true,
+    },
+    {
+      model: 'anthropic.claude-sonnet-4-6-v1:0',
+      inputCostPerToken: 0.003,
+      outputCostPerToken: 0.015,
+      currency: 'USD',
+      provider: 'anthropic',
+      capabilities: ['text', 'code', 'analysis', 'reasoning', 'multimodal'],
+      tier: 'premium',
+      lastUpdated: new Date('2025-02-01'),
+      active: true,
+    },
+    {
+      model: 'anthropic.claude-opus-4-20250514-v1:0',
+      inputCostPerToken: 0.015,
+      outputCostPerToken: 0.075,
+      currency: 'USD',
+      provider: 'anthropic',
+      capabilities: ['text', 'code', 'analysis', 'reasoning', 'complex'],
+      tier: 'enterprise',
+      lastUpdated: new Date('2025-05-01'),
+      active: true,
+    },
+    {
+      model: 'anthropic.claude-opus-4-1-20250805-v1:0',
+      inputCostPerToken: 0.015,
+      outputCostPerToken: 0.075,
+      currency: 'USD',
+      provider: 'anthropic',
+      capabilities: ['text', 'code', 'analysis', 'reasoning', 'complex'],
+      tier: 'enterprise',
+      lastUpdated: new Date('2025-08-01'),
+      active: true,
+    },
+    {
+      model: 'anthropic.claude-opus-4-5-20250514-v1:0',
+      inputCostPerToken: 0.015,
+      outputCostPerToken: 0.075,
+      currency: 'USD',
+      provider: 'anthropic',
+      capabilities: ['text', 'code', 'analysis', 'reasoning', 'complex'],
+      tier: 'enterprise',
+      lastUpdated: new Date('2025-05-01'),
+      active: true,
+    },
+    {
+      model: 'anthropic.claude-opus-4-6-v1',
+      inputCostPerToken: 0.015,
+      outputCostPerToken: 0.075,
+      currency: 'USD',
+      provider: 'anthropic',
+      capabilities: ['text', 'code', 'analysis', 'reasoning', 'complex'],
+      tier: 'enterprise',
+      lastUpdated: new Date('2025-12-01'),
+      active: true,
+    },
+    {
+      model: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
       inputCostPerToken: 0.003,
       outputCostPerToken: 0.015,
       currency: 'USD',
@@ -378,18 +458,80 @@ export class PricingService {
       'anthropic.claude-3-5-haiku-20241022-v1:0',
     'us.anthropic.claude-sonnet-4-5-20250929-v1:0':
       'anthropic.claude-sonnet-4-5-20250929-v1:0',
+    'us.anthropic.claude-sonnet-4-20250514-v1:0':
+      'anthropic.claude-sonnet-4-20250514-v1:0',
+    'global.anthropic.claude-sonnet-4-20250514-v1:0':
+      'anthropic.claude-sonnet-4-20250514-v1:0',
   };
 
   /**
+   * OpenAI Chat Completions `model` strings often omit the `openai.` prefix used in this table.
+   */
+  private static readonly OPENAI_API_TO_PRICING_MODEL: Record<string, string> =
+    {
+      'gpt-4o': 'openai.gpt-4o-2024-08-06',
+      'gpt-4o-2024-08-06': 'openai.gpt-4o-2024-08-06',
+      'gpt-4o-mini': 'openai.gpt-4o-mini-2024-07-18',
+      'gpt-4o-mini-2024-07-18': 'openai.gpt-4o-mini-2024-07-18',
+      'gpt-4-turbo': 'openai.gpt-4-turbo-2024-04-09',
+      'gpt-4-turbo-2024-04-09': 'openai.gpt-4-turbo-2024-04-09',
+    };
+
+  /**
+   * Candidate model ids to match against MODEL_PRICING (exact Messages API ids, Bedrock ids, OpenAI aliases).
+   */
+  private expandModelPricingLookupKeys(model: string): string[] {
+    const m = (model || '').trim();
+    if (!m || m === 'unknown') {
+      return [];
+    }
+    const ordered: string[] = [];
+    const push = (k: string) => {
+      if (k && !ordered.includes(k)) {
+        ordered.push(k);
+      }
+    };
+
+    push(m);
+
+    const profileBase = PricingService.INFERENCE_PROFILE_TO_BASE[m];
+    if (profileBase) {
+      push(profileBase);
+    }
+
+    if (/^gpt-/i.test(m) && !m.startsWith('openai.')) {
+      const openaiRow = PricingService.OPENAI_API_TO_PRICING_MODEL[m];
+      if (openaiRow) {
+        push(openaiRow);
+      }
+    }
+
+    if (/^claude-/i.test(m) && !m.startsWith('anthropic.')) {
+      push(mapAnthropicApiModelToBedrockId(m));
+    }
+
+    return ordered;
+  }
+
+  /**
    * Get pricing information for a specific model.
-   * Falls back to base model pricing for inference profile IDs (us./global.) when exact match not found.
+   * Resolves Anthropic Messages API and short OpenAI ids to table keys; falls back to inference profile base ids.
    */
   getModelPricing(model: string): ModelPricing | undefined {
-    const exact = this.MODEL_PRICING.find((p) => p.model === model && p.active);
-    if (exact) return exact;
-    const baseModel = PricingService.INFERENCE_PROFILE_TO_BASE[model];
-    if (baseModel) {
-      return this.MODEL_PRICING.find((p) => p.model === baseModel && p.active);
+    for (const id of this.expandModelPricingLookupKeys(model)) {
+      const exact = this.MODEL_PRICING.find((p) => p.model === id && p.active);
+      if (exact) {
+        return exact;
+      }
+      const baseModel = PricingService.INFERENCE_PROFILE_TO_BASE[id];
+      if (baseModel) {
+        const viaProfile = this.MODEL_PRICING.find(
+          (p) => p.model === baseModel && p.active,
+        );
+        if (viaProfile) {
+          return viaProfile;
+        }
+      }
     }
     return undefined;
   }

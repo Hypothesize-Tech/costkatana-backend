@@ -124,7 +124,7 @@ export interface GatewayContext {
     cacheHeaders: Record<string, string>;
   };
 
-  /** When set, GatewayService routes POST /v1/messages to Bedrock (no Anthropic API key). */
+  /** Server-only: POST /v1/messages is handled on AWS Bedrock when Nest has no Anthropic key. */
   useBedrockAnthropicFallback?: boolean;
 }
 

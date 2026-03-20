@@ -65,6 +65,11 @@ interface RequestTracking {
 export class ComprehensiveTrackingMiddleware implements NestMiddleware {
   private readonly logger = new Logger(ComprehensiveTrackingMiddleware.name);
 
+  /** Express normally sets `headers`; guard for edge cases so tracking never throws. */
+  private static incomingHeaders(req: Request): Record<string, string | string[] | undefined> {
+    return (req.headers ?? {}) as Record<string, string | string[] | undefined>;
+  }
+
   use(req: Request, res: Response, next: NextFunction) {
     const startTime = Date.now();
     const requestId = (req as any).requestId || uuidv4();
@@ -99,9 +104,11 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
       // Extract networking information
       const networking = this.extractNetworkingInfo(req);
 
+      const inHeaders = ComprehensiveTrackingMiddleware.incomingHeaders(req);
+
       // Extract request headers
       const headers: Headers = {
-        request: this.sanitizeHeaders(req.headers as Record<string, string>),
+        request: this.sanitizeHeaders(inHeaders as Record<string, string>),
         response: {}, // Will be filled on response
       };
 
@@ -112,8 +119,8 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
           : undefined,
         requestSize: this.estimatePayloadSize(req.body),
         responseSize: 0, // Will be updated on response
-        contentType: req.headers['content-type'] || 'application/json',
-        encoding: req.headers['content-encoding'],
+        contentType: inHeaders['content-type'] || 'application/json',
+        encoding: inHeaders['content-encoding'] as string | undefined,
         compressionRatio: undefined,
       };
 
@@ -163,14 +170,15 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
   private extractClientInfo(req: Request): ClientInfo {
     const clientIP = this.getClientIP(req);
     const forwardedIPs = this.extractForwardedIPs(req);
+    const h = ComprehensiveTrackingMiddleware.incomingHeaders(req);
 
     return {
       ip: clientIP,
       port: req.socket?.remotePort,
       forwardedIPs,
-      userAgent: req.headers['user-agent'] || 'Unknown',
-      sdkVersion: req.headers['x-sdk-version'] as string,
-      environment: (req.headers['x-environment'] as string) || 'production',
+      userAgent: (h['user-agent'] as string) || 'Unknown',
+      sdkVersion: h['x-sdk-version'] as string,
+      environment: (h['x-environment'] as string) || 'production',
     };
   }
 
@@ -180,8 +188,9 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
   private extractNetworkingInfo(req: Request): Networking {
     const protocol = req.protocol;
     const secure = protocol === 'https' || req.secure;
+    const h = ComprehensiveTrackingMiddleware.incomingHeaders(req);
     const host =
-      req.headers.host || `${req.hostname}:${req.socket?.localPort || 80}`;
+      (h.host as string) || `${req.hostname}:${req.socket?.localPort || 80}`;
     const serverIP = req.socket?.localAddress || '127.0.0.1';
     const serverPort = req.socket?.localPort || (secure ? 443 : 80);
 
@@ -191,7 +200,7 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
     return {
       serverEndpoint: req.path,
       serverFullUrl: `${protocol}://${host}${req.originalUrl}`,
-      clientOrigin: req.headers.origin || req.headers.referer,
+      clientOrigin: (h.origin || h.referer) as string | undefined,
       serverIP,
       serverPort,
       routePattern,
@@ -303,7 +312,8 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
    * Get client IP address considering proxies
    */
   private getClientIP(req: Request): string {
-    const forwarded = req.headers['x-forwarded-for'];
+    const h = ComprehensiveTrackingMiddleware.incomingHeaders(req);
+    const forwarded = h['x-forwarded-for'];
     if (forwarded) {
       // Take the first IP if multiple are present
       return (
@@ -311,7 +321,7 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
       ).trim();
     }
 
-    const realIP = req.headers['x-real-ip'];
+    const realIP = h['x-real-ip'];
     if (realIP) {
       return (Array.isArray(realIP) ? realIP[0] : realIP).trim();
     }
@@ -323,7 +333,8 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
    * Extract forwarded IPs from headers
    */
   private extractForwardedIPs(req: Request): string[] {
-    const forwarded = req.headers['x-forwarded-for'];
+    const forwarded =
+      ComprehensiveTrackingMiddleware.incomingHeaders(req)['x-forwarded-for'];
     if (!forwarded) return [];
 
     if (Array.isArray(forwarded)) {
@@ -339,7 +350,7 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
   private sanitizeHeaders(
     headers: Record<string, string>,
   ): Record<string, string> {
-    const sanitized = { ...headers };
+    const sanitized = { ...(headers ?? {}) };
 
     // Remove sensitive headers
     const sensitiveHeaders = [
@@ -413,7 +424,8 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
    * Determine if request body should be captured
    */
   private shouldCaptureBody(req: Request): boolean {
-    const contentType = req.headers['content-type'] || '';
+    const h = ComprehensiveTrackingMiddleware.incomingHeaders(req);
+    const contentType = (h['content-type'] as string) || '';
     const method = req.method;
 
     // Only capture for relevant methods and content types
@@ -431,7 +443,7 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
     }
 
     // Skip if body is too large (> 1MB)
-    const contentLength = parseInt(req.headers['content-length'] || '0');
+    const contentLength = parseInt((h['content-length'] as string) || '0');
     if (contentLength > 1024 * 1024) {
       return false;
     }

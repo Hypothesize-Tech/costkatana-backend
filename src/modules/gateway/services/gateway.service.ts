@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { AxiosResponse } from 'axios';
+import axios, { AxiosResponse } from 'axios';
 
 // Import all gateway services
 import { GatewayCacheService } from './gateway-cache.service';
@@ -30,6 +30,19 @@ import {
 @Injectable()
 export class GatewayService {
   private readonly logger = new Logger(GatewayService.name);
+
+  /** Express rejects non-integer status codes; align with HttpExceptionFilter. */
+  private static normalizeOutboundStatus(code: unknown): number {
+    if (
+      typeof code === 'number' &&
+      Number.isInteger(code) &&
+      code >= 100 &&
+      code <= 599
+    ) {
+      return code;
+    }
+    return HttpStatus.INTERNAL_SERVER_ERROR;
+  }
 
   constructor(
     private cacheService: GatewayCacheService,
@@ -262,6 +275,14 @@ export class GatewayService {
           processedResponse,
         );
 
+      const modelForCost =
+        request.body?.model || context.modelOverride || 'unknown';
+      const responseBodyForClient =
+        (await this.analyticsService.attachEstimatedCostToResponseBody(
+          modelForCost,
+          moderatedResponse.response,
+        )) ?? moderatedResponse.response;
+
       // Step 8: Confirm budget and cache response
       this.logger.debug('Step 8: Finalizing request', { requestId });
 
@@ -277,7 +298,7 @@ export class GatewayService {
           try {
             await this.cacheService.cacheResponse(
               request,
-              moderatedResponse.response,
+              responseBodyForClient,
             );
           } catch (error) {
             this.logger.warn('Failed to cache response', {
@@ -293,7 +314,7 @@ export class GatewayService {
         try {
           await this.analyticsService.trackUsage(
             request,
-            moderatedResponse.response,
+            responseBodyForClient,
             retryAttempts,
           );
 
@@ -313,7 +334,7 @@ export class GatewayService {
             );
             await this.analyticsService.recordModelPerformance(
               request,
-              moderatedResponse.response,
+              responseBodyForClient,
               context,
             );
           }
@@ -335,7 +356,7 @@ export class GatewayService {
         context.failoverEnabled ? 0 : -1, // failoverProviderIndex
       );
 
-      response.send(moderatedResponse.response);
+      response.send(responseBodyForClient);
 
       this.logger.log('=== GATEWAY REQUEST PROCESSING COMPLETED ===', {
         component: 'GatewayService',
@@ -407,15 +428,51 @@ export class GatewayService {
         }
       });
 
-      if (error.response) {
-        // Axios error with response
-        const axiosError = error;
+      if (response.headersSent) {
+        this.logger.warn('Gateway error after headers sent, skipping body', {
+          requestId,
+        });
+        return;
+      }
+
+      // Prefer Nest HttpException (Bedrock, validation, etc.) — do not treat as Axios.
+      if (error instanceof HttpException) {
+        const status = GatewayService.normalizeOutboundStatus(error.getStatus());
+        const body = error.getResponse();
+        if (typeof body === 'string') {
+          response.status(status).json({
+            success: false,
+            message: body,
+            error: body,
+          });
+        } else if (body && typeof body === 'object') {
+          response.status(status).json(body);
+        } else {
+          response.status(status).json({
+            success: false,
+            message: 'Gateway error',
+          });
+        }
+        return;
+      }
+
+      if (axios.isAxiosError(error) && error.response) {
+        const rx = error.response;
+        const safeResponse: AxiosResponse = {
+          ...rx,
+          status:
+            typeof rx.status === 'number' && Number.isInteger(rx.status)
+              ? rx.status
+              : 502,
+          headers: rx.headers ?? {},
+          data: rx.data ?? { error: 'Upstream error', message: 'Empty body' },
+        };
         this.responseHandlingService.addResponseHeaders(
           request,
           response,
-          axiosError.response,
+          safeResponse,
           {
-            response: axiosError.response.data,
+            response: safeResponse.data,
             moderationApplied: false,
             action: 'allow',
             violationCategories: [],
@@ -423,20 +480,16 @@ export class GatewayService {
           },
           -1,
         );
-        const upstreamStatus =
-          typeof axiosError.response.status === 'number' &&
-          Number.isInteger(axiosError.response.status)
-            ? axiosError.response.status
-            : 502;
-        response.status(upstreamStatus).json(axiosError.response.data);
-      } else {
-        // Other error
-        response.status(500).json({
-          error: 'Gateway error',
-          message: 'Internal server error in gateway',
-          details: error instanceof Error ? error.message : 'Unknown error',
-        });
+        response.status(safeResponse.status).json(safeResponse.data);
+        return;
       }
+
+      response.status(500).json({
+        success: false,
+        error: 'Gateway error',
+        message: 'Internal server error in gateway',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
     }
   }
 
