@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Request } from 'express';
 import {
   ProxyRequestConfig,
@@ -7,6 +7,11 @@ import {
 } from '../interfaces/gateway.interfaces';
 import https from 'https';
 import { LazySummarizationService } from './lazy-summarization.service';
+import {
+  inferGatewayTargetUrlForRequest,
+  stripGatewayPrefixFromPath,
+} from '../utils/gateway-target-url.util';
+import { isOfficialAnthropicGatewayTarget } from '../utils/gateway-anthropic-bedrock.util';
 
 /**
  * Request Processing Service - Handles request validation, transformation, and routing logic
@@ -35,9 +40,96 @@ export class RequestProcessingService {
   async prepareProxyRequest(request: Request): Promise<ProxyRequestConfig> {
     const context = (request as any).gatewayContext;
 
-    // Build the full target URL
-    const targetUrl = new URL(context.targetUrl);
-    const fullUrl = `${targetUrl.origin}${request.path}`;
+    const headerTarget =
+      typeof context.targetUrl === 'string' ? context.targetUrl.trim() : '';
+    if (!headerTarget) {
+      const inferred = inferGatewayTargetUrlForRequest(request);
+      if (inferred) {
+        context.targetUrl = inferred;
+        this.logger.debug('Inferred CostKatana-Target-Url from path', {
+          path: request.path,
+          inferred,
+        });
+      }
+    }
+
+    const rawTarget =
+      typeof context.targetUrl === 'string' ? context.targetUrl.trim() : '';
+    if (!rawTarget) {
+      throw new BadRequestException({
+        error: 'CostKatana-Target-Url is required',
+        message:
+          'Could not infer upstream URL from this path. Send the CostKatana-Target-Url header (provider origin) or use a supported route such as /v1/messages, /v1/chat/completions, or /v1/models/:model/generateContent.',
+        details: { path: request.path },
+      });
+    }
+
+    let targetUrl: URL;
+    try {
+      targetUrl = new URL(rawTarget);
+    } catch {
+      throw new BadRequestException({
+        error: 'Invalid CostKatana-Target-Url',
+        message:
+          'CostKatana-Target-Url must be a valid absolute URL (example: https://api.anthropic.com).',
+        details: { value: rawTarget },
+      });
+    }
+
+    const providerPath = stripGatewayPrefixFromPath(request.path || '');
+    const fullUrl = `${targetUrl.origin}${providerPath}`;
+
+    let body = request.body;
+    if (context.modelOverride && body && typeof body === 'object') {
+      body = { ...body, model: context.modelOverride };
+    }
+
+    // Add provider API key - check if we have a resolved proxy key first
+    let providerApiKey: string | null = null;
+
+    if (context.providerKey) {
+      providerApiKey = context.providerKey;
+      this.logger.log('Using resolved proxy key for provider', {
+        hostname: targetUrl.hostname,
+        provider: context.provider,
+        proxyKeyId: context.proxyKeyId,
+      });
+    } else {
+      providerApiKey = this.getProviderApiKey(targetUrl.hostname);
+      this.logger.log('Using environment API key for provider', {
+        hostname: targetUrl.hostname,
+        hasKey: !!providerApiKey,
+      });
+    }
+
+    const providerPathLower = providerPath.toLowerCase();
+    const isAnthropicMessagesPost =
+      request.method?.toUpperCase() === 'POST' &&
+      /\/v1\/messages(\/|$|\?)/.test(providerPathLower);
+
+    // No HTTP upstream: GatewayService runs Bedrock via AWS SDK (flag only; not a real URL).
+    if (
+      isAnthropicMessagesPost &&
+      isOfficialAnthropicGatewayTarget(targetUrl.hostname) &&
+      !providerApiKey
+    ) {
+      context.useBedrockAnthropicFallback = true;
+      this.logger.log(
+        'Anthropic Messages: no Anthropic key; routing to AWS Bedrock (Cost Katana)',
+        { path: providerPath },
+      );
+      return {
+        internalBedrockAnthropic: true,
+        method: request.method,
+        headers: {},
+        data: body,
+        timeout: 120000,
+        validateStatus: () => true,
+        httpsAgent: this.httpsAgent,
+        maxRedirects: 0,
+        decompress: true,
+      };
+    }
 
     // Prepare headers - remove gateway-specific headers
     const headers = { ...request.headers };
@@ -47,43 +139,26 @@ export class RequestProcessingService {
       }
     });
 
-    // Add Content-Type if not present
     if (!headers['content-type']) {
       headers['content-type'] = 'application/json';
     }
 
-    // Add provider API key - check if we have a resolved proxy key first
-    let providerApiKey: string | null = null;
-
-    if (context.providerKey) {
-      // Use the resolved provider API key from proxy key authentication
-      providerApiKey = context.providerKey;
-      this.logger.log('Using resolved proxy key for provider', {
-        hostname: targetUrl.hostname,
-        provider: context.provider,
-        proxyKeyId: context.proxyKeyId,
-      });
-    } else {
-      // Fall back to environment variables
-      providerApiKey = this.getProviderApiKey(targetUrl.hostname);
-      this.logger.log('Using environment API key for provider', {
-        hostname: targetUrl.hostname,
-        hasKey: !!providerApiKey,
-      });
-    }
+    const hostLower = targetUrl.hostname.toLowerCase();
+    const isAnthropic = hostLower.includes('anthropic.com');
 
     if (providerApiKey) {
-      headers['authorization'] = `Bearer ${providerApiKey}`;
+      if (isAnthropic) {
+        headers['x-api-key'] = providerApiKey;
+        headers['anthropic-version'] =
+          (headers['anthropic-version'] as string) || '2023-06-01';
+        delete headers['authorization'];
+      } else {
+        headers['authorization'] = `Bearer ${providerApiKey}`;
+      }
     } else {
       this.logger.warn('No API key found for provider', {
         hostname: targetUrl.hostname,
       });
-    }
-
-    // Override model if specified
-    let body = request.body;
-    if (context.modelOverride && body && typeof body === 'object') {
-      body = { ...body, model: context.modelOverride };
     }
 
     // Add headers to bypass Cloudflare detection

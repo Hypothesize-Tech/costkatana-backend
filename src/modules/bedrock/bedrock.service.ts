@@ -688,6 +688,85 @@ export class BedrockService {
   }
 
   /**
+   * Invoke Claude on Bedrock using an Anthropic Messages–shaped JSON body (plus
+   * `anthropic_version`). Used by the AI Gateway when no Anthropic API key is configured.
+   */
+  public static async invokeClaudeMessagesOnBedrock(
+    bedrockModelId: string,
+    requestBody: Record<string, unknown>,
+  ): Promise<{
+    status: number;
+    body: Record<string, unknown>;
+    resolvedModelId: string;
+  }> {
+    const startTime = Date.now();
+    const actualModelId = this.convertToInferenceProfile(bedrockModelId);
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    try {
+      const command = new InvokeModelCommand({
+        modelId: actualModelId,
+        contentType: 'application/json',
+        accept: 'application/json',
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await ServiceHelper.withRetry(
+        () => bedrockClient.send(command),
+        {
+          maxRetries: 3,
+          delayMs: 1000,
+          backoffMultiplier: 1.5,
+        },
+      );
+
+      const data = JSON.parse(
+        new TextDecoder().decode(response.body),
+      ) as Record<string, unknown>;
+
+      const usage = data.usage as
+        | { input_tokens?: number; output_tokens?: number }
+        | undefined;
+      inputTokens =
+        usage?.input_tokens ??
+        Math.ceil(JSON.stringify(requestBody).length / 4);
+      outputTokens =
+        usage?.output_tokens ?? Math.ceil(JSON.stringify(data).length / 4);
+
+      const costUSD = calculateCost(
+        inputTokens,
+        outputTokens,
+        BEDROCK_PROVIDER,
+        actualModelId,
+      );
+      await recordGenAIUsage({
+        provider: BEDROCK_PROVIDER,
+        operationName: 'gateway.anthropic.messages',
+        model: actualModelId,
+        promptTokens: inputTokens,
+        completionTokens: outputTokens,
+        cost: costUSD,
+        latencyMs: Date.now() - startTime,
+      });
+
+      return { status: 200, body: data, resolvedModelId: actualModelId };
+    } catch (error) {
+      await recordGenAIUsage({
+        provider: BEDROCK_PROVIDER,
+        operationName: 'gateway.anthropic.messages',
+        model: actualModelId,
+        promptTokens: inputTokens,
+        completionTokens: 0,
+        cost: 0,
+        error: error instanceof Error ? error : new Error(String(error)),
+        latencyMs: Date.now() - startTime,
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Stream model response with token-level updates.
    * Uses ConverseStreamCommand for supported models, falls back to invokeModel for others.
    */
