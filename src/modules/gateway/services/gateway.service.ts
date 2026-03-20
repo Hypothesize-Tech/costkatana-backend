@@ -275,6 +275,14 @@ export class GatewayService {
           processedResponse,
         );
 
+      const modelForCost =
+        request.body?.model || context.modelOverride || 'unknown';
+      const responseBodyForClient =
+        (await this.analyticsService.attachEstimatedCostToResponseBody(
+          modelForCost,
+          moderatedResponse.response,
+        )) ?? moderatedResponse.response;
+
       // Step 8: Confirm budget and cache response
       this.logger.debug('Step 8: Finalizing request', { requestId });
 
@@ -290,7 +298,7 @@ export class GatewayService {
           try {
             await this.cacheService.cacheResponse(
               request,
-              moderatedResponse.response,
+              responseBodyForClient,
             );
           } catch (error) {
             this.logger.warn('Failed to cache response', {
@@ -306,7 +314,7 @@ export class GatewayService {
         try {
           await this.analyticsService.trackUsage(
             request,
-            moderatedResponse.response,
+            responseBodyForClient,
             retryAttempts,
           );
 
@@ -326,7 +334,7 @@ export class GatewayService {
             );
             await this.analyticsService.recordModelPerformance(
               request,
-              moderatedResponse.response,
+              responseBodyForClient,
               context,
             );
           }
@@ -348,7 +356,7 @@ export class GatewayService {
         context.failoverEnabled ? 0 : -1, // failoverProviderIndex
       );
 
-      response.send(moderatedResponse.response);
+      response.send(responseBodyForClient);
 
       this.logger.log('=== GATEWAY REQUEST PROCESSING COMPLETED ===', {
         component: 'GatewayService',

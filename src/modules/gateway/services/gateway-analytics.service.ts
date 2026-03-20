@@ -17,6 +17,19 @@ import { CostSimulatorService } from '../../cost-simulator/cost-simulator.servic
 export class GatewayAnalyticsService {
   private readonly logger = new Logger(GatewayAnalyticsService.name);
 
+  /** Values allowed on Usage.service (Mongoose enum); must never persist `unknown` or ad-hoc provider names. */
+  private static readonly USAGE_SCHEMA_SERVICES = new Set<string>([
+    'openai',
+    'aws-bedrock',
+    'google-ai',
+    'google',
+    'anthropic',
+    'huggingface',
+    'cohere',
+    'dashboard-analytics',
+    'other',
+  ]);
+
   constructor(
     @InjectModel(Usage.name) private usageModel: Model<Usage>,
     @InjectModel(GatewayProviderMetrics.name)
@@ -48,26 +61,27 @@ export class GatewayAnalyticsService {
         timestamp: new Date().toISOString(),
       });
 
-      // Store request start metrics in database
+      // Store request start metrics in database (only Usage schema fields)
       try {
         const usageRecord = new this.usageModel({
           userId: context.userId,
           projectId: context.projectId,
-          service: this.inferServiceFromUrl(request.originalUrl),
+          service: this.getEffectiveGatewayUsageService(request),
           model: request.body?.model || 'unknown',
           prompt: request.body?.messages
             ? request.body.messages.map((m: any) => m.content || '').join('\n')
             : request.body?.prompt || '',
-          promptTokens: 0, // Will be updated when response is received
-          completionTokens: 0, // Will be updated when response is received
-          totalTokens: 0, // Will be updated when response is received
-          cost: 0, // Will be updated when response is received
-          requestMetadata: {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          cost: 0,
+          responseTime: 0,
+          ipAddress: request.ip,
+          userAgent: request.headers?.['user-agent'] as string | undefined,
+          metadata: {
             requestId,
             method: request.method,
             url: request.originalUrl,
-            userAgent: request.headers['user-agent'],
-            ip: request.ip,
             gatewayContext: {
               provider: context.provider,
               model: request.body?.model,
@@ -75,8 +89,11 @@ export class GatewayAnalyticsService {
               retryEnabled: context.retryEnabled,
             },
           },
-          status: 'in_progress',
-          requestTimestamp: new Date(),
+          requestTracking: this.mergeGatewayRequestTracking(
+            request,
+            undefined,
+            0,
+          ) as any,
         });
 
         await usageRecord.save();
@@ -112,6 +129,33 @@ export class GatewayAnalyticsService {
   }
 
   /**
+   * Adds `cost` (USD) to the provider JSON body when usage is present so clients can show spend.
+   * Skips if `cost` is already set and positive.
+   */
+  async attachEstimatedCostToResponseBody(
+    model: string,
+    body: unknown,
+  ): Promise<unknown> {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return body;
+    }
+    const rec = body as Record<string, unknown>;
+    if (typeof rec.cost === 'number' && rec.cost > 0) {
+      return body;
+    }
+    const extracted = this.extractTokensFromResponseBody(body);
+    if (!extracted) {
+      return body;
+    }
+    const cost = await this.calculateCostFromTokens(
+      model || 'unknown',
+      extracted.input,
+      extracted.output,
+    );
+    return { ...rec, cost };
+  }
+
+  /**
    * Track usage after request completion
    */
   async trackUsage(
@@ -125,11 +169,28 @@ export class GatewayAnalyticsService {
         (request.headers['x-request-id'] as string) || 'unknown';
       const processingTime = Date.now() - context.startTime;
 
-      // Calculate metrics
-      const inputTokens = context.inputTokens || 0;
-      const outputTokens = context.outputTokens || 0;
+      let inputTokens = context.inputTokens ?? 0;
+      let outputTokens = context.outputTokens ?? 0;
+      if (inputTokens === 0 && outputTokens === 0 && response) {
+        const extracted = this.extractTokensFromResponseBody(response);
+        if (extracted) {
+          inputTokens = extracted.input;
+          outputTokens = extracted.output;
+        }
+      }
       const totalTokens = inputTokens + outputTokens;
-      const cost = context.cost || 0;
+
+      let cost = context.cost ?? 0;
+      if (cost === 0 && (inputTokens > 0 || outputTokens > 0)) {
+        cost = await this.calculateCostFromTokens(
+          request.body?.model || 'unknown',
+          inputTokens,
+          outputTokens,
+        );
+      }
+
+      const completionText =
+        this.extractCompletionTextFromProviderResponse(response);
 
       this.logger.log('Tracking gateway usage', {
         component: 'GatewayAnalyticsService',
@@ -149,48 +210,56 @@ export class GatewayAnalyticsService {
         timestamp: new Date().toISOString(),
       });
 
-      // Store usage metrics in database
+      const requestTrackingMerged = this.mergeGatewayRequestTracking(
+        request,
+        response,
+        processingTime,
+      ) as any;
+
+      const metadataExtras: Record<string, unknown> = {
+        gatewayProcessingTime: processingTime,
+        retryAttempts,
+        gatewayMetrics: {
+          cacheHit: context.cacheHit || false,
+          failoverUsed: context.failoverEnabled || false,
+          cortexEnabled: context.cortexEnabled || false,
+        },
+      };
+
+      // Store usage metrics in database (Usage schema fields only)
       try {
-        const updateData: any = {
-          promptTokens: inputTokens,
-          completionTokens: outputTokens,
-          totalTokens,
-          cost,
-          responseMetadata: {
-            processingTime,
-            retryAttempts,
-            statusCode: response?.status || 200,
-            responseTimestamp: new Date(),
-            gatewayMetrics: {
-              cacheHit: context.cacheHit || false,
-              failoverUsed: context.failoverEnabled || false,
-              cortexEnabled: context.cortexEnabled || false,
-            },
-          },
-          status: 'completed',
-          completionTimestamp: new Date(),
-        };
-
-        // If we have a usage record ID from request start, update it
         if (context.usageRecordId) {
-          await this.usageModel.findByIdAndUpdate(
-            context.usageRecordId,
-            updateData,
-          );
+          const doc = await this.usageModel.findById(context.usageRecordId);
+          if (doc) {
+            doc.promptTokens = inputTokens;
+            doc.completionTokens = outputTokens;
+            doc.totalTokens = totalTokens;
+            doc.cost = cost;
+            doc.responseTime = processingTime;
+            doc.completion = completionText || doc.completion;
+            doc.requestTracking = requestTrackingMerged;
+            doc.recordedAt = new Date();
+            const prevMeta = (doc.metadata as Record<string, unknown>) || {};
+            doc.metadata = {
+              ...prevMeta,
+              ...metadataExtras,
+            } as any;
+            await doc.save();
 
-          this.logger.debug('Usage record updated in database', {
-            component: 'GatewayAnalyticsService',
-            operation: 'trackUsage',
-            type: 'usage_updated',
-            requestId,
-            usageRecordId: context.usageRecordId.toString(),
-          });
+            this.logger.debug('Usage record updated in database', {
+              component: 'GatewayAnalyticsService',
+              operation: 'trackUsage',
+              type: 'usage_updated',
+              requestId,
+              usageRecordId: context.usageRecordId.toString(),
+            });
+          }
         } else {
-          // Create new usage record if we don't have an existing one
           const metadata: Record<string, unknown> = {
             requestId,
             method: request.method,
             url: request.originalUrl,
+            ...metadataExtras,
           };
           if (context.proxyKeyId) {
             metadata.proxyKeyId = context.proxyKeyId;
@@ -201,17 +270,24 @@ export class GatewayAnalyticsService {
           const usageRecord = new this.usageModel({
             userId: context.userId,
             projectId: context.projectId,
-            service:
-              context.provider || this.inferServiceFromUrl(request.originalUrl),
+            service: this.getEffectiveGatewayUsageService(request),
             model: request.body?.model || 'unknown',
             prompt: request.body?.messages
               ? request.body.messages
                   .map((m: any) => m.content || '')
                   .join('\n')
               : request.body?.prompt || '',
-            ...updateData,
+            promptTokens: inputTokens,
+            completionTokens: outputTokens,
+            totalTokens,
+            cost,
+            responseTime: processingTime,
+            completion: completionText,
+            ipAddress: request.ip,
+            userAgent: request.headers?.['user-agent'] as string | undefined,
             metadata,
-            requestTimestamp: new Date(context.startTime),
+            requestTracking: requestTrackingMerged,
+            recordedAt: new Date(),
           });
 
           await usageRecord.save();
@@ -356,6 +432,8 @@ export class GatewayAnalyticsService {
       // Compute cost if not present on context, optionally extract from response if needed
       const cost = context.cost || 0;
 
+      const effectiveProvider = this.getEffectiveGatewayUsageService(request);
+
       // Basic fields for performance log
       const baseLog = {
         component: 'GatewayAnalyticsService',
@@ -363,7 +441,7 @@ export class GatewayAnalyticsService {
         requestId,
         userId: context.userId,
         model: request.body?.model || 'unknown',
-        provider: context.provider || 'unknown',
+        provider: effectiveProvider,
         processingTime,
         inputTokens,
         outputTokens,
@@ -382,7 +460,7 @@ export class GatewayAnalyticsService {
       try {
         const performanceMetrics = {
           model: request.body?.model || 'unknown',
-          provider: context.provider || 'unknown',
+          provider: effectiveProvider,
           userId: context.userId,
           processingTime,
           inputTokens,
@@ -403,7 +481,7 @@ export class GatewayAnalyticsService {
         };
 
         // Store in cache for quick access by routing decisions
-        const cacheKey = `model_performance:${context.provider}:${request.body?.model}`;
+        const cacheKey = `model_performance:${effectiveProvider}:${request.body?.model}`;
         await this.cacheModelPerformanceMetrics(cacheKey, performanceMetrics);
 
         this.logger.debug('Model performance metrics recorded', {
@@ -442,56 +520,16 @@ export class GatewayAnalyticsService {
    */
   async estimateRequestCost(request: any, context: any): Promise<number> {
     try {
-      // Basic cost estimation based on tokens
       const inputTokens =
         context.inputTokens || this.estimateTokens(request.body, 'input');
       const outputTokens =
         context.outputTokens || this.estimateTokens(request.body, 'output');
 
-      // Get actual pricing from pricing service
-      let inputPrice = 0.000001; // Default fallback
-      let outputPrice = 0.000002; // Default fallback
-
-      try {
-        // Import pricing service dynamically - path from gateway/services
-        const { PricingService } =
-          await import('../../utils/services/pricing.service');
-        const pricingService = new PricingService();
-
-        const pricing = pricingService.getModelPricing(
-          request.body?.model || 'unknown',
-        );
-
-        if (pricing) {
-          // ModelPricing uses inputCostPerToken/outputCostPerToken per 1K tokens
-          inputPrice = pricing.inputCostPerToken / 1000;
-          outputPrice = pricing.outputCostPerToken / 1000;
-
-          this.logger.debug('Retrieved pricing from service', {
-            component: 'GatewayAnalyticsService',
-            operation: 'estimateRequestCost',
-            model: request.body?.model,
-            provider: context.provider,
-            inputPrice,
-            outputPrice,
-          });
-        }
-      } catch (pricingError) {
-        this.logger.warn('Failed to get pricing from service, using defaults', {
-          component: 'GatewayAnalyticsService',
-          operation: 'estimateRequestCost',
-          error:
-            pricingError instanceof Error
-              ? pricingError.message
-              : 'Unknown error',
-          model: request.body?.model,
-          provider: context.provider,
-        });
-        // Continue with default pricing
-      }
-
-      const estimatedCost =
-        inputTokens * inputPrice + outputTokens * outputPrice;
+      const estimatedCost = await this.calculateCostFromTokens(
+        request.body?.model || 'unknown',
+        inputTokens,
+        outputTokens,
+      );
 
       this.logger.debug('Estimated request cost', {
         component: 'GatewayAnalyticsService',
@@ -513,6 +551,72 @@ export class GatewayAnalyticsService {
       });
       return 0;
     }
+  }
+
+  /**
+   * Resolves Usage.service for gateway requests. Uses Bedrock flag, validated provider,
+   * proxy target hostname, then gateway path heuristics. Always returns a Usage schema enum value.
+   */
+  getEffectiveGatewayUsageService(request: any): string {
+    const context = request?.gatewayContext ?? {};
+    if (context.useBedrockAnthropicFallback === true) {
+      return 'aws-bedrock';
+    }
+    const p = context.provider;
+    if (
+      typeof p === 'string' &&
+      GatewayAnalyticsService.USAGE_SCHEMA_SERVICES.has(p)
+    ) {
+      return p;
+    }
+    const target =
+      typeof context.targetUrl === 'string' ? context.targetUrl.trim() : '';
+    if (/^https?:\/\//i.test(target)) {
+      const fromHost = this.inferServiceFromUrl(target);
+      return this.mapInferredHostnameToUsageService(fromHost);
+    }
+    return this.inferUsageServiceFromGatewayPath(
+      String(request?.originalUrl || request?.url || ''),
+    );
+  }
+
+  /**
+   * Map inferServiceFromUrl() output to a Usage.service enum value.
+   */
+  private mapInferredHostnameToUsageService(inferred: string): string {
+    if (GatewayAnalyticsService.USAGE_SCHEMA_SERVICES.has(inferred)) {
+      return inferred;
+    }
+    return 'other';
+  }
+
+  /**
+   * When targetUrl is not yet set, infer from the gateway mount path (originalUrl is often relative).
+   */
+  private inferUsageServiceFromGatewayPath(originalUrl: string): string {
+    const path = originalUrl.split('?')[0].toLowerCase();
+    if (path.includes('/v1/messages')) return 'anthropic';
+    if (
+      path.includes('/v1/chat/completions') ||
+      path.includes('/v1/embeddings') ||
+      path.includes('/v1/images') ||
+      path.includes('/v1/audio') ||
+      path.includes('/v1/responses')
+    ) {
+      return 'openai';
+    }
+    if (
+      path.includes('generativelanguage') ||
+      path.includes('/models/') ||
+      path.includes('google')
+    ) {
+      return 'google-ai';
+    }
+    if (path.includes('cohere')) return 'cohere';
+    if (path.includes('bedrock') || path.includes('amazonaws.com'))
+      return 'aws-bedrock';
+    if (path.includes('huggingface')) return 'huggingface';
+    return 'other';
   }
 
   /**
@@ -701,6 +805,136 @@ export class GatewayAnalyticsService {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
+  }
+
+  /**
+   * Dollar cost from token counts using PricingService (per-1K token rates).
+   */
+  private async calculateCostFromTokens(
+    model: string,
+    inputTokens: number,
+    outputTokens: number,
+  ): Promise<number> {
+    let inputPrice = 0.000001;
+    let outputPrice = 0.000002;
+    try {
+      const { PricingService } =
+        await import('../../utils/services/pricing.service');
+      const pricingService = new PricingService();
+      const pricing = pricingService.getModelPricing(model || 'unknown');
+      if (pricing) {
+        inputPrice = pricing.inputCostPerToken / 1000;
+        outputPrice = pricing.outputCostPerToken / 1000;
+      }
+    } catch {
+      // keep defaults
+    }
+    return inputTokens * inputPrice + outputTokens * outputPrice;
+  }
+
+  /**
+   * Merge comprehensive middleware tracking with gateway request/response bodies for Usage.requestTracking.
+   */
+  private mergeGatewayRequestTracking(
+    request: any,
+    responseBody: unknown | undefined,
+    processingTimeMs: number,
+  ): Record<string, unknown> {
+    const existing = request.requestTracking as
+      | Record<string, unknown>
+      | undefined;
+    const payloadBase =
+      (existing?.payload as Record<string, unknown> | undefined) || {};
+    const payload: Record<string, unknown> = {
+      ...payloadBase,
+      requestBody: request.body,
+    };
+    if (responseBody !== undefined) {
+      payload.responseBody = responseBody;
+    }
+    const perfBase = (existing?.performance as Record<string, unknown>) || {
+      networkTime: 0,
+      serverProcessingTime: 0,
+      totalRoundTripTime: 0,
+      dataTransferEfficiency: 0,
+    };
+    const performance = {
+      ...perfBase,
+      serverProcessingTime:
+        processingTimeMs ||
+        (perfBase.serverProcessingTime as number) ||
+        0,
+      totalRoundTripTime:
+        processingTimeMs ||
+        (perfBase.totalRoundTripTime as number) ||
+        0,
+    };
+    if (existing) {
+      return { ...existing, payload, performance };
+    }
+    const h = request.headers || {};
+    return {
+      clientInfo: {
+        ip: request.ip || '',
+        forwardedIPs: [] as string[],
+        userAgent: (h['user-agent'] as string) || '',
+      },
+      headers: { request: {}, response: {} },
+      networking: {
+        serverEndpoint: String(request.originalUrl || request.path || ''),
+        serverFullUrl: '',
+        serverIP: '',
+        serverPort: 0,
+        routePattern: String(request.path || ''),
+        protocol: 'http',
+        secure: false,
+      },
+      payload: {
+        ...payload,
+        requestSize: 0,
+        responseSize: 0,
+        contentType: (h['content-type'] as string) || 'application/json',
+      },
+      performance,
+    };
+  }
+
+  /**
+   * Assistant text from OpenAI or Anthropic-shaped JSON bodies.
+   */
+  private extractCompletionTextFromProviderResponse(body: unknown): string {
+    if (!body || typeof body !== 'object') {
+      return '';
+    }
+    const r = body as Record<string, unknown>;
+    if (Array.isArray(r.choices)) {
+      return (r.choices as Record<string, unknown>[])
+        .map(
+          (c) =>
+            String(
+              (c.message as Record<string, unknown>)?.content ??
+                c.text ??
+                '',
+            ),
+        )
+        .join('\n');
+    }
+    if (Array.isArray(r.content)) {
+      return (r.content as Record<string, unknown>[])
+        .map((block) =>
+          typeof block === 'object' && block && 'text' in block
+            ? String((block as Record<string, unknown>).text)
+            : '',
+        )
+        .join('');
+    }
+    if (typeof r.output_text === 'string') {
+      return r.output_text;
+    }
+    if (typeof r.completion === 'string') {
+      return r.completion;
+    }
+    return '';
   }
 
   /**
