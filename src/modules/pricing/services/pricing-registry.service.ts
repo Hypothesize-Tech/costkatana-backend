@@ -307,10 +307,56 @@ export class PricingRegistryService
   }
 
   /**
+   * Map caller model ids to registry keys. Registry stores `provider:model` for API-style ids
+   * (e.g. `anthropic:claude-sonnet-4-20250514`) and bare Bedrock foundation ids when they contain `:`.
+   * Callers often pass Anthropic API strings without the `anthropic:` prefix, or `us.*` inference profiles.
+   */
+  private resolveRegistryModelId(modelId: string): string {
+    if (this.pricing.has(modelId)) {
+      return modelId;
+    }
+
+    const withoutInferenceProfilePrefix = modelId.replace(
+      /^(us|eu|ap|ca)\./,
+      '',
+    );
+    if (
+      withoutInferenceProfilePrefix !== modelId &&
+      this.pricing.has(withoutInferenceProfilePrefix)
+    ) {
+      return withoutInferenceProfilePrefix;
+    }
+
+    if (!modelId.includes(':')) {
+      if (modelId.startsWith('claude-')) {
+        const anthropicKey = `anthropic:${modelId}`;
+        if (this.pricing.has(anthropicKey)) {
+          return anthropicKey;
+        }
+      }
+      if (modelId.startsWith('gpt-')) {
+        const openaiKey = `openai:${modelId}`;
+        if (this.pricing.has(openaiKey)) {
+          return openaiKey;
+        }
+      }
+      if (modelId.startsWith('gemini-')) {
+        const googleKey = `google:${modelId}`;
+        if (this.pricing.has(googleKey)) {
+          return googleKey;
+        }
+      }
+    }
+
+    return modelId;
+  }
+
+  /**
    * Get pricing for a model
    */
   getPricing(modelId: string): ModelPricing | null {
-    const pricing = this.pricing.get(modelId);
+    const key = this.resolveRegistryModelId(modelId);
+    const pricing = this.pricing.get(key);
 
     if (!pricing) {
       this.logger.warn(`Pricing not found for model: ${modelId}`);

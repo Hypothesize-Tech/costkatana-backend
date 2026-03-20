@@ -107,7 +107,10 @@ export class RequestProcessingService {
       request.method?.toUpperCase() === 'POST' &&
       /\/v1\/messages(\/|$|\?)/.test(providerPathLower);
 
-    // No HTTP upstream: GatewayService runs Bedrock via AWS SDK (flag only; not a real URL).
+    // Claude via gateway: if there is no Anthropic API key (env ANTHROPIC_API_KEY or resolved
+    // provider key), Nest serves POST /v1/messages through AWS Bedrock using the same AWS
+    // credentials already configured for the backend. No extra gateway env vars — clients only
+    // authenticate to Cost Katana; they never send ANTHROPIC_API_KEY.
     if (
       isAnthropicMessagesPost &&
       isOfficialAnthropicGatewayTarget(targetUrl.hostname) &&
@@ -115,7 +118,7 @@ export class RequestProcessingService {
     ) {
       context.useBedrockAnthropicFallback = true;
       this.logger.log(
-        'Anthropic Messages: no Anthropic key; routing to AWS Bedrock (Cost Katana)',
+        'Anthropic Messages: no Anthropic key → AWS Bedrock (Nest)',
         { path: providerPath },
       );
       return {
@@ -623,7 +626,8 @@ export class RequestProcessingService {
     }
 
     if (host.includes('anthropic.com')) {
-      return process.env.ANTHROPIC_API_KEY || null;
+      const key = process.env.ANTHROPIC_API_KEY?.trim();
+      return key || null;
     }
 
     if (host.includes('googleapis.com')) {

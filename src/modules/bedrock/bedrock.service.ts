@@ -227,9 +227,20 @@ export class BedrockService {
     return AWS_CONFIG.bedrock.maxTokens;
   }
 
+  /**
+   * Bedrock InvokeModel often requires a cross-region inference profile ID
+   * (e.g. `us.anthropic.claude-sonnet-4-20250514-v1:0`) instead of the bare
+   * foundation model ID; unmapped Claude IDs were failing with on-demand errors.
+   */
   private static convertToInferenceProfile(modelId: string): string {
-    const region = process.env.AWS_BEDROCK_REGION || 'us-east-1';
+    const region =
+      process.env.AWS_BEDROCK_REGION || process.env.AWS_REGION || 'us-east-1';
     const regionPrefix = region.split('-')[0];
+
+    if (/^(us|eu|ap|ca)\./.test(modelId)) {
+      return modelId;
+    }
+
     const modelMappings: Record<string, string> = {
       'global.anthropic.claude-haiku-4-5-20251001-v1:0': `${regionPrefix}.global.anthropic.claude-haiku-4-5-20251001-v1:0`,
       'anthropic.claude-3-5-sonnet-20240620-v1:0': `${regionPrefix}.anthropic.claude-3-5-sonnet-20240620-v1:0`,
@@ -240,7 +251,20 @@ export class BedrockService {
       'anthropic.claude-opus-4-1-20250805-v1:0': `${regionPrefix}.anthropic.claude-opus-4-1-20250805-v1:0`,
       'amazon.nova-pro-v1:0': 'amazon.nova-pro-v1:0',
     };
-    return modelMappings[modelId] || modelId;
+
+    if (modelMappings[modelId] !== undefined) {
+      return modelMappings[modelId];
+    }
+
+    if (modelId.startsWith('global.anthropic.')) {
+      return `${regionPrefix}.${modelId}`;
+    }
+
+    if (modelId.startsWith('anthropic.claude')) {
+      return `${regionPrefix}.${modelId}`;
+    }
+
+    return modelId;
   }
 
   public static async extractJson(text: string): Promise<string> {

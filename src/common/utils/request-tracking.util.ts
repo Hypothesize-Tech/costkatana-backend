@@ -22,14 +22,21 @@ const SENSITIVE_HEADERS = [
   'x-session-token',
 ];
 
+function incomingHeaders(
+  req: Request,
+): Record<string, string | string[] | undefined> {
+  return (req.headers ?? {}) as Record<string, string | string[] | undefined>;
+}
+
 function getClientIP(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
+  const h = incomingHeaders(req);
+  const forwarded = h['x-forwarded-for'];
   if (forwarded) {
     return (
       Array.isArray(forwarded) ? forwarded[0] : forwarded.split(',')[0]
     ).trim();
   }
-  const realIP = req.headers['x-real-ip'];
+  const realIP = h['x-real-ip'];
   if (realIP) {
     return (Array.isArray(realIP) ? realIP[0] : realIP).trim();
   }
@@ -37,7 +44,7 @@ function getClientIP(req: Request): string {
 }
 
 function extractForwardedIPs(req: Request): string[] {
-  const forwarded = req.headers['x-forwarded-for'];
+  const forwarded = incomingHeaders(req)['x-forwarded-for'];
   if (!forwarded) return [];
   if (Array.isArray(forwarded)) {
     return forwarded.flatMap((f) => f.split(',').map((ip) => ip.trim()));
@@ -83,12 +90,13 @@ export function buildRequestTrackingFromRequest(
     frontendData?: Partial<IRequestTracking>;
   },
 ): IRequestTracking {
+  const hdrs = incomingHeaders(req);
   const clientIP = getClientIP(req);
   const forwardedIPs = extractForwardedIPs(req);
   const protocol = req.protocol || 'http';
   const secure = protocol === 'https' || req.secure === true;
   const host =
-    req.headers.host ||
+    (hdrs.host as string) ||
     `${req.hostname || 'localhost'}:${req.socket?.localPort || 80}`;
   const serverIP = req.socket?.localAddress || '127.0.0.1';
   const serverPort = req.socket?.localPort || (secure ? 443 : 80);
@@ -97,16 +105,16 @@ export function buildRequestTrackingFromRequest(
     ip: clientIP,
     port: req.socket?.remotePort,
     forwardedIPs,
-    userAgent: (req.headers['user-agent'] as string) || 'Unknown',
-    sdkVersion: req.headers['x-sdk-version'] as string,
-    environment: (req.headers['x-environment'] as string) || 'production',
+    userAgent: (hdrs['user-agent'] as string) || 'Unknown',
+    sdkVersion: hdrs['x-sdk-version'] as string,
+    environment: (hdrs['x-environment'] as string) || 'production',
     ...(options?.frontendData?.clientInfo ?? {}),
   };
 
   const networking: INetworking = {
     serverEndpoint: req.path,
     serverFullUrl: `${protocol}://${host}${req.originalUrl}`,
-    clientOrigin: (req.headers.origin || req.headers.referer) as string,
+    clientOrigin: (hdrs.origin || hdrs.referer) as string,
     serverIP,
     serverPort,
     routePattern: (req.route?.path as string) || req.path || 'unknown',
@@ -115,9 +123,7 @@ export function buildRequestTrackingFromRequest(
   };
 
   const headers: IHeaders = {
-    request: sanitizeHeaders(
-      req.headers as Record<string, string | string[] | undefined>,
-    ),
+    request: sanitizeHeaders(hdrs),
     response: {},
     ...(options?.frontendData?.headers ?? {}),
   };
@@ -126,8 +132,8 @@ export function buildRequestTrackingFromRequest(
   const payload: IPayload = {
     requestSize,
     responseSize: 0,
-    contentType: (req.headers['content-type'] as string) || 'application/json',
-    encoding: req.headers['content-encoding'] as string,
+    contentType: (hdrs['content-type'] as string) || 'application/json',
+    encoding: hdrs['content-encoding'] as string,
     ...(options?.frontendData?.payload ?? {}),
   };
 

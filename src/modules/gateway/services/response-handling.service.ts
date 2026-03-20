@@ -296,6 +296,16 @@ export class ResponseHandlingService {
   ): void {
     const context = (request as any).gatewayContext;
 
+    if (!axiosResponse || typeof axiosResponse !== 'object') {
+      this.logger.warn('addResponseHeaders: invalid upstream response object', {
+        requestId: (request.headers?.['x-request-id'] as string) || '',
+      });
+      if (!response.headersSent) {
+        response.status(502);
+      }
+      return;
+    }
+
     // Set response status (must be an integer; some synthetic Axios responses omit it)
     const upstreamStatus =
       typeof axiosResponse.status === 'number' &&
@@ -332,15 +342,17 @@ export class ResponseHandlingService {
       );
     }
 
-    // Copy relevant headers from the AI provider response
+    // Copy relevant headers from the AI provider response (synthetic Axios shapes may omit `headers`)
+    const upstreamHeaders = axiosResponse.headers ?? {};
     const headersToForward = [
       'content-type',
       'content-length',
       'content-encoding',
     ];
     headersToForward.forEach((header) => {
-      if (axiosResponse.headers[header]) {
-        response.setHeader(header, axiosResponse.headers[header]);
+      const value = upstreamHeaders[header];
+      if (value) {
+        response.setHeader(header, value as string);
       }
     });
 

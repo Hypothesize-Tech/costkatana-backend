@@ -55,6 +55,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
+    const reqHeaders = request.headers ?? {};
 
     const startTime = Date.now();
 
@@ -236,13 +237,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
         method: request.method,
         url: request.url,
         originalUrl: request.originalUrl,
-        headers: request.headers,
+        headers: reqHeaders,
         body: request.body,
         query: request.query,
         params: request.params,
         ip: request.ip,
         user: (request as any).user,
-        userAgent: request.get('User-Agent'),
+        userAgent: (reqHeaders['user-agent'] as string) || '',
         timestamp: new Date().toISOString(),
       },
     };
@@ -300,7 +301,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         Sentry.setContext('request', {
           method: request.method,
           url: request.originalUrl,
-          headers: request.headers,
+          headers: reqHeaders,
           query: request.query as Record<string, any>,
           params: request.params as Record<string, any>,
         });
@@ -321,7 +322,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
           },
           extra: {
             stack: error.stack,
-            userAgent: request.get('User-Agent'),
+            userAgent: (reqHeaders['user-agent'] as string) || '',
             ip: request.ip,
             timestamp: new Date().toISOString(),
           },
@@ -458,26 +459,56 @@ export class HttpExceptionFilter implements ExceptionFilter {
       return;
     }
 
-    // Add CORS headers to error response
-    const origin = request.headers.origin;
-    if (origin) {
-      response.setHeader('Access-Control-Allow-Origin', origin);
-      response.setHeader('Access-Control-Allow-Credentials', 'true');
+    try {
+      // Add CORS headers to error response
+      const origin = reqHeaders.origin;
+      if (origin) {
+        response.setHeader('Access-Control-Allow-Origin', origin);
+        response.setHeader('Access-Control-Allow-Credentials', 'true');
+      }
+
+      // Ensure JSON content type
+      response.setHeader('Content-Type', 'application/json');
+
+      const safeStatus = HttpExceptionFilter.normalizeHttpStatus(statusCode);
+      response.status(safeStatus).json(errorResponse);
+      this.logger.log('Error response sent successfully', {
+        component: 'HttpExceptionFilter',
+        operation: 'catch',
+        type: 'error_handling',
+        step: 'response_sent',
+        statusCode: safeStatus,
+        responseTime: `${Date.now() - startTime}ms`,
+      });
+    } catch (sendErr) {
+      this.logger.error('Failed to send HTTP error response', {
+        component: 'HttpExceptionFilter',
+        operation: 'catch',
+        type: 'error_handling',
+        step: 'send_response_failed',
+        cause: sendErr instanceof Error ? sendErr.message : String(sendErr),
+        stack: sendErr instanceof Error ? sendErr.stack : undefined,
+      });
+      try {
+        if (!response.headersSent) {
+          response
+            .status(HttpStatus.INTERNAL_SERVER_ERROR)
+            .setHeader('Content-Type', 'application/json')
+            .json({
+              success: false,
+              message: 'Internal server error',
+            });
+          this.logger.warn('Sent fallback 500 JSON after primary send failed', {
+            component: 'HttpExceptionFilter',
+            operation: 'catch',
+            type: 'error_handling',
+            step: 'fallback_response_sent',
+          });
+        }
+      } catch {
+        // Response object may be unusable; nothing more to do
+      }
     }
-
-    // Ensure JSON content type
-    response.setHeader('Content-Type', 'application/json');
-
-    response.status(statusCode).json(errorResponse);
-
-    this.logger.log('Error response sent successfully', {
-      component: 'HttpExceptionFilter',
-      operation: 'catch',
-      type: 'error_handling',
-      step: 'response_sent',
-      statusCode: statusCode,
-      responseTime: `${Date.now() - startTime}ms`,
-    });
 
     this.logger.log('=== HTTP EXCEPTION FILTER COMPLETED ===', {
       component: 'HttpExceptionFilter',

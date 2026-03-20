@@ -39,9 +39,10 @@ export class GlobalTrackingInterceptor implements NestInterceptor {
     }
 
     const startTime = Date.now();
+    const hdrs = request.headers ?? {};
     const requestId =
       (request as any).requestId ||
-      (request.headers['x-request-id'] as string) ||
+      (hdrs['x-request-id'] as string) ||
       crypto.randomUUID();
 
     // Extract tracking information
@@ -52,12 +53,12 @@ export class GlobalTrackingInterceptor implements NestInterceptor {
       url: request.url,
       path: request.path,
       query: request.query,
-      headers: this.sanitizeHeaders(request.headers),
+      headers: this.sanitizeHeaders(hdrs),
       userId: (request as any).user?.id || 'anonymous',
-      userAgent: request.headers['user-agent'] || '',
+      userAgent: (hdrs['user-agent'] as string) || '',
       ip: request.ip || request.connection?.remoteAddress || '',
-      contentType: request.headers['content-type'] || '',
-      contentLength: request.headers['content-length'] || '',
+      contentType: (hdrs['content-type'] as string) || '',
+      contentLength: (hdrs['content-length'] as string) || '',
     };
 
     // Add tracking headers to response
@@ -181,6 +182,10 @@ export class GlobalTrackingInterceptor implements NestInterceptor {
     ];
 
     const sanitized: Record<string, string> = {};
+
+    if (!headers || typeof headers !== 'object') {
+      return sanitized;
+    }
 
     for (const [key, value] of Object.entries(headers)) {
       if (sensitiveHeaders.includes(key.toLowerCase())) {

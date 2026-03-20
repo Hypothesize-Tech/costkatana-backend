@@ -109,7 +109,7 @@ export class SentryMiddleware implements NestMiddleware {
   }
 
   private sanitizeHeaders(headers: any): any {
-    const sanitized = { ...headers };
+    const sanitized = { ...(headers ?? {}) };
 
     // Remove sensitive headers
     const sensitiveHeaders = [
