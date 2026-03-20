@@ -8,6 +8,7 @@ import {
   GatewayProviderMetricsDocument,
 } from '../../../schemas/gateway/gateway-provider-metrics.schema';
 import { CostSimulatorService } from '../../cost-simulator/cost-simulator.service';
+import { estimateTokens } from '../../../utils/tokenCounter';
 
 function stringifyGatewayMessageContent(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -57,6 +58,30 @@ function extractUsagePromptFromGatewayBody(body: unknown): string {
   const lastUser = userMessages[userMessages.length - 1];
   if (!lastUser) return '';
   return stringifyGatewayMessageContent(lastUser.content);
+}
+
+/** True when the OpenAI/Anthropic-style body carries more than one chat message. */
+function requestBodyHasMultipleChatMessages(body: unknown): boolean {
+  if (!body || typeof body !== 'object') return false;
+  const m = (body as Record<string, unknown>).messages;
+  return Array.isArray(m) && m.length > 1;
+}
+
+/** Map gateway context.provider to estimateTokens() provider hints (Claude-on-Bedrock → anthropic). */
+function mapProviderForTokenEstimate(
+  provider: string | undefined,
+  model: string,
+): string | undefined {
+  const p = (provider || '').toLowerCase();
+  const m = (model || '').toLowerCase();
+  if (p.includes('bedrock')) {
+    return m.includes('claude') ? 'anthropic' : undefined;
+  }
+  if (p.includes('anthropic')) return 'anthropic';
+  if (p.includes('openai')) return 'openai';
+  if (p.includes('google')) return 'google';
+  if (p.includes('cohere')) return 'cohere';
+  return undefined;
 }
 
 /**
@@ -226,10 +251,40 @@ export class GatewayAnalyticsService {
           outputTokens = extracted.output;
         }
       }
+
+      // Usage rows are always "this request as one turn": when the client sends multiple
+      // chat messages (conversation memory), we still persist prompt + input token estimate
+      // for the LAST user message only; output tokens stay provider-reported for this reply.
+      let usageInputFromLastUserOnly = false;
+      if (requestBodyHasMultipleChatMessages(request.body)) {
+        const lastUserPrompt = extractUsagePromptFromGatewayBody(
+          request.body as unknown,
+        );
+        if (lastUserPrompt.trim()) {
+          const modelName = String(request.body?.model ?? 'unknown');
+          const providerGuess = mapProviderForTokenEstimate(
+            String(context.provider ?? ''),
+            modelName,
+          );
+          inputTokens = estimateTokens(
+            lastUserPrompt,
+            providerGuess,
+            modelName,
+          );
+          usageInputFromLastUserOnly = true;
+        }
+      }
+
       const totalTokens = inputTokens + outputTokens;
 
       let cost = context.cost ?? 0;
-      if (cost === 0 && (inputTokens > 0 || outputTokens > 0)) {
+      if (usageInputFromLastUserOnly && (inputTokens > 0 || outputTokens > 0)) {
+        cost = await this.calculateCostFromTokens(
+          request.body?.model || 'unknown',
+          inputTokens,
+          outputTokens,
+        );
+      } else if (cost === 0 && (inputTokens > 0 || outputTokens > 0)) {
         cost = await this.calculateCostFromTokens(
           request.body?.model || 'unknown',
           inputTokens,
