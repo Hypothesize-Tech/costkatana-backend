@@ -296,8 +296,13 @@ export class ResponseHandlingService {
   ): void {
     const context = (request as any).gatewayContext;
 
-    // Set response status
-    response.status(axiosResponse.status);
+    // Set response status (must be an integer; some synthetic Axios responses omit it)
+    const upstreamStatus =
+      typeof axiosResponse.status === 'number' &&
+      Number.isInteger(axiosResponse.status)
+        ? axiosResponse.status
+        : 502;
+    response.status(upstreamStatus);
 
     // Add CostKatana-Request-Id header for feedback tracking
     if (context.requestId) {

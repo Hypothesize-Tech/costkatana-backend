@@ -35,6 +35,22 @@ export class AppError extends Error {
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
 
+  /**
+   * Express rejects non-integer status codes (e.g. undefined). Some code paths can
+   * produce malformed HttpException or AppError instances; normalize before res.status().
+   */
+  private static normalizeHttpStatus(code: unknown): number {
+    if (
+      typeof code === 'number' &&
+      Number.isInteger(code) &&
+      code >= 100 &&
+      code <= 599
+    ) {
+      return code;
+    }
+    return HttpStatus.INTERNAL_SERVER_ERROR;
+  }
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -107,17 +123,33 @@ export class HttpExceptionFilter implements ExceptionFilter {
       statusCode = 400;
     } else if (exception instanceof HttpException) {
       const httpException = exception;
-      statusCode = httpException.getStatus();
-      const response = httpException.getResponse();
+      const exceptionPayload = httpException.getResponse();
+      const fromException = httpException.getStatus();
+      let resolvedStatus = HttpExceptionFilter.normalizeHttpStatus(fromException);
+      if (
+        resolvedStatus === HttpStatus.INTERNAL_SERVER_ERROR &&
+        typeof exceptionPayload === 'object' &&
+        exceptionPayload !== null
+      ) {
+        const sc = (exceptionPayload as { statusCode?: unknown }).statusCode;
+        const fromBody = HttpExceptionFilter.normalizeHttpStatus(sc);
+        if (fromBody !== HttpStatus.INTERNAL_SERVER_ERROR) {
+          resolvedStatus = fromBody;
+        }
+      }
+      statusCode = resolvedStatus;
 
-      if (typeof response === 'string') {
-        error = new AppError(response, statusCode);
-      } else if (typeof response === 'object' && response !== null) {
-        const errorResponse = response as any;
-        error = new AppError(
-          errorResponse.message || errorResponse.error || 'HTTP Exception',
-          statusCode,
-        );
+      if (typeof exceptionPayload === 'string') {
+        error = new AppError(exceptionPayload, statusCode);
+      } else if (typeof exceptionPayload === 'object' && exceptionPayload !== null) {
+        const errorResponse = exceptionPayload as Record<string, unknown>;
+        const msg =
+          (typeof errorResponse.message === 'string'
+            ? errorResponse.message
+            : null) ||
+          (typeof errorResponse.error === 'string' ? errorResponse.error : null) ||
+          'HTTP Exception';
+        error = new AppError(msg, statusCode);
         if (errorResponse.errors) {
           errors = errorResponse.errors;
         }
@@ -181,6 +213,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
       error = new AppError('Unknown error occurred', 500);
       statusCode = 500;
     }
+
+    statusCode = HttpExceptionFilter.normalizeHttpStatus(statusCode);
+    error.statusCode = statusCode;
 
     this.logger.log('Step 2: Building comprehensive error context', {
       component: 'HttpExceptionFilter',
