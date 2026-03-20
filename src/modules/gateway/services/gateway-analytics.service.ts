@@ -9,6 +9,56 @@ import {
 } from '../../../schemas/gateway/gateway-provider-metrics.schema';
 import { CostSimulatorService } from '../../cost-simulator/cost-simulator.service';
 
+function stringifyGatewayMessageContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (content == null) return '';
+  if (Array.isArray(content)) {
+    const parts: string[] = [];
+    for (const block of content) {
+      if (
+        block &&
+        typeof block === 'object' &&
+        'text' in block &&
+        typeof (block as { text: unknown }).text === 'string'
+      ) {
+        parts.push((block as { text: string }).text);
+      }
+    }
+    return parts.join('');
+  }
+  if (typeof content === 'object') {
+    try {
+      return JSON.stringify(content);
+    } catch {
+      return '';
+    }
+  }
+  if (typeof content === 'number' || typeof content === 'boolean') {
+    return String(content);
+  }
+  return '';
+}
+
+/**
+ * Persist the current user turn for Usage / dashboards — not the full thread.
+ * Joining every message's `content` mixes prior assistant replies into "Request".
+ */
+function extractUsagePromptFromGatewayBody(body: unknown): string {
+  if (!body || typeof body !== 'object') return '';
+  const b = body as Record<string, unknown>;
+  if (typeof b.prompt === 'string' && b.prompt.trim()) return b.prompt;
+  const messages = b.messages;
+  if (!Array.isArray(messages) || messages.length === 0) return '';
+  const userMessages = messages.filter((m): m is Record<string, unknown> => {
+    if (m === null || typeof m !== 'object') return false;
+    const rec = m as Record<string, unknown>;
+    return rec.role === 'user';
+  });
+  const lastUser = userMessages[userMessages.length - 1];
+  if (!lastUser) return '';
+  return stringifyGatewayMessageContent(lastUser.content);
+}
+
 /**
  * Gateway Analytics Service - Handles usage tracking and analytics for gateway operations.
  * Uses Redis (CacheService) for hot path and MongoDB for durable persistence (production scalability).
@@ -68,9 +118,7 @@ export class GatewayAnalyticsService {
           projectId: context.projectId,
           service: this.getEffectiveGatewayUsageService(request),
           model: request.body?.model || 'unknown',
-          prompt: request.body?.messages
-            ? request.body.messages.map((m: any) => m.content || '').join('\n')
-            : request.body?.prompt || '',
+          prompt: extractUsagePromptFromGatewayBody(request.body as unknown),
           promptTokens: 0,
           completionTokens: 0,
           totalTokens: 0,
@@ -272,11 +320,7 @@ export class GatewayAnalyticsService {
             projectId: context.projectId,
             service: this.getEffectiveGatewayUsageService(request),
             model: request.body?.model || 'unknown',
-            prompt: request.body?.messages
-              ? request.body.messages
-                  .map((m: any) => m.content || '')
-                  .join('\n')
-              : request.body?.prompt || '',
+            prompt: extractUsagePromptFromGatewayBody(request.body as unknown),
             promptTokens: inputTokens,
             completionTokens: outputTokens,
             totalTokens,
