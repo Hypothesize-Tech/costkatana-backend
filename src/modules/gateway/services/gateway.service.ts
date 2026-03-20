@@ -423,9 +423,12 @@ export class GatewayService {
           },
           -1,
         );
-        response
-          .status(axiosError.response.status)
-          .json(axiosError.response.data);
+        const upstreamStatus =
+          typeof axiosError.response.status === 'number' &&
+          Number.isInteger(axiosError.response.status)
+            ? axiosError.response.status
+            : 502;
+        response.status(upstreamStatus).json(axiosError.response.data);
       } else {
         // Other error
         response.status(500).json({
