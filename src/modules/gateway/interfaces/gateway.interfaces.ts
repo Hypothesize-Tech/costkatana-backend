@@ -123,6 +123,9 @@ export interface GatewayContext {
     estimatedSavings: number;
     cacheHeaders: Record<string, string>;
   };
+
+  /** When set, GatewayService routes POST /v1/messages to Bedrock (no Anthropic API key). */
+  useBedrockAnthropicFallback?: boolean;
 }
 
 /**
@@ -134,6 +137,11 @@ export interface ProxyRequestConfig extends AxiosRequestConfig {
   maxRedirects: number;
   decompress: boolean;
   validateStatus: () => boolean;
+  /**
+   * When true, the gateway never performs HTTP to `url`; it invokes Claude on AWS Bedrock
+   * inside the Cost Katana backend. Clients and the SDK do not set this — only the server.
+   */
+  internalBedrockAnthropic?: boolean;
 }
 
 /**

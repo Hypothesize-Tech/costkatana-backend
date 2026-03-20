@@ -80,8 +80,9 @@ export class GatewayAuthGuard implements CanActivate {
         requestId,
       });
 
-      // Initialize gateway context
+      // Merge with any context from GatewayHeadersMiddleware (CostKatana-* headers)
       const gatewayContext: GatewayContext = {
+        ...(request.gatewayContext ?? {}),
         startTime,
         requestId,
       };

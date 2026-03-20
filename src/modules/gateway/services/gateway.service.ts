@@ -10,6 +10,7 @@ import { BudgetEnforcementService } from './budget-enforcement.service';
 import { GatewayAnalyticsService } from './gateway-analytics.service';
 import { RequestProcessingService } from './request-processing.service';
 import { ResponseHandlingService } from './response-handling.service';
+import { GatewayAnthropicBedrockService } from './gateway-anthropic-bedrock.service';
 import { FailoverService } from './failover.service';
 import { PriorityQueueService } from './priority-queue.service';
 import { PromptFirewallService } from '../../security/prompt-firewall.service';
@@ -38,6 +39,7 @@ export class GatewayService {
     private analyticsService: GatewayAnalyticsService,
     private requestProcessingService: RequestProcessingService,
     private responseHandlingService: ResponseHandlingService,
+    private gatewayAnthropicBedrockService: GatewayAnthropicBedrockService,
     private failoverService: FailoverService,
     private priorityQueueService: PriorityQueueService,
     private promptFirewallService: PromptFirewallService,
@@ -161,7 +163,11 @@ export class GatewayService {
       let axiosResponse: AxiosResponse;
       let retryAttempts = 0;
 
-      if (context.failoverEnabled && context.failoverPolicy) {
+      if (
+        context.failoverEnabled &&
+        context.failoverPolicy &&
+        !proxyRequest.internalBedrockAnthropic
+      ) {
         // Handle failover request (failoverPolicy may be string or object with providers)
         const policy = context.failoverPolicy as
           | { providers?: unknown[] }
@@ -218,7 +224,14 @@ export class GatewayService {
         // Handle single provider request with retry logic
         this.logger.debug('Executing single provider request', { requestId });
 
-        if (context.retryEnabled) {
+        if (proxyRequest.internalBedrockAnthropic) {
+          axiosResponse =
+            await this.gatewayAnthropicBedrockService.execute(
+              request,
+              proxyRequest,
+            );
+          retryAttempts = 0;
+        } else if (context.retryEnabled) {
           const retryResult = await this.retryService.executeWithRetry(
             proxyRequest,
             {
@@ -231,7 +244,6 @@ export class GatewayService {
           axiosResponse = retryResult.response;
           retryAttempts = retryResult.retryAttempts;
         } else {
-          // Direct request without retry
           const axios = (await import('axios')).default;
           axiosResponse = await axios(proxyRequest);
         }

@@ -1,9 +1,4 @@
-import {
-  Module,
-  MiddlewareConsumer,
-  RequestMethod,
-  forwardRef,
-} from '@nestjs/common';
+import { Module, MiddlewareConsumer, forwardRef } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 
 // Import existing modules and services
@@ -34,6 +29,7 @@ import { GatewayFirewallService } from './services/gateway-firewall.service';
 import { BudgetEnforcementService } from './services/budget-enforcement.service';
 import { GatewayAnalyticsService } from './services/gateway-analytics.service';
 import { RequestProcessingService } from './services/request-processing.service';
+import { GatewayAnthropicBedrockService } from './services/gateway-anthropic-bedrock.service';
 import { ResponseHandlingService } from './services/response-handling.service';
 import { OutputModerationService } from './services/output-moderation.service';
 import { GatewayCortexService } from './services/gateway-cortex.service';
@@ -91,6 +87,7 @@ import { AgentIdentityModule } from '../agent-identity/agent-identity.module';
     BudgetEnforcementService,
     GatewayAnalyticsService,
     RequestProcessingService,
+    GatewayAnthropicBedrockService,
     ResponseHandlingService,
     OutputModerationService,
     GatewayCortexService,
@@ -121,13 +118,13 @@ import { AgentIdentityModule } from '../agent-identity/agent-identity.module';
 })
 export class GatewayModule {
   configure(consumer: MiddlewareConsumer) {
-    // Apply gateway middleware stack for all gateway routes
+    // Apply gateway middleware stack for all gateway routes (controller is `api/gateway`)
     consumer
       .apply(
         GatewayHeadersMiddleware,
         GatewayRateLimitMiddleware,
         PriorityQueueMiddleware,
       )
-      .forRoutes({ path: 'gateway/*', method: RequestMethod.ALL });
+      .forRoutes(GatewayController);
   }
 }
