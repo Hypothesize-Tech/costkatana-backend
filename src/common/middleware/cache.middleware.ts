@@ -56,6 +56,15 @@ export class CacheMiddleware implements NestMiddleware {
         '/mcp/mongodb/connections',
         '/webhooks', // webhook list, queue stats, etc. - real-time data
         '/admin/discounts', // discount management - always return fresh data
+        // Profile, subscription, usage, analytics — user-specific; must not be Redis-cached
+        '/user/profile',
+        '/user/stats',
+        '/user/subscription',
+        '/user/spending',
+        '/analytics/recent-usage',
+        '/user/activities',
+        '/usage',
+        '/guardrails/usage',
       ];
       const isNoCache =
         noCachePaths.some((p) => url.includes(p)) &&

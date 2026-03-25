@@ -252,6 +252,12 @@ export class SubscriptionService {
         subscription.features ??
         (planLimits as { features?: string[] }).features ??
         [],
+      gracePeriodEnd:
+        (subscription as { gracePeriod?: { gracePeriodEnd?: Date } })
+          .gracePeriod?.gracePeriodEnd?.toISOString?.() ?? undefined,
+      gracePeriodReason:
+        (subscription as { gracePeriod?: { gracePeriodReason?: string } })
+          .gracePeriod?.gracePeriodReason ?? undefined,
       createdAt:
         subscription.createdAt?.toISOString?.() ?? new Date().toISOString(),
       updatedAt:

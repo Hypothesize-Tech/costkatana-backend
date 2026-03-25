@@ -328,12 +328,20 @@ export class UserService {
    */
   async getActivities(
     userId: string,
-    options?: { page?: number; limit?: number; type?: string },
+    options?: {
+      page?: number;
+      limit?: number;
+      type?: string;
+      startDate?: Date;
+      endDate?: Date;
+    },
   ) {
     return this.activityService.getUserActivities(userId, {
       page: options?.page,
       limit: options?.limit,
       type: options?.type as any,
+      startDate: options?.startDate,
+      endDate: options?.endDate,
     });
   }
 

@@ -102,8 +102,21 @@ export class UserController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
     @Query('type') type?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
-    return this.userService.getActivities(user.id, { page, limit, type });
+    const data = await this.userService.getActivities(user.id, {
+      page,
+      limit,
+      type,
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? new Date(endDate) : undefined,
+    });
+    return {
+      success: true,
+      message: 'User activities retrieved successfully',
+      data,
+    };
   }
 
   // Preferences endpoints
