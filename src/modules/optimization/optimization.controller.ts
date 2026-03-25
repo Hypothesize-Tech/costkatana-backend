@@ -401,6 +401,7 @@ export class OptimizationController {
         query,
       );
 
+      const totalPages = Math.ceil(result.total / result.limit);
       return {
         success: true,
         data: result.optimizations,
@@ -408,7 +409,9 @@ export class OptimizationController {
           page: result.page,
           limit: result.limit,
           total: result.total,
-          totalPages: Math.ceil(result.total / result.limit),
+          totalPages,
+          /** Alias for clients expecting `pages` (matches service layer) */
+          pages: totalPages,
         },
       };
     } catch (error) {
