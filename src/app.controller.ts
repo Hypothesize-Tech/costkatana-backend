@@ -22,11 +22,6 @@ export class AppController {
     };
   }
 
-  @Get('health')
-  getHealthCheck(): { status: string } {
-    return this.appService.getHealth();
-  }
-
   @Get('api/health')
   getApiHealth(): { status: string } {
     return this.appService.getHealth();
@@ -40,7 +35,7 @@ export class AppController {
   /**
    * Sentry status endpoint for observability monitoring
    */
-  @Get('sentry-status')
+  @Get('api/sentry-status')
   getSentryStatus(): Record<string, unknown> {
     try {
       const sentryHealth = checkSentryHealth();
@@ -76,7 +71,7 @@ export class AppController {
   /**
    * Security monitoring dashboard (admin/security_monitoring only)
    */
-  @Get('security-dashboard')
+  @Get('api/security-dashboard')
   @UseGuards(JwtAuthGuard, SecurityDashboardGuard)
   getSecurityDashboard(): {
     success: boolean;

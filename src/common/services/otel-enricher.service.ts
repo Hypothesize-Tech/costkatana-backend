@@ -267,10 +267,10 @@ export class OTelEnricherService {
     const routingInfo: Record<string, string | number | boolean> = {};
     if (!context.httpRoute) return routingInfo;
 
-    if (context.httpRoute.includes('/api/v1/')) {
-      routingInfo['routing.version'] = 'v1';
-    } else if (context.httpRoute.includes('/api/v2/')) {
-      routingInfo['routing.version'] = 'v2';
+    if (context.httpRoute.includes('/api/gateway/v1/')) {
+      routingInfo['routing.surface'] = 'gateway_openai_compat';
+    } else if (context.httpRoute.startsWith('/api/')) {
+      routingInfo['routing.surface'] = 'rest';
     }
 
     if (context.httpMethod === 'GET') {
@@ -424,7 +424,7 @@ Respond in JSON format:
 
   private inferRequestPriority(route: string): string {
     if (route.includes('/health') || route.includes('/metrics')) return 'low';
-    if (route.includes('/api/v1/ai/') || route.includes('/chat/'))
+    if (route.includes('/api/agent/') || route.includes('/chat/'))
       return 'high';
     if (route.includes('/analytics/') || route.includes('/reports/'))
       return 'medium';
@@ -433,8 +433,8 @@ Respond in JSON format:
 
   private inferCacheTTL(route: string): number {
     if (route.includes('/static/') || route.includes('/assets/')) return 86400;
-    if (route.includes('/api/v1/models/')) return 3600;
-    if (route.includes('/api/v1/analytics/')) return 300;
+    if (route.includes('/api/gateway/v1/models')) return 3600;
+    if (route.includes('/api/analytics')) return 300;
     return 60;
   }
 

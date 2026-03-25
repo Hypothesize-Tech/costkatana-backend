@@ -7,7 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 
 /**
- * Guard for /security-dashboard endpoint.
+ * Guard for GET /api/security-dashboard.
  * Use with JwtAuthGuard. Allows: admin role, or security_monitoring permission, or admin permission.
  * Optionally restricts by SECURITY_DASHBOARD_ALLOWED_IPS.
  */

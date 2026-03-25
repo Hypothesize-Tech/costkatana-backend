@@ -136,6 +136,7 @@ processors:
     traces:
       span:
         - 'attributes["http.target"] == "/health"'
+        - 'attributes["http.target"] == "/api/health"'
         - 'attributes["http.target"] == "/metrics"'
         - 'attributes["http.target"] == "/"'
         - 'attributes["http.user_agent"] != nil and IsMatch(attributes["http.user_agent"], ".*ELB-HealthChecker.*")'

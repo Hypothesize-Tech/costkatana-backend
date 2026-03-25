@@ -291,7 +291,9 @@ export async function startTelemetry(): Promise<void> {
         ignoreIncomingRequestHook: (request) => {
           // Ignore health check endpoints
           const url = (request as any).url;
-          return url === '/health' || url === '/metrics' || url === '/';
+          return (
+            url === '/api/health' || url === '/metrics' || url === '/'
+          );
         },
       }),
       // Express instrumentation
