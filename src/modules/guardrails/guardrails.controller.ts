@@ -102,6 +102,61 @@ export class GuardrailsController {
     return { success: true, data: stats };
   }
 
+  /**
+   * Daily usage trend for an inclusive calendar date range.
+   * Registered before GET usage/trend so `trend/range` is not shadowed.
+   */
+  @Get('usage/trend/range')
+  async getUsageTrendByRange(
+    @Req() req: AuthenticatedRequest,
+    @Query('startDate') startDateStr?: string,
+    @Query('endDate') endDateStr?: string,
+  ): Promise<
+    | { success: false; message: string }
+    | {
+        success: true;
+        data: Array<{
+          date: string;
+          requests: number;
+          tokens: number;
+          cost: number;
+        }>;
+      }
+  > {
+    const userId = req.user?.id ?? req.user?._id ?? req.userId;
+    if (!userId) {
+      return { success: false, message: 'Authentication required' };
+    }
+    if (!startDateStr?.trim() || !endDateStr?.trim()) {
+      return { success: false, message: 'startDate and endDate are required' };
+    }
+    const parsedStart = new Date(startDateStr);
+    const parsedEnd = new Date(endDateStr);
+    if (Number.isNaN(parsedStart.getTime()) || Number.isNaN(parsedEnd.getTime())) {
+      return { success: false, message: 'Invalid startDate or endDate' };
+    }
+    const MAX_DAYS = 731;
+    const startDay = new Date(parsedStart);
+    startDay.setHours(0, 0, 0, 0);
+    const endDay = new Date(parsedEnd);
+    endDay.setHours(23, 59, 59, 999);
+    if (endDay.getTime() < startDay.getTime()) {
+      return { success: false, message: 'endDate must be on or after startDate' };
+    }
+    const spanDays =
+      Math.floor(
+        (endDay.getTime() - startDay.getTime()) / (24 * 60 * 60 * 1000),
+      ) + 1;
+    if (spanDays > MAX_DAYS) {
+      return {
+        success: false,
+        message: `Date range cannot exceed ${MAX_DAYS} days`,
+      };
+    }
+    const trend = await this.buildDailyUsageTrend(userId, startDay, endDay);
+    return { success: true, data: trend };
+  }
+
   @Get('usage/trend')
   async getUsageTrend(
     @Req() req: AuthenticatedRequest,
@@ -129,12 +184,34 @@ export class GuardrailsController {
     startDate.setHours(0, 0, 0, 0);
     const endDate = new Date(today);
     endDate.setHours(23, 59, 59, 999);
+    const trend = await this.buildDailyUsageTrend(userId, startDate, endDate);
+    return { success: true, data: trend };
+  }
+
+  private async buildDailyUsageTrend(
+    userId: string,
+    rangeStart: Date,
+    rangeEnd: Date,
+  ): Promise<
+    Array<{
+      date: string;
+      requests: number;
+      tokens: number;
+      cost: number;
+    }>
+  > {
+    const startDate = new Date(rangeStart);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(rangeEnd);
+    endDate.setHours(23, 59, 59, 999);
+
     const dateBoundaries: string[] = [];
-    for (let i = 0; i < days; i++) {
-      const d = new Date(startDate);
-      d.setDate(d.getDate() + i);
-      dateBoundaries.push(d.toISOString().split('T')[0]);
+    const cursor = new Date(startDate);
+    while (cursor.getTime() <= endDate.getTime()) {
+      dateBoundaries.push(cursor.toISOString().split('T')[0]);
+      cursor.setDate(cursor.getDate() + 1);
     }
+
     const userObjectId = new mongoose.Types.ObjectId(userId);
     const trendData = await this.usageModel.aggregate([
       {
@@ -166,7 +243,7 @@ export class GuardrailsController {
         ],
       ),
     );
-    const trend = dateBoundaries.map((dateStr) => {
+    return dateBoundaries.map((dateStr) => {
       const data = dataMap.get(dateStr);
       return {
         date: dateStr,
@@ -175,7 +252,6 @@ export class GuardrailsController {
         cost: data?.cost ?? 0,
       };
     });
-    return { success: true, data: trend };
   }
 
   @Get('usage/alerts')
@@ -340,8 +416,8 @@ export class GuardrailsController {
     const sub =
       await this.subscriptionService.getSubscriptionByUserId(targetUserId);
     const limits =
-      sub?.usageLimits ??
-      ({} as { tokensPerMonth?: number; requestsPerMonth?: number });
+      (sub as { usageLimits?: { tokensPerMonth?: number; requestsPerMonth?: number } } | null)
+        ?.usageLimits ?? {};
     const tokensPerMonth =
       typeof limits.tokensPerMonth === 'number'
         ? limits.tokensPerMonth

@@ -221,12 +221,28 @@ export class AnalyticsController {
       baseFilter.projectId = new Types.ObjectId(projectId);
     }
     let endDate = new Date();
-    let startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    let startDate: Date;
+
+    const rangeMs: Record<string, number> = {
+      '24h': 24 * 60 * 60 * 1000,
+      '7d': 7 * 24 * 60 * 60 * 1000,
+      '30d': 30 * 24 * 60 * 60 * 1000,
+      '90d': 90 * 24 * 60 * 60 * 1000,
+      '365d': 365 * 24 * 60 * 60 * 1000,
+    };
+    const requestedRange = query.timeRange;
+
+    if (requestedRange && rangeMs[requestedRange]) {
+      startDate = new Date(endDate.getTime() - rangeMs[requestedRange]);
+    } else {
+      startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    }
+
     const hasRecentUsage = await this.usageModel.exists({
       ...baseFilter,
       createdAt: { $gte: startDate, $lte: endDate },
     });
-    if (!hasRecentUsage) {
+    if (!requestedRange && !hasRecentUsage) {
       const usageBounds = await this.usageModel.aggregate([
         { $match: baseFilter },
         {

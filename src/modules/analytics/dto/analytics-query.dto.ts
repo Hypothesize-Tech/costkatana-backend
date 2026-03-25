@@ -74,6 +74,11 @@ export class DashboardQueryDto {
   @IsOptional()
   @IsString()
   projectId?: string;
+
+  /** Rolling window for dashboard aggregates and charts (default: 30d server-side when omitted). */
+  @IsOptional()
+  @IsIn(['24h', '7d', '30d', '90d', '365d'])
+  timeRange?: string;
 }
 
 export class RecentUsageQueryDto {
