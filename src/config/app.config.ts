@@ -66,24 +66,35 @@ export interface RedisConfig {
   tls: object | undefined;
 }
 
+/** Strip trailing slash so https://app.example.com/ matches allowlist entries. */
+function normalizeOrigin(o: string): string {
+  return o.trim().replace(/\/$/, '');
+}
+
 export default (): AppConfig => ({
   env: process.env.NODE_ENV ?? 'development',
   port: parseInt(process.env.PORT ?? '8000', 10),
   cors: (() => {
     const corsOrigin = process.env.CORS_ORIGIN?.trim();
-    const frontendUrl = (
-      process.env.FRONTEND_URL || 'http://localhost:3000'
-    ).replace(/\/$/, '');
+    const frontendUrl = normalizeOrigin(
+      process.env.FRONTEND_URL || 'http://localhost:3000',
+    );
     const isDev = process.env.NODE_ENV !== 'production';
 
-    // CORS_ORIGIN=* or empty: allow all origins by reflecting (required when credentials: true)
-    // CORS_ORIGIN specific: comma-separated list of allowed origins
-    const allowedOrigins =
+    const allowedOrigins: string[] | null =
       corsOrigin && corsOrigin !== '*'
-        ? corsOrigin
-            .split(',')
-            .map((o) => o.trim())
-            .filter(Boolean)
+        ? [
+            ...new Set(
+              [
+                ...corsOrigin
+                  .split(',')
+                  .map(normalizeOrigin)
+                  .filter(Boolean),
+                frontendUrl,
+                // CORS_EXTRA_ORIGINS removed
+              ],
+            ),
+          ]
         : null;
 
     const originHandler: CorsConfig['origin'] = allowedOrigins
@@ -92,7 +103,10 @@ export default (): AppConfig => ({
           callback: (err: Error | null, allow?: boolean | string) => void,
         ) => {
           if (!origin) return callback(null, true);
-          const allowed = allowedOrigins.some((a) => a === origin || a === '*');
+          const normalized = normalizeOrigin(origin);
+          const allowed = allowedOrigins.some(
+            (a) => normalizeOrigin(a) === normalized || a === '*',
+          );
           callback(null, allowed ? origin : false);
         }
       : (
