@@ -523,7 +523,7 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
     const method = req.method;
 
     // Skip health checks
-    if (path === '/health' || path === '/ping' || path === '/status') {
+    if (path === '/api/health' || path === '/ping' || path === '/status') {
       return true;
     }
 

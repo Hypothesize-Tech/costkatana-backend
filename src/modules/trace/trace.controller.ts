@@ -15,18 +15,17 @@ import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '@/common/interfaces/authenticated-user.interface';
 import { TraceService } from './trace.service';
 import { ListSessionsQueryDto } from './dto/list-sessions-query.dto';
-import { IngestTraceDto } from './dto/ingest-trace.dto';
 
 const SUMMARY_TIMEOUT_MS = 15_000;
 
-@Controller('api/v1')
+@Controller('api/sessions')
 @UseGuards(JwtAuthGuard)
 export class TraceController {
   private readonly logger = new Logger(TraceController.name);
 
   constructor(private readonly traceService: TraceService) {}
 
-  @Get('sessions')
+  @Get()
   async listSessions(
     @Query() query: ListSessionsQueryDto,
     @CurrentUser() user: AuthenticatedUser,
@@ -50,7 +49,7 @@ export class TraceController {
     return { success: true, data: result };
   }
 
-  @Get('sessions/summary')
+  @Get('summary')
   async getSessionsSummary(@CurrentUser() user: AuthenticatedUser) {
     const userId = user.id;
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -73,7 +72,7 @@ export class TraceController {
     }
   }
 
-  @Get('sessions/:id/graph')
+  @Get(':id/graph')
   async getSessionGraph(
     @Param('id') sessionId: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -89,7 +88,7 @@ export class TraceController {
     }
   }
 
-  @Get('sessions/:id/details')
+  @Get(':id/details')
   async getSessionDetails(
     @Param('id') sessionId: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -104,7 +103,7 @@ export class TraceController {
     return { success: true, data: details };
   }
 
-  @Post('sessions/:id/end')
+  @Post(':id/end')
   async endSession(
     @Param('id') sessionId: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -114,33 +113,5 @@ export class TraceController {
       throw new NotFoundException('Session not found');
     }
     return { success: true, data: session };
-  }
-
-  @Post('traces/ingest')
-  async ingestTrace(
-    @Body() body: IngestTraceDto,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
-    const userId = user.id;
-    const result = await this.traceService.ingestTrace(
-      {
-        sessionId: body.sessionId,
-        parentId: body.parentId,
-        name: body.name,
-        type: body.type,
-        status: body.status,
-        startedAt: body.startedAt,
-        endedAt: body.endedAt,
-        error: body.error,
-        aiModel: body.aiModel,
-        tokens: body.tokens,
-        costUSD: body.costUSD,
-        tool: body.tool,
-        resourceIds: body.resourceIds,
-        metadata: body.metadata,
-      },
-      userId,
-    );
-    return { success: true, data: result };
   }
 }

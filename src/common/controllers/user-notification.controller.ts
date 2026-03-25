@@ -13,7 +13,7 @@ import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { UserNotificationService } from '../services/user-notification.service';
 import { AuthenticatedUser } from '../interfaces/authenticated-user.interface';
 
-@Controller('user/notifications')
+@Controller('api/user/notifications')
 @UseGuards(JwtAuthGuard)
 export class UserNotificationController implements OnModuleDestroy {
   constructor(private readonly notificationService: UserNotificationService) {}

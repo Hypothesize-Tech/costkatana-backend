@@ -12,6 +12,7 @@ import {
 } from '@/schemas/trace/trace-message.schema';
 import { Message, MessageSchema } from '@/schemas/trace/message.schema';
 import { TraceController } from './trace.controller';
+import { TracesIngestController } from './traces-ingest.controller';
 import { TraceService } from './trace.service';
 
 @Module({
@@ -24,7 +25,7 @@ import { TraceService } from './trace.service';
       { name: Message.name, schema: MessageSchema },
     ]),
   ],
-  controllers: [TraceController],
+  controllers: [TraceController, TracesIngestController],
   providers: [TraceService],
   exports: [TraceService],
 })

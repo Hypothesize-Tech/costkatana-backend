@@ -26,7 +26,7 @@ import {
   RequestIdParamDto,
 } from './dto';
 
-@Controller('api/v1')
+@Controller('api/request-feedback')
 @UseGuards(JwtAuthGuard)
 export class RequestFeedbackController
   implements OnModuleInit, OnModuleDestroy
@@ -61,7 +61,7 @@ export class RequestFeedbackController
     }
   }
 
-  @Post('request/:requestId/feedback')
+  @Post(':requestId/feedback')
   async submitFeedback(
     @Param() params: RequestIdParamDto,
     @Body() body: SubmitFeedbackDto,
@@ -111,7 +111,7 @@ export class RequestFeedbackController
     return { success: true, message: 'Feedback submitted successfully' };
   }
 
-  @Get('feedback/analytics')
+  @Get('analytics')
   async getFeedbackAnalytics(@CurrentUser() user: AuthenticatedUser) {
     const userId = user.id;
     const analytics =
@@ -119,7 +119,7 @@ export class RequestFeedbackController
     return { success: true, data: analytics };
   }
 
-  @Get('feedback/analytics/global')
+  @Get('analytics/global')
   async getGlobalFeedbackAnalytics(@CurrentUser() user: AuthenticatedUser) {
     const userId = user.id;
     const role = user.role;
@@ -138,7 +138,7 @@ export class RequestFeedbackController
     return { success: true, data: analytics };
   }
 
-  @Get('request/:requestId/feedback')
+  @Get(':requestId/feedback')
   async getFeedbackByRequestId(
     @Param() params: RequestIdParamDto,
     @CurrentUser() user: AuthenticatedUser,
@@ -160,7 +160,7 @@ export class RequestFeedbackController
     return { success: true, data: feedback };
   }
 
-  @Put('request/:requestId/implicit-signals')
+  @Put(':requestId/implicit-signals')
   async updateImplicitSignals(
     @Param() params: RequestIdParamDto,
     @Body() body: UpdateImplicitSignalsDto,

@@ -11,7 +11,7 @@ import { RoiEvaluatorService } from './roi-evaluator.service';
 import { CalculateRoiDto } from './dto/calculate-roi.dto';
 import { RoiLeadDto } from './dto/roi-lead.dto';
 
-@Controller('roi-evaluator')
+@Controller('api/roi-evaluator')
 export class RoiEvaluatorController {
   constructor(private readonly roiEvaluatorService: RoiEvaluatorService) {}
 

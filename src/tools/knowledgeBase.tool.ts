@@ -900,7 +900,7 @@ Suggestions:
         `• This is the primary API endpoint for all CostKatana services\n` +
         `• Use this URL for API integrations and SDK configurations\n` +
         `• The backend provides authentication, cost tracking, and optimization services\n` +
-        `• Health check endpoint: https://api.costkatana.com/health\n\n` +
+        `• Health check endpoint: https://api.costkatana.com/api/health\n\n` +
         `**Configuration Examples:**\n` +
         `• Environment variable: \`COST_KATANA_BASE_URL=https://api.costkatana.com\`\n` +
         `• SDK configuration: \`baseUrl: 'https://api.costkatana.com'\`\n` +
@@ -919,7 +919,7 @@ Suggestions:
         `• **Model Management:** \`GET /api/models\` - List available AI models\n` +
         `• **Analytics:** \`GET /api/analytics\` - Usage analytics and insights\n` +
         `• **Webhooks:** \`POST /api/webhooks\` - Configure webhook notifications\n` +
-        `• **Health Check:** \`GET /health\` - Service health status\n\n` +
+        `• **Health Check:** \`GET /api/health\` - Service health status\n\n` +
         `**Authentication:** All API requests require the \`Authorization: Bearer <API_KEY>\` header\n` +
         `**API Key Format:** Keys must start with \`dak_\` (e.g., \`dak_your_key_here\`)`
       );
