@@ -52,7 +52,8 @@ export class VercelConnection {
   @Prop({ required: true, index: true })
   userId: string;
 
-  @Prop({ required: true })
+  /** Friendly label for UI; OAuth flow sets this explicitly; default prevents validation failures if omitted. */
+  @Prop({ required: true, default: 'Vercel' })
   name: string;
 
   @Prop({ required: true })
@@ -158,6 +159,22 @@ export class VercelConnection {
 
 export const VercelConnectionSchema =
   SchemaFactory.createForClass(VercelConnection);
+
+/** Ensure `name` is never empty (required path) when other identity fields exist */
+VercelConnectionSchema.pre('save', function (next) {
+  const doc = this as VercelConnectionDocument;
+  const trimmed = doc.name?.trim();
+  if (!trimmed) {
+    doc.name =
+      doc.teamName?.trim() ||
+      doc.vercelUsername?.trim() ||
+      doc.vercelEmail?.split('@')[0]?.trim() ||
+      'Vercel';
+  } else {
+    doc.name = trimmed;
+  }
+  next();
+});
 
 // Indexes
 VercelConnectionSchema.index({ userId: 1, status: 1 });
