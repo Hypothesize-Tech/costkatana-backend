@@ -137,6 +137,9 @@ export class GatewayAuthGuard implements CanActivate {
           gatewayContext.providerKey = proxyKeyResult.decryptedApiKey;
           gatewayContext.provider = proxyKeyResult.provider;
           gatewayContext.authMethodOverride = 'gateway';
+          if (proxyKeyResult.projectId && !gatewayContext.projectId) {
+            gatewayContext.projectId = proxyKeyResult.projectId;
+          }
 
           this.logger.log('Proxy key authenticated successfully', {
             component: 'GatewayAuthGuard',
@@ -537,6 +540,8 @@ export class GatewayAuthGuard implements CanActivate {
     userId: string;
     decryptedApiKey: string;
     provider: string;
+    /** Resolved from proxy key when client omits CostKatana-Project-Id */
+    projectId?: string;
   } | null> {
     try {
       // Resolve proxy key to get master provider key
@@ -610,6 +615,20 @@ export class GatewayAuthGuard implements CanActivate {
         }
       }
 
+      const pk = proxyKey as {
+        projectId?: { toString(): string };
+        assignedProjects?: string[];
+      };
+      let resolvedProjectId: string | undefined =
+        pk.projectId != null ? pk.projectId.toString() : undefined;
+      if (
+        !resolvedProjectId &&
+        Array.isArray(pk.assignedProjects) &&
+        pk.assignedProjects.length === 1
+      ) {
+        resolvedProjectId = pk.assignedProjects[0];
+      }
+
       return {
         user,
         userId: (
@@ -617,6 +636,7 @@ export class GatewayAuthGuard implements CanActivate {
         )._id.toString(),
         decryptedApiKey,
         provider: providerKey.provider,
+        projectId: resolvedProjectId,
       };
     } catch (error) {
       this.logger.error(

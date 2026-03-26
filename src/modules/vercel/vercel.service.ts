@@ -305,6 +305,11 @@ export class VercelService {
         );
       }
 
+      const connectionName = this.deriveVercelConnectionName(
+        userInfo,
+        teamInfo,
+      );
+
       // Check for existing connection
       let connection = await this.vercelConnectionModel
         .findOne({
@@ -322,6 +327,7 @@ export class VercelService {
 
         connection.encryptedAccessToken = `${encryptedToken.iv}:${encryptedToken.authTag}:${encryptedToken.encrypted}`;
         connection.tokenType = tokenData.token_type;
+        connection.name = connectionName;
         connection.vercelUsername = userInfo.username;
         connection.vercelEmail = userInfo.email;
         connection.avatarUrl = userInfo.avatar;
@@ -353,6 +359,7 @@ export class VercelService {
 
         connection = new this.vercelConnectionModel({
           userId,
+          name: connectionName,
           encryptedAccessToken: `${encryptedToken.iv}:${encryptedToken.authTag}:${encryptedToken.encrypted}`,
           tokenType: tokenData.token_type,
           vercelUserId: userInfo.id,
@@ -401,6 +408,25 @@ export class VercelService {
       });
       throw error;
     }
+  }
+
+  /**
+   * Display name for the stored connection (schema requires `name`).
+   */
+  private deriveVercelConnectionName(
+    userInfo: VercelUser,
+    teamInfo?: VercelTeam,
+  ): string {
+    if (teamInfo?.name?.trim()) {
+      return teamInfo.name.trim();
+    }
+    const fromUser =
+      [userInfo.name, userInfo.username].find(
+        (s) => typeof s === 'string' && s.trim().length > 0,
+      ) ||
+      userInfo.email?.split('@')[0] ||
+      '';
+    return fromUser || 'Vercel';
   }
 
   /**

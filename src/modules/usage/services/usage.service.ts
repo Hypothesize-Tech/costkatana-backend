@@ -63,6 +63,12 @@ interface PaginatedResult<T> {
     totalTokens: number;
     avgCost: number;
     avgTokens: number;
+    chartData?: Array<{
+      date: string;
+      cost: number;
+      calls: number;
+      tokens: number;
+    }>;
   };
 }
 
@@ -376,8 +382,30 @@ export class UsageService implements OnModuleDestroy {
         .limit(limit)
         .toArray();
 
-      // Calculate summary
-      const summary = await this.calculateUsageSummary(matchQuery);
+      // Summary totals + daily time series for Usage Over Time chart (same filters as list)
+      const [summaryBase, usageOverTime] = await Promise.all([
+        this.calculateUsageSummary(matchQuery),
+        this.getUsageOverTime(matchQuery, 'daily'),
+      ]);
+
+      const chartData = (usageOverTime || []).map(
+        (row: {
+          date: string;
+          cost: number;
+          tokens: number;
+          requests: number;
+        }) => ({
+          date: row.date,
+          cost: Number(row.cost ?? 0),
+          calls: Number(row.requests ?? 0),
+          tokens: Number(row.tokens ?? 0),
+        }),
+      );
+
+      const summary = {
+        ...summaryBase,
+        chartData,
+      };
 
       const result: PaginatedResult<UsageDocument> = {
         data: data as any,
