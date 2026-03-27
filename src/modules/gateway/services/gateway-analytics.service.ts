@@ -1,8 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { CacheService } from '../../../common/cache/cache.service';
 import { Usage } from '../../../schemas/core/usage.schema';
+import {
+  ThreatLog,
+  ThreatLogDocument,
+} from '../../../schemas/security/threat-log.schema';
+import type { GatewayContext } from '../interfaces/gateway.interfaces';
 import {
   GatewayProviderMetrics,
   GatewayProviderMetricsDocument,
@@ -67,6 +72,56 @@ function requestBodyHasMultipleChatMessages(body: unknown): boolean {
   return Array.isArray(m) && m.length > 1;
 }
 
+/** Provider-native cache token counts from OpenAI / Anthropic / Gemini response bodies */
+function extractProviderNativeCacheFromResponse(body: unknown): {
+  anthropicCacheReadInputTokens: number;
+  anthropicCacheCreationInputTokens: number;
+  openaiCachedPromptTokens: number;
+  geminiCachedContentTokenCount: number;
+} {
+  const empty = {
+    anthropicCacheReadInputTokens: 0,
+    anthropicCacheCreationInputTokens: 0,
+    openaiCachedPromptTokens: 0,
+    geminiCachedContentTokenCount: 0,
+  };
+  const n = (v: unknown): number => {
+    const x = Number(v);
+    return Number.isFinite(x) && x > 0 ? x : 0;
+  };
+  if (!body || typeof body !== 'object') {
+    return empty;
+  }
+  const obj = body as Record<string, unknown>;
+  const usage = obj.usage;
+  if (usage && typeof usage === 'object') {
+    const u = usage as Record<string, unknown>;
+    empty.anthropicCacheReadInputTokens = n(u.cache_read_input_tokens);
+    empty.anthropicCacheCreationInputTokens = n(
+      u.cache_creation_input_tokens,
+    );
+    empty.geminiCachedContentTokenCount = Math.max(
+      empty.geminiCachedContentTokenCount,
+      n(u.cachedContentTokenCount),
+    );
+    const ptd = u.prompt_tokens_details;
+    if (ptd && typeof ptd === 'object') {
+      empty.openaiCachedPromptTokens = n(
+        (ptd as Record<string, unknown>).cached_tokens,
+      );
+    }
+  }
+  const um = obj.usageMetadata;
+  if (um && typeof um === 'object') {
+    const u = um as Record<string, unknown>;
+    empty.geminiCachedContentTokenCount = Math.max(
+      empty.geminiCachedContentTokenCount,
+      n(u.cachedContentTokenCount),
+    );
+  }
+  return empty;
+}
+
 /** Map gateway context.provider to estimateTokens() provider hints (Claude-on-Bedrock → anthropic). */
 function mapProviderForTokenEstimate(
   provider: string | undefined,
@@ -109,9 +164,349 @@ export class GatewayAnalyticsService {
     @InjectModel(Usage.name) private usageModel: Model<Usage>,
     @InjectModel(GatewayProviderMetrics.name)
     private gatewayProviderMetricsModel: Model<GatewayProviderMetricsDocument>,
+    @InjectModel(ThreatLog.name) private threatLogModel: Model<ThreatLogDocument>,
     private cacheService: CacheService,
     private readonly costSimulatorService: CostSimulatorService,
   ) {}
+
+  /**
+   * Reads `usage.cache_*` / `usageMetadata` from the provider JSON body and sets
+   * `gatewayContext.providerNativeCache`, `promptCaching`, and estimated USD savings.
+   */
+  async applyProviderCacheContext(
+    request: { gatewayContext?: GatewayContext; body?: unknown },
+    responseBody: unknown,
+  ): Promise<void> {
+    const context = request.gatewayContext;
+    if (!context) {
+      return;
+    }
+    const raw = extractProviderNativeCacheFromResponse(responseBody);
+    const model = (request.body as Record<string, unknown> | undefined)?.model;
+    const estimatedSavingsUsd = await this.estimateProviderNativeCacheSavingsUsd(
+      typeof model === 'string' ? model : 'unknown',
+      raw,
+    );
+    context.providerNativeCache = {
+      ...raw,
+      estimatedSavingsUsd,
+    };
+    const hasTokens =
+      raw.anthropicCacheReadInputTokens > 0 ||
+      raw.anthropicCacheCreationInputTokens > 0 ||
+      raw.openaiCachedPromptTokens > 0 ||
+      raw.geminiCachedContentTokenCount > 0;
+    if (hasTokens) {
+      const cacheHeaders: Record<string, string> = {
+        'CostKatana-Anthropic-Cache-Read-Tokens': String(
+          raw.anthropicCacheReadInputTokens,
+        ),
+        'CostKatana-Anthropic-Cache-Creation-Tokens': String(
+          raw.anthropicCacheCreationInputTokens,
+        ),
+        'CostKatana-OpenAI-Cached-Prompt-Tokens': String(
+          raw.openaiCachedPromptTokens,
+        ),
+        'CostKatana-Gemini-Cached-Content-Tokens': String(
+          raw.geminiCachedContentTokenCount,
+        ),
+      };
+      const explicit =
+        raw.anthropicCacheReadInputTokens > 0 ||
+        raw.anthropicCacheCreationInputTokens > 0;
+      context.promptCaching = {
+        enabled: true,
+        type: explicit ? 'explicit' : 'automatic',
+        estimatedSavings: estimatedSavingsUsd,
+        cacheHeaders,
+      };
+    }
+  }
+
+  private async estimateProviderNativeCacheSavingsUsd(
+    model: string,
+    metrics: {
+      anthropicCacheReadInputTokens: number;
+      anthropicCacheCreationInputTokens: number;
+      openaiCachedPromptTokens: number;
+      geminiCachedContentTokenCount: number;
+    },
+  ): Promise<number> {
+    let inputPrice = 0.000001;
+    try {
+      const { PricingService } =
+        await import('../../utils/services/pricing.service');
+      const pricingService = new PricingService();
+      const pricing = pricingService.getModelPricing(model || 'unknown');
+      if (pricing) {
+        inputPrice = pricing.inputCostPerToken / 1000;
+      }
+    } catch {
+      // keep default per-token estimate
+    }
+    // Anthropic cache read tokens: ~90% savings vs standard input (bill at 0.1x)
+    const anthropicReadSavings =
+      metrics.anthropicCacheReadInputTokens * inputPrice * 0.9;
+    // OpenAI / Gemini cached input: ~50% discount vs standard input
+    const openaiSavings = metrics.openaiCachedPromptTokens * inputPrice * 0.5;
+    const geminiSavings =
+      metrics.geminiCachedContentTokenCount * inputPrice * 0.5;
+    return anthropicReadSavings + openaiSavings + geminiSavings;
+  }
+
+  /**
+   * Aggregates gateway proxy cache metrics from Usage (Redis response cache + provider-native cache tokens).
+   * Scoped to completed gateway requests (`metadata.gatewayProcessingTime`).
+   */
+  async getGatewayUsageCacheSummary(userId: string): Promise<{
+    appLevelCacheHits: number;
+    totalProviderCacheSavingsUsd: number;
+    gatewayProxyRequests: number;
+    anthropicCacheReadInputTokens: number;
+    anthropicCacheCreationInputTokens: number;
+    openaiCachedPromptTokens: number;
+    geminiCachedContentTokenCount: number;
+    appLevelCacheHitRatePercent: number;
+  }> {
+    try {
+      const match = {
+        userId: new Types.ObjectId(userId),
+        'metadata.gatewayProcessingTime': { $exists: true },
+      };
+      const result = await this.usageModel.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: null,
+            gatewayProxyRequests: { $sum: 1 },
+            appLevelCacheHits: {
+              $sum: {
+                $cond: [
+                  { $eq: ['$metadata.gatewayMetrics.appLevelCacheHit', true] },
+                  1,
+                  0,
+                ],
+              },
+            },
+            totalProviderCacheSavingsUsd: {
+              $sum: {
+                $ifNull: [
+                  '$metadata.gatewayMetrics.costSavingsFromProviderCacheUsd',
+                  0,
+                ],
+              },
+            },
+            anthropicCacheReadInputTokens: {
+              $sum: {
+                $ifNull: [
+                  '$metadata.gatewayMetrics.providerNativeCache.anthropicCacheReadInputTokens',
+                  0,
+                ],
+              },
+            },
+            anthropicCacheCreationInputTokens: {
+              $sum: {
+                $ifNull: [
+                  '$metadata.gatewayMetrics.providerNativeCache.anthropicCacheCreationInputTokens',
+                  0,
+                ],
+              },
+            },
+            openaiCachedPromptTokens: {
+              $sum: {
+                $ifNull: [
+                  '$metadata.gatewayMetrics.providerNativeCache.openaiCachedPromptTokens',
+                  0,
+                ],
+              },
+            },
+            geminiCachedContentTokenCount: {
+              $sum: {
+                $ifNull: [
+                  '$metadata.gatewayMetrics.providerNativeCache.geminiCachedContentTokenCount',
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]);
+      const row = result[0] as
+        | {
+            gatewayProxyRequests?: number;
+            appLevelCacheHits?: number;
+            totalProviderCacheSavingsUsd?: number;
+            anthropicCacheReadInputTokens?: number;
+            anthropicCacheCreationInputTokens?: number;
+            openaiCachedPromptTokens?: number;
+            geminiCachedContentTokenCount?: number;
+          }
+        | undefined;
+      const gw = row?.gatewayProxyRequests ?? 0;
+      const hits = row?.appLevelCacheHits ?? 0;
+      return {
+        appLevelCacheHits: hits,
+        totalProviderCacheSavingsUsd: row?.totalProviderCacheSavingsUsd ?? 0,
+        gatewayProxyRequests: gw,
+        anthropicCacheReadInputTokens: row?.anthropicCacheReadInputTokens ?? 0,
+        anthropicCacheCreationInputTokens:
+          row?.anthropicCacheCreationInputTokens ?? 0,
+        openaiCachedPromptTokens: row?.openaiCachedPromptTokens ?? 0,
+        geminiCachedContentTokenCount: row?.geminiCachedContentTokenCount ?? 0,
+        appLevelCacheHitRatePercent:
+          gw > 0 ? Math.round((hits / gw) * 10000) / 100 : 0,
+      };
+    } catch (error) {
+      this.logger.warn('getGatewayUsageCacheSummary failed', {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        appLevelCacheHits: 0,
+        totalProviderCacheSavingsUsd: 0,
+        gatewayProxyRequests: 0,
+        anthropicCacheReadInputTokens: 0,
+        anthropicCacheCreationInputTokens: 0,
+        openaiCachedPromptTokens: 0,
+        geminiCachedContentTokenCount: 0,
+        appLevelCacheHitRatePercent: 0,
+      };
+    }
+  }
+
+  /**
+   * Aggregated firewall (ThreatLog) + output moderation (Usage) stats for the gateway dashboard.
+   */
+  async getGatewaySecuritySummary(userId: string): Promise<{
+    totalBlockedByFirewall: number;
+    threatsByCategory: Record<string, number>;
+    firewallCostSaved: number;
+    totalModerationActions: number;
+    moderationActionsByType: Record<string, number>;
+    moderationCategories: Record<string, number>;
+  }> {
+    const empty = () => ({
+      totalBlockedByFirewall: 0,
+      threatsByCategory: {} as Record<string, number>,
+      firewallCostSaved: 0,
+      totalModerationActions: 0,
+      moderationActionsByType: {} as Record<string, number>,
+      moderationCategories: {} as Record<string, number>,
+    });
+
+    if (!userId || !Types.ObjectId.isValid(userId)) {
+      return empty();
+    }
+
+    const oid = new Types.ObjectId(userId);
+    const firewallStages = [
+      'prompt-guard',
+      'openai-safeguard',
+      'tool-guard',
+      'rag-guard',
+    ] as const;
+
+    try {
+      const threatTotals = await this.threatLogModel.aggregate([
+        { $match: { userId: oid, stage: { $in: [...firewallStages] } } },
+        {
+          $group: {
+            _id: null,
+            totalBlockedByFirewall: { $sum: 1 },
+            firewallCostSaved: { $sum: { $ifNull: ['$costSaved', 0] } },
+          },
+        },
+      ]);
+      const threatByCategory = await this.threatLogModel.aggregate([
+        { $match: { userId: oid, stage: { $in: [...firewallStages] } } },
+        { $group: { _id: '$threatCategory', count: { $sum: 1 } } },
+      ]);
+
+      const threatsByCategory: Record<string, number> = {};
+      for (const row of threatByCategory) {
+        if (row._id != null) {
+          threatsByCategory[String(row._id)] = row.count;
+        }
+      }
+
+      const tRow = threatTotals[0] as
+        | { totalBlockedByFirewall?: number; firewallCostSaved?: number }
+        | undefined;
+
+      const moderationActionsByTypeArr = await this.usageModel.aggregate([
+        {
+          $match: {
+            userId: oid,
+            'metadata.gatewayMetrics.outputModeration.action': {
+              $exists: true,
+            },
+          },
+        },
+        {
+          $group: {
+            _id: '$metadata.gatewayMetrics.outputModeration.action',
+            count: { $sum: 1 },
+          },
+        },
+      ]);
+
+      const moderationCategoriesArr = await this.usageModel.aggregate([
+        {
+          $match: {
+            userId: oid,
+            'metadata.gatewayMetrics.outputModeration.categories': {
+              $exists: true,
+              $ne: [],
+            },
+          },
+        },
+        { $unwind: '$metadata.gatewayMetrics.outputModeration.categories' },
+        {
+          $group: {
+            _id: '$metadata.gatewayMetrics.outputModeration.categories',
+            count: { $sum: 1 },
+          },
+        },
+      ]);
+
+      const totalModerationActions = await this.usageModel.countDocuments({
+        userId: oid,
+        $or: [
+          { 'metadata.gatewayMetrics.outputModeration.applied': true },
+          { 'metadata.gatewayMetrics.outputModeration.blocked': true },
+        ],
+      });
+
+      const moderationActionsByType: Record<string, number> = {};
+      for (const row of moderationActionsByTypeArr) {
+        if (row._id != null) {
+          moderationActionsByType[String(row._id)] = row.count;
+        }
+      }
+
+      const moderationCategories: Record<string, number> = {};
+      for (const row of moderationCategoriesArr) {
+        if (row._id != null) {
+          moderationCategories[String(row._id)] = row.count;
+        }
+      }
+
+      return {
+        totalBlockedByFirewall: tRow?.totalBlockedByFirewall ?? 0,
+        threatsByCategory,
+        firewallCostSaved: tRow?.firewallCostSaved ?? 0,
+        totalModerationActions,
+        moderationActionsByType,
+        moderationCategories,
+      };
+    } catch (error) {
+      this.logger.warn('getGatewaySecuritySummary failed', {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return empty();
+    }
+  }
 
   /**
    * Log request start for analytics
@@ -319,14 +714,23 @@ export class GatewayAnalyticsService {
         processingTime,
       ) as any;
 
+      const gatewayMetricsBase: Record<string, unknown> = {
+        cacheHit: context.cacheHit || false,
+        appLevelCacheHit: context.appLevelCacheHit || false,
+        failoverUsed: context.failoverEnabled || false,
+        cortexEnabled: context.cortexEnabled || false,
+        providerNativeCache: context.providerNativeCache,
+        costSavingsFromProviderCacheUsd:
+          context.providerNativeCache?.estimatedSavingsUsd ?? 0,
+      };
+      if (context.outputModeration) {
+        gatewayMetricsBase.outputModeration = context.outputModeration;
+      }
+
       const metadataExtras: Record<string, unknown> = {
         gatewayProcessingTime: processingTime,
         retryAttempts,
-        gatewayMetrics: {
-          cacheHit: context.cacheHit || false,
-          failoverUsed: context.failoverEnabled || false,
-          cortexEnabled: context.cortexEnabled || false,
-        },
+        gatewayMetrics: gatewayMetricsBase,
       };
 
       // Store usage metrics in database (Usage schema fields only)

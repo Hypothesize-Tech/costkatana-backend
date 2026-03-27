@@ -50,8 +50,10 @@ export class GatewayController {
    * Cache Management Routes (requires authentication)
    */
   @Get('cache/stats')
-  async getCacheStats(@Res() res: Response) {
-    const data = await this.gatewayService.getCacheStats();
+  async getCacheStats(@Req() req: Request, @Res() res: Response) {
+    const userId = (req as Request & { gatewayContext?: { userId?: string } })
+      .gatewayContext?.userId;
+    const data = await this.gatewayService.getCacheStats(userId);
     res.status(200).json({
       success: true,
       data,
@@ -114,6 +116,19 @@ export class GatewayController {
       dateRange,
     );
     res.status(result.success ? 200 : 500).json(result);
+  }
+
+  /**
+   * Security summary for gateway dashboard (firewall ThreatLog + output moderation from Usage).
+   */
+  @Get('security/summary')
+  async getSecuritySummary(@Req() req: Request, @Res() res: Response) {
+    const userId = (req as Request & { gatewayContext?: { userId?: string } })
+      .gatewayContext?.userId;
+    const data = await this.analyticsService.getGatewaySecuritySummary(
+      userId ?? '',
+    );
+    res.status(200).json({ success: true, data });
   }
 
   /**

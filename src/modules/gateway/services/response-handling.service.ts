@@ -54,9 +54,9 @@ export class ResponseHandlingService {
     const context = (request as any).gatewayContext;
 
     try {
-      // Check if output moderation is enabled via headers
+      // Output moderation is on by default; opt out with costkatana-output-moderation-enabled: false
       const outputModerationEnabled =
-        request.headers['costkatana-output-moderation-enabled'] === 'true';
+        request.headers['costkatana-output-moderation-enabled'] !== 'false';
 
       // Default moderation config (can be customized via headers)
       const moderationConfig: ModerationConfig = {
@@ -413,6 +413,8 @@ export class ResponseHandlingService {
     request: Request,
     response: Response,
     cachedResponse: any,
+    /** When set (e.g. after output moderation), returned instead of raw cached body */
+    responseBodyOverride?: unknown,
   ): void {
     const context = (request as any).gatewayContext;
 
@@ -426,7 +428,36 @@ export class ResponseHandlingService {
       response.setHeader('CostKatana-Request-Id', context.requestId);
     }
 
-    response.status(200).json(cachedResponse.response);
+    const payload =
+      responseBodyOverride !== undefined
+        ? responseBodyOverride
+        : cachedResponse.response;
+    response.status(200).json(payload);
+  }
+
+  /**
+   * Send output moderation block response with HTTP 400 (not the provider's upstream status).
+   */
+  sendModerationBlockedResponse(
+    request: Request,
+    response: Response,
+    moderationResult: ModerationResult,
+  ): void {
+    const context = (request as any).gatewayContext;
+
+    if (context?.requestId) {
+      response.setHeader('CostKatana-Request-Id', context.requestId);
+    }
+    response.setHeader('CostKatana-Moderation-Applied', 'true');
+    response.setHeader('CostKatana-Moderation-Action', moderationResult.action);
+    if (moderationResult.violationCategories?.length > 0) {
+      response.setHeader(
+        'CostKatana-Moderation-Categories',
+        moderationResult.violationCategories.join(','),
+      );
+    }
+
+    response.status(400).json(moderationResult.response);
   }
 
   /**

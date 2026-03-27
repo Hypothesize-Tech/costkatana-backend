@@ -1,26 +1,33 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+/** Max cache breakpoints Anthropic allows per request */
+const MAX_CACHE_BREAKPOINTS = 4;
+
+/** Minimum characters for a user block to be treated as cacheable static document context */
+const MIN_USER_DOC_CHARS = 512;
+
 /**
  * Anthropic Prompt Caching Service - Handles Anthropic-specific prompt caching optimizations
- * Implements Anthropic's caching API for efficient token usage
+ * Places `cache_control: { type: 'ephemeral' }` on stable prefix blocks only (system, tools,
+ * large non-final user content), never on the last message turn.
  */
 @Injectable()
 export class AnthropicPromptCachingService {
   private readonly logger = new Logger(AnthropicPromptCachingService.name);
 
-  private readonly SUPPORTED_MODELS = [
-    'claude-3-5-sonnet-20241022',
-    'claude-3-5-haiku-20241022',
-    'claude-3-opus-20240229',
-    'claude-3-sonnet-20240229',
-    'claude-3-haiku-20240307',
-  ];
-
   /**
-   * Check if model supports prompt caching
+   * Check if model supports prompt caching (prefix match — new model ids ship without code changes).
    */
   static isModelSupported(model: string): boolean {
-    return new AnthropicPromptCachingService().SUPPORTED_MODELS.includes(model);
+    const m = (model || '').toLowerCase();
+    return (
+      m.includes('claude-3') ||
+      m.includes('claude-4') ||
+      m.includes('claude-opus') ||
+      m.includes('claude-sonnet') ||
+      m.includes('claude-haiku') ||
+      m.includes('anthropic.claude')
+    );
   }
 
   /**
@@ -55,7 +62,8 @@ export class AnthropicPromptCachingService {
   }
 
   /**
-   * Process messages and identify caching opportunities
+   * Process messages and place up to 4 cache breakpoints on stable content only.
+   * Never marks the last message in the array (current user turn).
    */
   private processMessages(
     messages: any[],
@@ -65,20 +73,32 @@ export class AnthropicPromptCachingService {
     breakpoints: any[];
     metrics: any;
   } {
-    const processedMessages = [...messages];
+    const processedMessages = Array.isArray(messages)
+      ? messages.map((m) => (m && typeof m === 'object' ? { ...m } : m))
+      : [];
     const breakpoints: any[] = [];
     let regularTokens = 0;
     let cacheCreationTokens = 0;
 
     try {
-      // Analyze messages for caching opportunities
+      const lastIndex = processedMessages.length - 1;
+
       for (let i = 0; i < processedMessages.length; i++) {
         const message = processedMessages[i];
         const tokenCount = this.estimateTokenCount(message);
 
-        // Check if this message should be cached
-        if (this.shouldCacheMessage(message, i, cacheConfig)) {
-          // Add cache control to message
+        if (breakpoints.length >= MAX_CACHE_BREAKPOINTS) {
+          regularTokens += tokenCount;
+          continue;
+        }
+
+        if (i === lastIndex) {
+          // Never cache the final turn — it is usually the live user query
+          regularTokens += tokenCount;
+          continue;
+        }
+
+        if (this.shouldCacheMessage(message, i, lastIndex, cacheConfig)) {
           message.cache_control = { type: 'ephemeral' };
           breakpoints.push({
             messageIndex: i,
@@ -103,7 +123,6 @@ export class AnthropicPromptCachingService {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
 
-      // Return original messages on error
       return {
         processedMessages: messages,
         breakpoints: [],
@@ -143,7 +162,6 @@ export class AnthropicPromptCachingService {
         .join(',');
     }
 
-    // Add token usage estimates
     headers['anthropic-estimated-cache-creation-tokens'] =
       cacheCreationTokens.toString();
     headers['anthropic-estimated-regular-tokens'] = regularTokens.toString();
@@ -152,31 +170,32 @@ export class AnthropicPromptCachingService {
   }
 
   /**
-   * Determine if a message should be cached
+   * Cache system messages; cache user messages only when they look like static documents
+   * (large text). Skip assistant turns — not stable for prefix caching in typical flows.
    */
   private shouldCacheMessage(
     message: any,
     index: number,
-    cacheConfig: any,
+    lastIndex: number,
+    _cacheConfig: any,
   ): boolean {
-    // Cache assistant messages (responses) for reuse
-    if (message.role === 'assistant') {
-      return true;
+    if (index === lastIndex) {
+      return false;
     }
 
-    // Cache system messages
     if (message.role === 'system') {
       return true;
     }
 
-    // Cache user messages that are substantial
+    if (message.role === 'assistant') {
+      return false;
+    }
+
     if (message.role === 'user') {
       const content = Array.isArray(message.content)
         ? message.content.map((c: any) => c.text || '').join('')
-        : message.content;
-
-      // Only cache if content is substantial (>100 characters)
-      return content.length > 100;
+        : String(message.content || '');
+      return content.length >= MIN_USER_DOC_CHARS;
     }
 
     return false;
@@ -187,17 +206,22 @@ export class AnthropicPromptCachingService {
    */
   private estimateTokenCount(message: any): number {
     try {
+      if (Array.isArray(message)) {
+        return message.reduce(
+          (sum, m) => sum + this.estimateTokenCount(m),
+          0,
+        );
+      }
       let content = '';
 
-      if (Array.isArray(message.content)) {
+      if (Array.isArray(message?.content)) {
         content = message.content.map((c: any) => c.text || '').join('');
-      } else if (typeof message.content === 'string') {
+      } else if (typeof message?.content === 'string') {
         content = message.content;
       }
 
-      // Rough estimation: ~4 characters per token
       return Math.ceil(content.length / 4);
-    } catch (error) {
+    } catch {
       return 0;
     }
   }

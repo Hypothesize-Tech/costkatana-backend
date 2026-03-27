@@ -1,7 +1,8 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from '../auth/auth.module';
 import { UserSessionModule } from '../user-session/user-session.module';
+import { GatewayModule } from '../gateway/gateway.module';
 import { CacheController } from './cache.controller';
 
 /**
@@ -13,7 +14,12 @@ import { CacheController } from './cache.controller';
  * Uses UserSessionModule for UserSessionService (JwtAuthGuard).
  */
 @Module({
-  imports: [ConfigModule, AuthModule, UserSessionModule],
+  imports: [
+    ConfigModule,
+    AuthModule,
+    UserSessionModule,
+    forwardRef(() => GatewayModule),
+  ],
   controllers: [CacheController],
 })
 export class CacheModule {}
