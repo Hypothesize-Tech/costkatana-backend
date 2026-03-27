@@ -175,7 +175,8 @@ export class GatewayHeadersMiddleware implements NestMiddleware {
     if (cacheControl && cacheControl.includes('max-age=')) {
       const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
       if (maxAgeMatch) {
-        context.cacheTTL = parseInt(maxAgeMatch[1]) * 1000; // Convert seconds to milliseconds
+        // HTTP max-age is in seconds; CacheService / storeCache expect seconds
+        context.cacheTTL = parseInt(maxAgeMatch[1], 10);
       }
     }
 

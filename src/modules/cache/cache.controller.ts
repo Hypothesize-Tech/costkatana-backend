@@ -22,6 +22,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CacheService } from '../../common/cache/cache.service';
 import { BusinessEventLoggingService } from '../../common/services/business-event-logging.service';
+import { GatewayAnalyticsService } from '../gateway/services/gateway-analytics.service';
 import { ClearCacheQueryDto } from './dto/clear-cache-query.dto';
 import { ImportCacheDto } from './dto/import-cache.dto';
 import { WarmupCacheDto } from './dto/warmup-cache.dto';
@@ -35,6 +36,7 @@ export class CacheController {
     private readonly cacheService: CacheService,
     private readonly businessLogging: BusinessEventLoggingService,
     private readonly configService: ConfigService,
+    private readonly gatewayAnalyticsService: GatewayAnalyticsService,
   ) {}
 
   /**
@@ -45,7 +47,13 @@ export class CacheController {
   async getCacheStats(@CurrentUser('id') userId: string) {
     const startTime = Date.now();
     const redisStats = await this.cacheService.getCacheStats();
+    const gatewayUsage =
+      await this.gatewayAnalyticsService.getGatewayUsageCacheSummary(userId);
     const duration = Date.now() - startTime;
+
+    const totalCostSavedCombined =
+      (redisStats.costSaved ?? 0) +
+      (gatewayUsage.totalProviderCacheSavingsUsd ?? 0);
 
     this.businessLogging.logBusiness({
       event: 'cache_stats_retrieved',
@@ -59,6 +67,8 @@ export class CacheController {
         hitRate: (redisStats.hits / (redisStats.totalRequests || 1)) * 100,
         costSaved: redisStats.costSaved,
         tokensSaved: redisStats.tokensSaved ?? 0,
+        gatewayAppCacheHits: gatewayUsage.appLevelCacheHits,
+        providerCacheSavingsUsd: gatewayUsage.totalProviderCacheSavingsUsd,
       },
     });
 
@@ -77,6 +87,7 @@ export class CacheController {
             modelSpecific: true,
           },
         },
+        gateway: gatewayUsage,
         combined: {
           totalHits: redisStats.hits,
           totalMisses: redisStats.misses,
@@ -85,6 +96,10 @@ export class CacheController {
             (redisStats.hits / (redisStats.totalRequests || 1)) * 100,
           totalCostSaved: redisStats.costSaved,
           totalTokensSaved: redisStats.tokensSaved ?? 0,
+          gatewayAppCacheHits: gatewayUsage.appLevelCacheHits,
+          gatewayProxyRequests: gatewayUsage.gatewayProxyRequests,
+          providerCacheSavingsUsd: gatewayUsage.totalProviderCacheSavingsUsd,
+          totalCostSavedIncludingProviderCache: totalCostSavedCombined,
         },
       },
     };

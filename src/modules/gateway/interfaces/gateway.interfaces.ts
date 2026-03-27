@@ -124,6 +124,29 @@ export interface GatewayContext {
     cacheHeaders: Record<string, string>;
   };
 
+  /** Provider-reported prompt/KV cache usage from response body (Anthropic, OpenAI, Gemini). */
+  providerNativeCache?: {
+    anthropicCacheReadInputTokens: number;
+    anthropicCacheCreationInputTokens: number;
+    openaiCachedPromptTokens: number;
+    geminiCachedContentTokenCount: number;
+    estimatedSavingsUsd: number;
+  };
+
+  /** True when Redis gateway returned a stored response without calling the provider */
+  appLevelCacheHit?: boolean;
+
+  /** True when application-level (Redis) cache served the response */
+  cacheHit?: boolean;
+
+  /** Set before trackUsage so Usage.metadata.gatewayMetrics can include output moderation stats */
+  outputModeration?: {
+    applied: boolean;
+    action: string;
+    categories: string[];
+    blocked: boolean;
+  };
+
   /** Server-only: POST /v1/messages is handled on AWS Bedrock when Nest has no Anthropic key. */
   useBedrockAnthropicFallback?: boolean;
 }

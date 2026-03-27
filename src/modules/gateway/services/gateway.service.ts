@@ -88,20 +88,42 @@ export class GatewayService {
           this.logger.log('Cache hit - returning cached response', {
             requestId,
           });
+          context.cacheHit = true;
+          context.appLevelCacheHit = true;
           await this.analyticsService.logRequestStart(request);
           const moderationResult =
             await this.responseHandlingService.moderateOutput(
               request,
               cachedResponse.response,
             );
+          context.outputModeration = {
+            applied: moderationResult.moderationApplied,
+            action: moderationResult.action,
+            categories: moderationResult.violationCategories ?? [],
+            blocked: moderationResult.isBlocked,
+          };
+          if (moderationResult.isBlocked) {
+            this.responseHandlingService.sendModerationBlockedResponse(
+              request,
+              response,
+              moderationResult,
+            );
+            await this.analyticsService.trackUsage(
+              request,
+              moderationResult.response,
+              0,
+            );
+            return;
+          }
           this.responseHandlingService.sendCacheHitResponse(
             request,
             response,
             cachedResponse,
+            moderationResult.response,
           );
           await this.analyticsService.trackUsage(
             request,
-            cachedResponse.response,
+            moderationResult.response,
             0,
           );
           return;
@@ -131,7 +153,11 @@ export class GatewayService {
       // Step 3: Firewall check (if enabled)
       this.logger.debug('Step 3: Checking firewall rules', { requestId });
       let firewallResult: FirewallCheckResult = { isBlocked: false };
-      if (context.firewallEnabled || context.firewallAdvanced) {
+      if (
+        context.firewallEnabled ||
+        context.firewallAdvanced ||
+        context.securityEnabled !== false
+      ) {
         firewallResult = await this.firewallService.checkFirewallRules(request);
         if (firewallResult.isBlocked) {
           this.logger.warn('Firewall blocked request', {
@@ -275,6 +301,42 @@ export class GatewayService {
           processedResponse,
         );
 
+      context.outputModeration = {
+        applied: moderatedResponse.moderationApplied,
+        action: moderatedResponse.action,
+        categories: moderatedResponse.violationCategories ?? [],
+        blocked: moderatedResponse.isBlocked,
+      };
+
+      if (moderatedResponse.isBlocked) {
+        await this.analyticsService.trackUsage(
+          request,
+          moderatedResponse.response,
+          retryAttempts,
+        );
+        if (budgetCheck.reservationId) {
+          const cost = context.cost || 0;
+          await this.budgetService.trackRequestCost(
+            request,
+            axiosResponse,
+            cost,
+          );
+        }
+        this.responseHandlingService.sendModerationBlockedResponse(
+          request,
+          response,
+          moderatedResponse,
+        );
+        this.logger.log('=== GATEWAY REQUEST PROCESSING COMPLETED (MODERATION BLOCK) ===', {
+          component: 'GatewayService',
+          operation: 'processGatewayRequest',
+          type: 'gateway_request_moderation_blocked',
+          requestId,
+          processingTime: `${Date.now() - startTime}ms`,
+        });
+        return;
+      }
+
       const modelForCost =
         request.body?.model || context.modelOverride || 'unknown';
       const responseBodyForClient =
@@ -282,6 +344,11 @@ export class GatewayService {
           modelForCost,
           moderatedResponse.response,
         )) ?? moderatedResponse.response;
+
+      await this.analyticsService.applyProviderCacheContext(
+        request,
+        responseBodyForClient,
+      );
 
       // Step 8: Confirm budget and cache response
       this.logger.debug('Step 8: Finalizing request', { requestId });
@@ -549,14 +616,32 @@ export class GatewayService {
 
   /**
    * Get cache statistics (for /gateway/cache/stats)
+   * @param userId Authenticated user — merges Usage-based gateway proxy cache metrics (Redis + provider-native)
    */
-  async getCacheStats(): Promise<{
+  async getCacheStats(userId?: string): Promise<{
     redis: Record<string, unknown>;
+    gateway: Record<string, unknown>;
     config: { defaultTTL: number; defaultTTLHours: number };
   }> {
     try {
       const redisStats = await this.cacheService.getCacheStats();
       const stats = redisStats || {};
+      let gateway: Record<string, unknown> = {
+        appLevelCacheHits: 0,
+        totalProviderCacheSavingsUsd: 0,
+        gatewayProxyRequests: 0,
+        anthropicCacheReadInputTokens: 0,
+        anthropicCacheCreationInputTokens: 0,
+        openaiCachedPromptTokens: 0,
+        geminiCachedContentTokenCount: 0,
+        appLevelCacheHitRatePercent: 0,
+      };
+      if (userId) {
+        const g = await this.analyticsService.getGatewayUsageCacheSummary(
+          userId,
+        );
+        gateway = { ...g };
+      }
       return {
         redis: {
           hits: stats.hits ?? 0,
@@ -572,6 +657,7 @@ export class GatewayService {
           topModels: stats.topModels ?? [],
           topUsers: stats.topUsers ?? [],
         },
+        gateway,
         config: {
           defaultTTL: 3600,
           defaultTTLHours: 1,
@@ -595,6 +681,16 @@ export class GatewayService {
           cacheSize: 0,
           topModels: [],
           topUsers: [],
+        },
+        gateway: {
+          appLevelCacheHits: 0,
+          totalProviderCacheSavingsUsd: 0,
+          gatewayProxyRequests: 0,
+          anthropicCacheReadInputTokens: 0,
+          anthropicCacheCreationInputTokens: 0,
+          openaiCachedPromptTokens: 0,
+          geminiCachedContentTokenCount: 0,
+          appLevelCacheHitRatePercent: 0,
         },
         config: { defaultTTL: 3600, defaultTTLHours: 1 },
       };

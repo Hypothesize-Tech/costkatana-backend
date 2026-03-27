@@ -17,6 +17,36 @@ const GITHUB_PREFIX = 'github:';
 const GITHUB_CACHE_TTL = 3600; // 1 hour
 const GITHUB_WARMUP_PLACEHOLDER_TTL = 120; // 2 min placeholder when no data passed
 
+/** Options for gateway cache keys: hash includes keyMaterial (sorted) when present. */
+export interface BuildCacheKeyOptions {
+  userId?: string;
+  model?: string;
+  provider?: string;
+  /** Semantically significant request fields (messages, tools, temperature, etc.) */
+  keyMaterial?: Record<string, unknown>;
+}
+
+/**
+ * Recursively sort object keys for deterministic JSON.stringify (cache key stability).
+ */
+export function sortObjectKeysDeep(value: unknown): unknown {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sortObjectKeysDeep(item));
+  }
+  if (typeof value === 'object' && value.constructor === Object) {
+    const obj = value as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(obj).sort()) {
+      sorted[key] = sortObjectKeysDeep(obj[key]);
+    }
+    return sorted;
+  }
+  return value;
+}
+
 export interface CacheStats {
   hits: number;
   misses: number;
@@ -364,6 +394,7 @@ export class CacheService implements OnModuleDestroy {
       userId?: string;
       model?: string;
       provider?: string;
+      keyMaterial?: Record<string, unknown>;
       enableSemantic?: boolean;
       enableDeduplication?: boolean;
       similarityThreshold?: number;
@@ -378,6 +409,7 @@ export class CacheService implements OnModuleDestroy {
       userId: options?.userId,
       model: options?.model,
       provider: options?.provider,
+      keyMaterial: options?.keyMaterial,
     });
     const value = await this.get(key);
     if (value != null) {
@@ -404,6 +436,7 @@ export class CacheService implements OnModuleDestroy {
       ttl?: number;
       tokens?: number;
       cost?: number;
+      keyMaterial?: Record<string, unknown>;
       enableSemantic?: boolean;
       enableDeduplication?: boolean;
     },
@@ -412,6 +445,7 @@ export class CacheService implements OnModuleDestroy {
       userId: options?.userId,
       model: options?.model,
       provider: options?.provider,
+      keyMaterial: options?.keyMaterial,
     });
     const ttl = options?.ttl ?? DEFAULT_CACHE_TTL;
     await this.set(key, response, ttl);
@@ -655,16 +689,34 @@ export class CacheService implements OnModuleDestroy {
 
   /**
    * Build cache key from content and options (parity with Express redis.service generateCacheKey).
+   * When `keyMaterial` is provided, the hash includes a deterministic JSON serialization of
+   * provider, model, user scope, keyMaterial, and prompt text (temperature, tools, etc.).
    * Format: cache:provider:model:userId:contentHash
    */
   buildCacheKey(
     content: string,
-    options: { userId?: string; model?: string; provider?: string } = {},
+    options: BuildCacheKeyOptions = {},
   ): string {
-    const { userId, model, provider } = options;
+    const { userId, model, provider, keyMaterial } = options;
+    const hashPayload =
+      keyMaterial && Object.keys(keyMaterial).length > 0
+        ? sortObjectKeysDeep({
+            provider: provider ?? 'unknown',
+            model: model ?? 'unknown',
+            userScope: userId ?? 'anonymous',
+            keyMaterial,
+            promptFingerprint: content,
+          })
+        : sortObjectKeysDeep({
+            provider: provider ?? 'unknown',
+            model: model ?? 'unknown',
+            userScope: userId ?? 'anonymous',
+            content,
+          });
+    const serialized = JSON.stringify(hashPayload);
     const contentHash = crypto
       .createHash('sha256')
-      .update(content)
+      .update(serialized)
       .digest('hex')
       .substring(0, 16);
     const components = [

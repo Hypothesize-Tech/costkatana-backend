@@ -43,8 +43,12 @@ export class GatewayFirewallService {
         hasFirewallAdvanced: context.firewallAdvanced,
       });
 
-      // Check if firewall is enabled
-      if (!context.firewallEnabled && !context.firewallAdvanced) {
+      // Skip only when LLM security is explicitly off and no explicit firewall headers
+      if (
+        !context.firewallEnabled &&
+        !context.firewallAdvanced &&
+        context.securityEnabled === false
+      ) {
         this.logger.debug('Firewall disabled, skipping check', {
           component: 'GatewayFirewallService',
           operation: 'checkFirewallRules',
@@ -97,7 +101,10 @@ export class GatewayFirewallService {
       // Run firewall check (checkPrompt expects: prompt, config, requestId, estimatedCost?, context?, toolCalls?)
       const config: import('../../security/prompt-firewall.service').FirewallConfig =
         {
-          enableBasicFirewall: !!context.firewallEnabled,
+          enableBasicFirewall: !!(
+            context.firewallEnabled ||
+            (context.securityEnabled !== false && !context.firewallAdvanced)
+          ),
           enableAdvancedFirewall: !!context.firewallAdvanced,
           enableRAGSecurity: false,
           enableToolSecurity: !!context.firewallAdvanced, // Enable tool security when advanced firewall is on

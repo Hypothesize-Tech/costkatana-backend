@@ -29,6 +29,13 @@ interface SummaryResult {
   totalTokens: number;
   totalRequests: number;
   averageCostPerRequest: number;
+  /** Aggregated from Usage.metadata.gatewayMetrics (gateway proxy) */
+  totalProviderCacheSavingsUsd?: number;
+  gatewayAppCacheHits?: number;
+  /** Percent of requests served from Redis app-level cache */
+  cacheHitRate?: number;
+  /** Alias for dashboards: USD saved via provider-native prompt caching */
+  cost_savings?: number;
 }
 
 export type { TimeSeriesData, SummaryResult };
@@ -145,6 +152,7 @@ export class AnalyticsService {
 
     const operations: Promise<unknown>[] = [
       this.getSummary(match as any),
+      this.getGatewayCacheMetrics(match as any),
       this.getTimeline(match as any, options.groupBy || 'date'),
       this.getBreakdown(match as any),
     ];
@@ -183,14 +191,25 @@ export class AnalyticsService {
     }
 
     const results = await Promise.all(operations);
-    const [summary, timeline, breakdown] = results as [
-      SummaryResult,
+    const [summaryBase, gatewayCache, timeline, breakdown] = results as [
+      SummaryResult & { averageResponseTime?: number },
+      { totalProviderCacheSavingsUsd: number; gatewayAppCacheHits: number },
       TimeSeriesData[],
       { services: any[]; models: any[] },
     ];
+    const totalReq = summaryBase.totalRequests ?? 0;
+    const appHits = gatewayCache.gatewayAppCacheHits ?? 0;
+    const summary: SummaryResult & { averageResponseTime?: number } = {
+      ...summaryBase,
+      totalProviderCacheSavingsUsd: gatewayCache.totalProviderCacheSavingsUsd,
+      gatewayAppCacheHits: appHits,
+      cacheHitRate:
+        totalReq > 0 ? Math.round((appHits / totalReq) * 10000) / 100 : 0,
+      cost_savings: gatewayCache.totalProviderCacheSavingsUsd,
+    };
     const projectBreakdown =
       options.includeProjectBreakdown && !filters.projectId
-        ? (results[3] as any[])
+        ? (results[4] as any[])
         : null;
 
     this.loggerService.debug('Analytics result', {
@@ -221,11 +240,22 @@ export class AnalyticsService {
       ...filters,
       projectId: new Types.ObjectId(projectId),
     };
-    const [summary, timeline, breakdown] = await Promise.all([
+    const [summaryBase, gatewayCache, timeline, breakdown] = await Promise.all([
       this.getSummary(match),
+      this.getGatewayCacheMetrics(match),
       this.getTimeline(match, options.groupBy || 'date'),
       this.getBreakdown(match),
     ]);
+    const totalReq = summaryBase.totalRequests ?? 0;
+    const appHits = gatewayCache.gatewayAppCacheHits ?? 0;
+    const summary = {
+      ...summaryBase,
+      totalProviderCacheSavingsUsd: gatewayCache.totalProviderCacheSavingsUsd,
+      gatewayAppCacheHits: appHits,
+      cacheHitRate:
+        totalReq > 0 ? Math.round((appHits / totalReq) * 10000) / 100 : 0,
+      cost_savings: gatewayCache.totalProviderCacheSavingsUsd,
+    };
     return {
       summary,
       timeline,
@@ -449,6 +479,50 @@ export class AnalyticsService {
       );
     }
     return csvRows.join('\n');
+  }
+
+  /**
+   * Sums provider prompt-cache USD savings and app-level (Redis) cache hits from gateway usage metadata.
+   */
+  private async getGatewayCacheMetrics(match: any): Promise<{
+    totalProviderCacheSavingsUsd: number;
+    gatewayAppCacheHits: number;
+  }> {
+    const result = await this.usageModel.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          totalProviderCacheSavingsUsd: {
+            $sum: {
+              $ifNull: [
+                '$metadata.gatewayMetrics.costSavingsFromProviderCacheUsd',
+                0,
+              ],
+            },
+          },
+          gatewayAppCacheHits: {
+            $sum: {
+              $cond: [
+                { $eq: ['$metadata.gatewayMetrics.appLevelCacheHit', true] },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    ]);
+    const row = result[0] as
+      | {
+          totalProviderCacheSavingsUsd?: number;
+          gatewayAppCacheHits?: number;
+        }
+      | undefined;
+    return {
+      totalProviderCacheSavingsUsd: row?.totalProviderCacheSavingsUsd ?? 0,
+      gatewayAppCacheHits: row?.gatewayAppCacheHits ?? 0,
+    };
   }
 
   private async getSummary(

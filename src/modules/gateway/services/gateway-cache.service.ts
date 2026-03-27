@@ -38,10 +38,13 @@ export class GatewayCacheService {
       const disableSemanticCache =
         request.headers['costkatana-disable-semantic-cache'] === 'true';
 
+      const keyMaterial = this.extractCacheKeyMaterial(request.body);
+
       const cacheResult = await this.cacheService.checkCache(prompt, {
         userId: context.cacheUserScope ? context.userId : undefined,
         model: request.body?.model,
         provider: context.provider,
+        keyMaterial,
         enableSemantic:
           !disableSemanticCache && context.semanticCacheEnabled !== false,
         enableDeduplication: context.deduplicationEnabled !== false,
@@ -103,6 +106,8 @@ export class GatewayCacheService {
         const disableSemanticCache =
           request.headers['costkatana-disable-semantic-cache'] === 'true';
 
+        const keyMaterial = this.extractCacheKeyMaterial(request.body);
+
         await this.cacheService.storeCache(prompt, response, {
           userId: context.cacheUserScope ? context.userId : undefined,
           model: request.body?.model,
@@ -110,6 +115,7 @@ export class GatewayCacheService {
           ttl: context.cacheTTL || DEFAULT_CACHE_TTL,
           tokens: inputTokens + outputTokens,
           cost,
+          keyMaterial,
           enableSemantic:
             !disableSemanticCache && context.semanticCacheEnabled !== false,
           enableDeduplication: context.deduplicationEnabled !== false,
@@ -136,6 +142,44 @@ export class GatewayCacheService {
         requestId: request.headers['x-request-id'] as string,
       });
     }
+  }
+
+  /**
+   * Fields that affect model output and must participate in the cache key
+   * (deterministic JSON via CacheService.sortObjectKeysDeep).
+   */
+  private extractCacheKeyMaterial(
+    requestBody: Record<string, unknown> | null | undefined,
+  ): Record<string, unknown> {
+    if (!requestBody || typeof requestBody !== 'object') {
+      return {};
+    }
+    const b = requestBody;
+    const material: Record<string, unknown> = {};
+    const copyIfDefined = (key: string) => {
+      if (b[key] !== undefined) {
+        material[key] = b[key];
+      }
+    };
+    copyIfDefined('messages');
+    copyIfDefined('system');
+    copyIfDefined('prompt');
+    copyIfDefined('contents');
+    copyIfDefined('temperature');
+    copyIfDefined('top_p');
+    copyIfDefined('top_k');
+    copyIfDefined('max_tokens');
+    copyIfDefined('max_completion_tokens');
+    copyIfDefined('tools');
+    copyIfDefined('tool_choice');
+    copyIfDefined('response_format');
+    copyIfDefined('prompt_cache_key');
+    copyIfDefined('frequency_penalty');
+    copyIfDefined('presence_penalty');
+    copyIfDefined('seed');
+    copyIfDefined('stop');
+    copyIfDefined('n');
+    return material;
   }
 
   /**
