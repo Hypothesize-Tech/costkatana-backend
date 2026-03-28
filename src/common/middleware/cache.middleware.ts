@@ -48,6 +48,7 @@ export class CacheMiddleware implements NestMiddleware {
 
       // Skip endpoints that must always return fresh data (no server-side caching)
       const noCachePaths = [
+        '/auth/oauth', // OAuth state + authUrl must never be cached (breaks login / stale state)
         '/vercel/connections', // exact match for GET list, not /connections/:id
         '/github/connections',
         '/github/integrations',

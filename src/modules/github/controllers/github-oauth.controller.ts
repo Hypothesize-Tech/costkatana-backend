@@ -15,6 +15,11 @@ import { GithubOAuthApiService } from '../services/github-oauth-api.service';
 import { GithubConnectionService } from '../services/github-connection.service';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
+import { OAuthService } from '../../oauth/oauth.service';
+import {
+  normalizeOAuthStateParam,
+  verifyOAuthState,
+} from '../../oauth/oauth-state.helpers';
 
 @Controller('api/github')
 export class GithubOAuthController {
@@ -24,6 +29,7 @@ export class GithubOAuthController {
     private readonly githubOAuthApiService: GithubOAuthApiService,
     private readonly githubConnectionService: GithubConnectionService,
     private readonly configService: ConfigService,
+    private readonly oauthService: OAuthService,
   ) {}
 
   /**
@@ -223,7 +229,7 @@ export class GithubOAuthController {
         );
       } else if (code) {
         // This is an OAuth callback
-        await this.handleOAuthCodeCallback(code, state, res);
+        await this.handleOAuthCodeCallback(code, state, res, req);
       } else {
         throw new Error('Invalid callback parameters');
       }
@@ -235,8 +241,9 @@ export class GithubOAuthController {
       });
 
       // Redirect to error page
-      const frontendUrl =
-        this.configService.getOrThrow<string>('FRONTEND_URL');
+      const frontendUrl = this.configService
+        .getOrThrow<string>('FRONTEND_URL')
+        .replace(/\/+$/, '');
       res.redirect(
         `${frontendUrl}?error=callback_failed&message=${encodeURIComponent(error.message)}`,
       );
@@ -257,133 +264,181 @@ export class GithubOAuthController {
     code: string,
     state: string | undefined,
     res: Response,
+    req: Request,
   ): Promise<void> {
-    // --- Step 1: Verify state parameter ---
     if (!state) {
       throw new Error('Missing state parameter');
     }
 
-    // --- Step 2: Verify HMAC signature and decode state ---
     const decodedState = this.verifyAndDecodeState(state);
-    if (!decodedState) {
-      throw new Error('Invalid or expired state parameter');
-    }
 
-    // --- Step 3: Verify state type ---
-    if (decodedState.type !== 'oauth') {
-      throw new Error('Invalid state type for OAuth callback');
-    }
+    if (decodedState) {
+      // Legacy: integrations flow — Redis-backed state from GET /api/github/auth
+      if (decodedState.type !== 'oauth') {
+        throw new Error('Invalid state type for OAuth callback');
+      }
 
-    // --- Step 4: Check if state was already used (prevent replay attacks) ---
-    const stateKey = `github:oauth:state:${state}`;
-    const storedStateRaw =
-      await this.githubOAuthApiService['cacheService'].get(stateKey);
-    const storedState = storedStateRaw as
-      | { userId?: string; redirectUri?: string }
-      | undefined;
+      const stateKey = `github:oauth:state:${state}`;
+      const storedStateRaw =
+        await this.githubOAuthApiService['cacheService'].get(stateKey);
+      const storedState = storedStateRaw as
+        | { userId?: string; redirectUri?: string }
+        | undefined;
 
-    if (!storedState) {
-      // State not found in cache - this could be a replay attack or expired state
-      this.logger.warn(
-        'State parameter not found in cache - possible replay attack or expired',
-        {
-          state: state.substring(0, 10) + '...', // Log partial state for debugging
-        },
-      );
-      throw new Error('State parameter already used or expired');
-    }
+      if (!storedState) {
+        this.logger.warn(
+          'State parameter not found in cache - possible replay attack or expired',
+          {
+            state: state.substring(0, 10) + '...',
+          },
+        );
+        throw new Error('State parameter already used or expired');
+      }
 
-    // --- Step 5: Verify user ID matches ---
-    if (storedState.userId !== decodedState.userId) {
-      this.logger.error('State user ID mismatch - possible tampering attempt', {
-        decodedUserId: decodedState.userId,
-        storedUserId: storedState.userId,
+      if (storedState.userId !== decodedState.userId) {
+        this.logger.error('State user ID mismatch - possible tampering attempt', {
+          decodedUserId: decodedState.userId,
+          storedUserId: storedState.userId,
+        });
+        throw new Error('State parameter verification failed');
+      }
+
+      await this.githubOAuthApiService['cacheService'].del(stateKey);
+
+      const { userId, redirectUri } = decodedState;
+
+      this.logger.log('Processing OAuth code exchange', {
+        userId,
+        codeLength: code.length,
       });
-      throw new Error('State parameter verification failed');
-    }
 
-    // --- Step 6: Remove the used state from cache for security ---
-    await this.githubOAuthApiService['cacheService'].del(stateKey);
+      let tokenResponse: {
+        access_token: string;
+        scope?: string;
+        token_type?: string;
+      };
+      try {
+        tokenResponse =
+          await this.githubOAuthApiService.exchangeCodeForToken(code);
+      } catch (exchangeErr: any) {
+        this.logger.error('GitHub token exchange failed', {
+          error: exchangeErr.message,
+          stack: exchangeErr.stack,
+        });
+        throw new Error('GitHub authentication failed during code exchange');
+      }
 
-    const { userId, redirectUri } = decodedState;
+      let githubUser: { id: number; login: string; [key: string]: any };
+      try {
+        githubUser = await this.githubOAuthApiService.getAuthenticatedUser(
+          tokenResponse.access_token,
+        );
+      } catch (userinfoErr: any) {
+        this.logger.error('GitHub user lookup failed', {
+          error: userinfoErr.message,
+          stack: userinfoErr.stack,
+        });
+        throw new Error('Failed to fetch GitHub user');
+      }
 
-    this.logger.log('Processing OAuth code exchange', {
-      userId,
-      codeLength: code.length,
-    });
+      try {
+        await this.githubConnectionService.upsertConnection({
+          userId,
+          githubUserId: githubUser.id,
+          githubUsername: githubUser.login,
+          accessToken: tokenResponse.access_token,
+          scopes: tokenResponse.scope,
+        });
+      } catch (dbErr: any) {
+        this.logger.error('Failed to upsert GitHub connection', {
+          error: dbErr.message,
+          stack: dbErr.stack,
+          userId,
+          githubUserId: githubUser.id,
+        });
+      }
 
-    // --- Step 4: Exchange code for access token ---
-    let tokenResponse: {
-      access_token: string;
-      scope?: string;
-      token_type?: string;
-    };
-    try {
-      tokenResponse =
-        await this.githubOAuthApiService.exchangeCodeForToken(code);
-    } catch (exchangeErr: any) {
-      this.logger.error('GitHub token exchange failed', {
-        error: exchangeErr.message,
-        stack: exchangeErr.stack,
-      });
-      throw new Error('GitHub authentication failed during code exchange');
-    }
-
-    // --- Step 5: Retrieve authenticated user info from GitHub ---
-    let githubUser: { id: number; login: string; [key: string]: any };
-    try {
-      githubUser = await this.githubOAuthApiService.getAuthenticatedUser(
-        tokenResponse.access_token,
-      );
-    } catch (userinfoErr: any) {
-      this.logger.error('GitHub user lookup failed', {
-        error: userinfoErr.message,
-        stack: userinfoErr.stack,
-      });
-      throw new Error('Failed to fetch GitHub user');
-    }
-
-    // --- Step 6: Persist or update GitHub connection in database ---
-    try {
-      await this.githubConnectionService.upsertConnection({
+      this.logger.log('OAuth flow completed successfully', {
         userId,
         githubUserId: githubUser.id,
         githubUsername: githubUser.login,
-        accessToken: tokenResponse.access_token,
         scopes: tokenResponse.scope,
       });
-    } catch (dbErr: any) {
-      this.logger.error('Failed to upsert GitHub connection', {
-        error: dbErr.message,
-        stack: dbErr.stack,
-        userId,
-        githubUserId: githubUser.id,
+
+      const successRedirectUri =
+        redirectUri ||
+        this.configService.getOrThrow<string>('FRONTEND_URL').replace(/\/+$/, '');
+
+      const params = new URLSearchParams({
+        success: 'oauth_completed',
+        user: githubUser.login,
       });
-      // Don't throw: safely allow user to proceed for their session
+
+      if (userId) params.append('user_id', userId);
+      if (tokenResponse.scope) params.append('scope', tokenResponse.scope);
+
+      res.redirect(`${successRedirectUri}?${params.toString()}`);
+      return;
     }
 
-    this.logger.log('OAuth flow completed successfully', {
-      userId,
-      githubUserId: githubUser.id,
-      githubUsername: githubUser.login,
-      scopes: tokenResponse.scope,
-    });
+    // Unified login/link state from GET /api/auth/oauth/github (HMAC in oauth-state.helpers).
+    // GitHub often has a single registered callback URL pointing here instead of /api/auth/oauth/github/callback.
+    const unifiedSecret =
+      this.configService.get<string>('OAUTH_STATE_SECRET') ||
+      this.configService.get<string>('ENCRYPTION_KEY') ||
+      'default-key-change-me';
 
-    // --- Step 7: Redirect to final destination with context ---
-    const successRedirectUri =
-      redirectUri ||
-      this.configService.getOrThrow<string>('FRONTEND_URL');
+    let unifiedState;
+    try {
+      unifiedState = verifyOAuthState(
+        normalizeOAuthStateParam(state),
+        unifiedSecret,
+      );
+    } catch {
+      throw new Error('Invalid or expired state parameter');
+    }
 
-    // Forward minimal info to frontend for continued onboarding
-    const params = new URLSearchParams({
-      success: 'oauth_completed',
-      user: githubUser.login,
-    });
+    if (unifiedState.provider !== 'github') {
+      throw new Error('Invalid or expired state parameter');
+    }
 
-    if (userId) params.append('user_id', userId);
-    if (tokenResponse.scope) params.append('scope', tokenResponse.scope);
+    const result = await this.oauthService.handleOAuthCallback(
+      'github',
+      code,
+      state,
+      req,
+    );
 
-    res.redirect(`${successRedirectUri}?${params.toString()}`);
+    const frontend = this.configService
+      .getOrThrow<string>('FRONTEND_URL')
+      .replace(/\/+$/, '');
+
+    if (!result.requiresMFA) {
+      await this.oauthService.updateLastLoginMethod(
+        (result.user as any)._id.toString(),
+        'github',
+      );
+    }
+
+    if (result.requiresMFA) {
+      res.redirect(
+        `${frontend}/oauth/callback?` +
+          `requiresMFA=true&` +
+          `mfaToken=${encodeURIComponent(result.mfaToken!)}&` +
+          `userId=${encodeURIComponent((result.user as any)._id.toString())}&` +
+          `availableMethods=${encodeURIComponent(result.availableMethods!.join(','))}&` +
+          `lastLoginMethod=${encodeURIComponent('github')}`,
+      );
+      return;
+    }
+
+    res.redirect(
+      `${frontend}/oauth/callback?` +
+        `accessToken=${encodeURIComponent(result.accessToken)}&` +
+        `refreshToken=${encodeURIComponent(result.refreshToken)}&` +
+        `isNewUser=${result.isNewUser}&` +
+        `lastLoginMethod=${encodeURIComponent('github')}`,
+    );
   }
 
   /**

@@ -9,16 +9,12 @@ import {
   Res,
   UseGuards,
   BadRequestException,
-  Redirect,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { OAuthService } from './oauth.service';
-import { GitHubIntegrationService } from './github-integration.service';
-import { GoogleIntegrationService } from './google-integration.service';
-import { MfaService } from '../auth/mfa.service';
 import { ConfigService } from '@nestjs/config';
 import { OAuthCallbackQueryDto } from './dto/oauth-callback-query.dto';
 import { Public } from '../../common/decorators/public.decorator';
@@ -27,9 +23,6 @@ import { Public } from '../../common/decorators/public.decorator';
 export class OAuthController {
   constructor(
     private readonly oauthService: OAuthService,
-    private readonly githubIntegrationService: GitHubIntegrationService,
-    private readonly googleIntegrationService: GoogleIntegrationService,
-    private readonly mfaService: MfaService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -51,8 +44,11 @@ export class OAuthController {
     const result = await this.oauthService.initiateOAuth(provider, userId);
 
     return {
-      authUrl: result.authUrl,
-      provider: result.provider,
+      success: true,
+      data: {
+        authUrl: result.authUrl,
+        provider: result.provider,
+      },
     };
   }
 
@@ -120,27 +116,11 @@ export class OAuthController {
         );
       }
 
-      // 12. Linking flow: redirect to integrations page
-      const userId = (result.user as any)._id.toString();
-      const isLinkingFlow = await this.isLinkingFlow(userId, provider);
-      if (isLinkingFlow) {
-        const connectionExists =
-          provider === 'github'
-            ? await this.githubIntegrationService.verifyConnection(userId)
-            : await this.googleIntegrationService.verifyConnection(userId);
+      // 12. Redirect with tokens (login and OAuth "link while logged in" both return JWTs from the service).
+      // Do NOT branch on linkedProviders.length — users with Google+GitHub were sent to /integrations
+      // without tokens and could never complete SPA auth.
 
-        if (connectionExists) {
-          return res.redirect(
-            `${this.getFrontendUrl()}/integrations?${provider}Connected=true&message=${encodeURIComponent(`${provider} account linked successfully`)}`,
-          );
-        } else {
-          return res.redirect(
-            `${this.getFrontendUrl()}/integrations?error=${encodeURIComponent(`Failed to setup ${provider} connection`)}`,
-          );
-        }
-      }
-
-      // 13. Login flow: redirect with tokens
+      // 13. Success: redirect to frontend OAuth callback with tokens
       return res.redirect(
         `${this.getFrontendUrl()}/oauth/callback?` +
           `accessToken=${encodeURIComponent(result.accessToken)}&` +
@@ -184,17 +164,20 @@ export class OAuthController {
     const result = await this.oauthService.initiateOAuth(provider, user.id);
 
     return {
-      authUrl: result.authUrl,
-      provider: result.provider,
-      scopes:
-        provider === 'google'
-          ? [
-              'openid',
-              'email',
-              'profile',
-              'https://www.googleapis.com/auth/drive.file',
-            ]
-          : ['read:user', 'user:email', 'repo'],
+      success: true,
+      data: {
+        authUrl: result.authUrl,
+        provider: result.provider,
+        scopes:
+          provider === 'google'
+            ? [
+                'openid',
+                'email',
+                'profile',
+                'https://www.googleapis.com/auth/drive.file',
+              ]
+            : ['read:user', 'user:email', 'repo'],
+      },
     };
   }
 
@@ -232,26 +215,10 @@ export class OAuthController {
   // ============================================================================
 
   /**
-   * Get frontend URL from config
+   * Get frontend URL from config (no trailing slash — avoids //oauth/callback).
    */
   private getFrontendUrl(): string {
-    return this.configService.getOrThrow<string>('FRONTEND_URL');
-  }
-
-  /**
-   * Check if this is a linking flow by checking if user has password/other providers
-   */
-  private async isLinkingFlow(
-    userId: string,
-    provider: string,
-  ): Promise<boolean> {
-    try {
-      const linkedProviders =
-        await this.oauthService.getLinkedProviders(userId);
-      // If user has multiple providers or a password, consider it a linking scenario
-      return linkedProviders.length > 1;
-    } catch (error) {
-      return false;
-    }
+    const raw = this.configService.getOrThrow<string>('FRONTEND_URL');
+    return raw.replace(/\/+$/, '');
   }
 }
