@@ -68,10 +68,14 @@ export class GoogleIntegrationService {
       // Get authenticated user info
       const userInfo = await this.getGoogleUserInfo(accessToken);
 
-      // Encrypt tokens manually (GoogleConnection doesn't have pre-save hook)
-      const encryptedAccessToken = EncryptionService.encryptCBC(accessToken);
+      // Encrypt tokens as JSON strings (schema: string; decrypt via google-connection-tokens)
+      const encryptedAccessToken = JSON.stringify(
+        EncryptionService.encryptCBC(accessToken),
+      );
       const encryptedRefreshToken = googleTokenResponse.refresh_token
-        ? EncryptionService.encryptCBC(googleTokenResponse.refresh_token)
+        ? JSON.stringify(
+            EncryptionService.encryptCBC(googleTokenResponse.refresh_token),
+          )
         : undefined;
 
       // Upsert Google connection

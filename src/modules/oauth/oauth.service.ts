@@ -18,13 +18,12 @@ import { WorkspaceService } from '../team/services/workspace.service';
 import { GitHubIntegrationService } from './github-integration.service';
 import { GoogleIntegrationService } from './google-integration.service';
 import { MfaService } from '../auth/mfa.service';
-
-interface OAuthStateData {
-  provider: 'google' | 'github';
-  userId?: string; // Present for linking flows
-  nonce: string;
-  timestamp: number;
-}
+import {
+  type OAuthStateData,
+  normalizeOAuthStateParam,
+  signOAuthState,
+  verifyOAuthState as verifyOAuthStatePayload,
+} from './oauth-state.helpers';
 
 interface OAuthUserInfo {
   id: string;
@@ -90,12 +89,11 @@ export class OAuthService {
         stateData.userId = userId; // For linking flows
       }
 
-      // Store state in cache
-      const stateKey = `oauth:state:${stateData.nonce}`;
-      await this.cacheService.set(stateKey, stateData, this.STATE_TTL);
+      // Signed state (no Redis): survives load balancers & multi-instance
+      const signedState = signOAuthState(stateData, this.getOAuthStateSecret());
 
       // Generate auth URL
-      const authUrl = this.buildAuthUrl(provider, stateData.nonce);
+      const authUrl = this.buildAuthUrl(provider, signedState);
 
       this.logger.debug(
         `OAuth initiated: ${provider}, userId: ${userId || 'anonymous'}`,
@@ -119,40 +117,25 @@ export class OAuthService {
     provider: 'google' | 'github',
   ): Promise<OAuthStateData> {
     try {
-      // Decode and parse state
-      const stateData = this.decodeState(state);
+      const stateData = verifyOAuthStatePayload(
+        state,
+        this.getOAuthStateSecret(),
+      );
 
-      // Validate provider match
       if (stateData.provider !== provider) {
         throw new BadRequestException('Provider mismatch in OAuth state');
       }
 
-      // Validate timestamp (10 minutes max age)
       const age = Date.now() - stateData.timestamp;
       if (age > this.STATE_TTL * 1000) {
         throw new BadRequestException('OAuth state has expired');
       }
-
-      // Retrieve and delete from cache
-      const stateKey = `oauth:state:${stateData.nonce}`;
-      const cachedStateRaw = await this.cacheService.get(stateKey);
-
-      if (!cachedStateRaw) {
-        throw new BadRequestException('OAuth state not found or expired');
+      if (age < -120_000) {
+        throw new BadRequestException('Invalid OAuth state timestamp');
       }
 
-      const cachedState = cachedStateRaw as OAuthStateData;
-
-      // Verify nonce matches
-      if (cachedState.nonce !== stateData.nonce) {
-        throw new BadRequestException('OAuth state nonce mismatch');
-      }
-
-      // Consume state (delete from cache)
-      await this.cacheService.del(stateKey);
-
-      this.logger.debug(`OAuth state validated and consumed: ${provider}`);
-      return cachedState;
+      this.logger.debug(`OAuth state validated: ${provider}`);
+      return stateData;
     } catch (error) {
       this.logger.error(
         'Error validating OAuth state:',
@@ -167,18 +150,7 @@ export class OAuthService {
    */
   resolveCallbackState(rawState: string): string {
     try {
-      // Handle common URL encoding issues
-      let normalizedState = rawState;
-
-      // Replace spaces with + (URL encoding)
-      normalizedState = normalizedState.replace(/\s/g, '+');
-
-      // Ensure proper base64 padding
-      while (normalizedState.length % 4 !== 0) {
-        normalizedState += '=';
-      }
-
-      return normalizedState;
+      return normalizeOAuthStateParam(rawState);
     } catch (error) {
       this.logger.error(
         'Error resolving callback state:',
@@ -186,6 +158,39 @@ export class OAuthService {
       );
       throw new BadRequestException('Invalid OAuth state format');
     }
+  }
+
+  /**
+   * Google OAuth redirect URI used for authorize + token exchange (must match Google Cloud console).
+   * Supports GOOGLE_REDIRECT_URI, or GOOGLE_CALLBACK_URL (env.example), or BACKEND_URL default.
+   */
+  private getGoogleOAuthRedirectUri(): string {
+    const explicit =
+      this.configService.get<string>('GOOGLE_REDIRECT_URI') ||
+      this.configService.get<string>('GOOGLE_CALLBACK_URL');
+    if (explicit?.trim()) {
+      return explicit.trim();
+    }
+    const base = (
+      this.configService.get<string>('BACKEND_URL') ?? 'http://localhost:8000'
+    ).replace(/\/$/, '');
+    return `${base}/api/auth/oauth/google/callback`;
+  }
+
+  /**
+   * GitHub OAuth redirect URI (authorize URL must match token exchange / app settings).
+   */
+  private getGitHubOAuthRedirectUri(): string {
+    const explicit =
+      this.configService.get<string>('GITHUB_REDIRECT_URI') ||
+      this.configService.get<string>('GITHUB_CALLBACK_URL');
+    if (explicit?.trim()) {
+      return explicit.trim();
+    }
+    const base = (
+      this.configService.get<string>('BACKEND_URL') ?? 'http://localhost:8000'
+    ).replace(/\/$/, '');
+    return `${base}/api/auth/oauth/github/callback`;
   }
 
   /**
@@ -197,9 +202,9 @@ export class OAuthService {
       const clientSecret = this.configService.get<string>(
         'GOOGLE_CLIENT_SECRET',
       );
-      const redirectUri = this.configService.get<string>('GOOGLE_REDIRECT_URI');
+      const redirectUri = this.getGoogleOAuthRedirectUri();
 
-      if (!clientId || !clientSecret || !redirectUri) {
+      if (!clientId || !clientSecret) {
         throw new Error('Google OAuth configuration missing');
       }
 
@@ -728,53 +733,49 @@ export class OAuthService {
   }
 
   /**
-   * Decode base64 state to OAuthStateData
+   * Secret for HMAC OAuth state (falls back to ENCRYPTION_KEY).
    */
-  private decodeState(state: string): OAuthStateData {
-    try {
-      const decoded = Buffer.from(state, 'base64').toString('utf-8');
-      return JSON.parse(decoded);
-    } catch (error) {
-      throw new BadRequestException('Invalid OAuth state encoding');
+  private getOAuthStateSecret(): string {
+    const secret =
+      this.configService.get<string>('OAUTH_STATE_SECRET') ||
+      this.configService.get<string>('ENCRYPTION_KEY');
+    if (!secret || secret === 'default-key-change-me') {
+      this.logger.warn(
+        'OAUTH_STATE_SECRET or ENCRYPTION_KEY should be set for OAuth state signing',
+      );
     }
+    return secret ?? 'default-key-change-me';
   }
 
   /**
    * Build OAuth authorization URL
+   * @param stateParam — base64-encoded signed JSON (from signOAuthState)
    */
-  private buildAuthUrl(provider: 'google' | 'github', state: string): string {
-    const base64State = Buffer.from(
-      JSON.stringify({
-        provider,
-        nonce: state,
-        timestamp: Date.now(),
-      }),
-    ).toString('base64');
-
+  private buildAuthUrl(provider: 'google' | 'github', stateParam: string): string {
     if (provider === 'google') {
       const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
-      const redirectUri = this.configService.get<string>('GOOGLE_REDIRECT_URI');
+      const redirectUri = this.getGoogleOAuthRedirectUri();
 
       return (
         `https://accounts.google.com/o/oauth2/v2/auth?` +
         `client_id=${encodeURIComponent(clientId!)}&` +
-        `redirect_uri=${encodeURIComponent(redirectUri!)}&` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
         `scope=${encodeURIComponent('openid email profile https://www.googleapis.com/auth/drive.file')}&` +
         `response_type=code&` +
-        `state=${encodeURIComponent(base64State)}&` +
+        `state=${encodeURIComponent(stateParam)}&` +
         `access_type=offline&` +
         `prompt=consent`
       );
     } else {
       const clientId = this.configService.get<string>('GITHUB_CLIENT_ID');
-      const redirectUri = this.configService.get<string>('GITHUB_REDIRECT_URI');
+      const redirectUri = this.getGitHubOAuthRedirectUri();
 
       return (
         `https://github.com/login/oauth/authorize?` +
         `client_id=${encodeURIComponent(clientId!)}&` +
-        `redirect_uri=${encodeURIComponent(redirectUri!)}&` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
         `scope=${encodeURIComponent('read:user user:email repo')}&` +
-        `state=${encodeURIComponent(base64State)}`
+        `state=${encodeURIComponent(stateParam)}`
       );
     }
   }
