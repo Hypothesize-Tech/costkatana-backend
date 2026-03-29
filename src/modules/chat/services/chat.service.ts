@@ -80,6 +80,7 @@ import { generateSecureId } from '../../../common/utils/secure-id.util';
 import { ProcessingContext } from '../handlers/types/handler.types';
 import type { LangchainOrchestratorService } from '../langchain/langchain-orchestrator.service';
 import { CortexStreamingOrchestratorService } from './cortex-streaming-orchestrator.service';
+import { TokenCounterService } from '../../utils/services/token-counter.service';
 
 export interface ChatMessageResponse {
   id: string;
@@ -245,6 +246,7 @@ export class ChatService {
     )
     private readonly langchainOrchestrator: LangchainOrchestratorService,
     private readonly cortexStreamingOrchestrator: CortexStreamingOrchestratorService,
+    private readonly tokenCounterService: TokenCounterService,
     @InjectModel(GovernedTask.name)
     private readonly governedTaskModel: Model<GovernedTaskDocument>,
     @Optional() private readonly chatEventsRedis?: ChatEventsRedisService,
@@ -1449,11 +1451,20 @@ export class ChatService {
 
         // Persist the cortex result as an assistant message
         const startTime = Date.now();
-        const tokenCount = Math.ceil(cortexResult.length / 4); // Rough approximation
+        const modelId = dto.modelId || 'gpt-4o-mini';
+        const promptTokens = this.tokenCounterService.countTokens(
+          finalMessage,
+          { model: modelId },
+        ).tokens;
+        const outputTokens = this.tokenCounterService.countTokens(
+          typeof cortexResult === 'string' ? cortexResult : String(cortexResult),
+          { model: modelId },
+        ).tokens;
+        const tokenCount = promptTokens + outputTokens;
         const cost = CostEstimator.estimateCost(
-          dto.modelId,
-          tokenCount,
-          tokenCount, // Rough estimate for output tokens
+          modelId,
+          promptTokens,
+          outputTokens,
         );
 
         const assistantSession = await this.chatMessageModel.startSession();

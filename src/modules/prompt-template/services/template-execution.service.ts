@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CacheService } from '../../../common/cache/cache.service';
@@ -6,7 +6,8 @@ import { ActivityService } from '../../../modules/activity/activity.service';
 import { BedrockService } from '../../bedrock/bedrock.service';
 import { ModelRecommendationService } from './model-recommendation.service';
 import { estimateTokens } from '../../../utils/tokenCounter';
-import { AIProvider } from '../../../types';
+import { OptimizationService } from '../../optimization/optimization.service';
+import { CortexDecisionService } from '../../cortex/services/cortex-decision.service';
 import {
   PromptTemplate,
   PromptTemplateDocument,
@@ -24,7 +25,8 @@ export interface TemplateExecutionRequest {
   executionMode: 'single' | 'comparison' | 'recommended';
   modelId?: string; // User-selected model (overrides recommendation)
   compareWith?: string[]; // Additional models for comparison
-  enableOptimization?: boolean; // Future Cortex integration
+  /** When true, runs Cortex breakeven + optional prompt optimization before Bedrock */
+  enableOptimization?: boolean;
 }
 
 export interface TemplateExecutionResult {
@@ -56,6 +58,15 @@ export interface TemplateExecutionResult {
 
   // Quality metrics (future enhancement)
   qualityScore?: number;
+
+  /** When enableOptimization: Cortex / breakeven / token delta */
+  cortexOptimization?: {
+    applied: boolean;
+    promptTokensBefore?: number;
+    promptTokensAfter?: number;
+    breakevenReason?: string;
+    skipped?: boolean;
+  };
 }
 
 export interface ComparisonExecutionResult {
@@ -95,6 +106,8 @@ export class TemplateExecutionService {
     private readonly cacheService: CacheService,
     private readonly activityService: ActivityService,
     private readonly modelRecommendationService: ModelRecommendationService,
+    private readonly optimizationService: OptimizationService,
+    private readonly cortexDecisionService: CortexDecisionService,
   ) {}
 
   /**
@@ -288,6 +301,7 @@ export class TemplateExecutionService {
       variables: request.variables,
       modelId: request.modelId,
       executionMode: request.executionMode,
+      enableOptimization: request.enableOptimization === true,
     });
     return crypto.createHash('sha256').update(data).digest('hex');
   }
@@ -328,10 +342,87 @@ export class TemplateExecutionService {
     // Process variables and fill template
     const filledPrompt = this.fillTemplate(template, request.variables);
 
-    // Execute with AI (modelId may be undefined from recommendation - use default)
     const effectiveModelId = modelId || 'amazon.nova-pro-v1:0';
-    const aiResult = await BedrockService.invokeModel(
+    const promptTokensBefore = estimateTokens(
       filledPrompt,
+      'aws-bedrock',
+      effectiveModelId,
+    );
+
+    let promptForModel = filledPrompt;
+    let cortexOptimization:
+      | TemplateExecutionResult['cortexOptimization']
+      | undefined;
+
+    if (request.enableOptimization) {
+      const decision = this.cortexDecisionService.shouldUseCortex({
+        prompt: filledPrompt,
+        baselineModel: effectiveModelId,
+      });
+      if (!decision.useCortex) {
+        cortexOptimization = {
+          applied: false,
+          skipped: true,
+          breakevenReason: decision.reason,
+          promptTokensBefore,
+        };
+      } else {
+        try {
+          const cortexResult =
+            await this.optimizationService.runCortexPromptOptimization(
+              filledPrompt,
+              request.userId,
+              { model: effectiveModelId },
+              effectiveModelId,
+              'compress',
+            );
+          const meta = cortexResult.cortexMetadata as Record<
+            string,
+            unknown
+          >;
+          if (meta?.skipped) {
+            cortexOptimization = {
+              applied: false,
+              skipped: true,
+              breakevenReason: String(meta.breakevenReason ?? 'skipped'),
+              promptTokensBefore,
+            };
+          } else if (
+            typeof cortexResult.optimizedPrompt === 'string' &&
+            cortexResult.optimizedPrompt.length > 0 &&
+            cortexResult.optimizedPrompt.length <= filledPrompt.length * 1.25
+          ) {
+            promptForModel = cortexResult.optimizedPrompt;
+            cortexOptimization = {
+              applied: true,
+              promptTokensBefore,
+              promptTokensAfter: estimateTokens(
+                promptForModel,
+                'aws-bedrock',
+                effectiveModelId,
+              ),
+            };
+          } else {
+            cortexOptimization = {
+              applied: false,
+              promptTokensBefore,
+            };
+          }
+        } catch (e) {
+          this.logger.warn('Template Cortex optimization failed, using raw', {
+            error: e instanceof Error ? e.message : String(e),
+          });
+          cortexOptimization = {
+            applied: false,
+            promptTokensBefore,
+          };
+        }
+      }
+    }
+
+    // Execute with AI (modelId may be undefined from recommendation - use default)
+    const aiResult = await BedrockService.invokeModel(
+      promptForModel,
       effectiveModelId,
     );
 
@@ -339,7 +430,11 @@ export class TemplateExecutionService {
 
     // Extract response - invokeModel returns string
     const aiResponse = typeof aiResult === 'string' ? aiResult : '';
-    const promptTokens = Math.ceil(filledPrompt.length / 4);
+    const promptTokens = estimateTokens(
+      promptForModel,
+      'aws-bedrock',
+      effectiveModelId,
+    );
     const completionTokens = Math.ceil(aiResponse.length / 4);
     const totalTokens = promptTokens + completionTokens;
 
@@ -352,7 +447,7 @@ export class TemplateExecutionService {
       effectiveModelId,
     );
 
-    const analysis = this.modelRecommendationService.analyzeTemplate(template);
+    this.modelRecommendationService.analyzeTemplate(template);
     const baselineCost =
       this.modelRecommendationService.calculateBaselineCost(template);
 
@@ -386,7 +481,7 @@ export class TemplateExecutionService {
     await this.trackUsage(
       request.userId,
       modelId!,
-      filledPrompt,
+      promptForModel,
       aiResponse,
       promptTokens,
       completionTokens,
@@ -431,6 +526,7 @@ export class TemplateExecutionService {
       recommendationReasoning: recommendation?.reasoning,
       latencyMs,
       executedAt: new Date(),
+      cortexOptimization,
     };
   }
 

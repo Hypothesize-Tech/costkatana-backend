@@ -53,6 +53,49 @@ export class CortexAnalyticsService {
   ) {}
 
   /**
+   * Lightweight decode quality check: non-empty output, sane length vs prompt, keyword overlap.
+   */
+  validateDecodeQuality(
+    originalPrompt: string,
+    decodedOutput: string,
+  ): { pass: boolean; score: number } {
+    if (!decodedOutput || decodedOutput.trim().length < 10) {
+      return { pass: false, score: 0 };
+    }
+
+    const origWords = new Set(
+      originalPrompt
+        .toLowerCase()
+        .split(/\W+/)
+        .filter((w) => w.length > 3),
+    );
+    const outWords = new Set(
+      decodedOutput
+        .toLowerCase()
+        .split(/\W+/)
+        .filter((w) => w.length > 3),
+    );
+    let overlap = 0;
+    for (const w of origWords) {
+      if (outWords.has(w)) overlap++;
+    }
+    const denom = Math.max(1, Math.min(origWords.size, 10));
+    const score = overlap / denom;
+
+    const lengthRatio =
+      decodedOutput.length / Math.max(1, originalPrompt.length);
+    if (lengthRatio < 0.05 && originalPrompt.length > 100) {
+      return { pass: false, score };
+    }
+
+    if (origWords.size < 5) {
+      return { pass: true, score: 1 };
+    }
+
+    return { pass: score >= 0.3, score };
+  }
+
+  /**
    * Analyze the impact of Cortex optimization
    */
   public async analyzeOptimizationImpact(

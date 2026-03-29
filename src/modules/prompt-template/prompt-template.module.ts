@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { MulterModule } from '@nestjs/platform-express';
 import { SchemasModule } from '../../schemas/schemas.module';
@@ -37,6 +37,8 @@ import { PromptCachingService } from './services/prompt-caching.service';
 import { AnthropicPromptCachingService } from './services/providers/anthropic-prompt-caching.service';
 import { OpenAIPromptCachingService } from './services/providers/openai-prompt-caching.service';
 import { GooglePromptCachingService } from './services/providers/google-prompt-caching.service';
+import { OptimizationModule } from '../optimization/optimization.module';
+import { CortexModule } from '../cortex/cortex.module';
 
 @Module({
   imports: [
@@ -52,6 +54,8 @@ import { GooglePromptCachingService } from './services/providers/google-prompt-c
     AwsModule,
     AgentModule,
     AuthModule,
+    forwardRef(() => OptimizationModule),
+    CortexModule,
 
     // Mongoose models
     MongooseModule.forFeature([

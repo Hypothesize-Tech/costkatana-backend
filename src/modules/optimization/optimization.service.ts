@@ -38,6 +38,7 @@ import {
   CortexAnalyticsService,
   CortexImpactMetrics,
 } from '../cortex/services/cortex-analytics.service';
+import { CortexDecisionService } from '../cortex/services/cortex-decision.service';
 
 // 🚀 ADVANCED STREAMING ORCHESTRATOR
 import { CortexStreamingOrchestratorService } from '../cortex/services/cortex-streaming-orchestrator.service';
@@ -142,6 +143,7 @@ export class OptimizationService implements OnModuleDestroy {
     private cortexTrainingDataCollector: CortexTrainingDataCollectorService,
     private cortexAnalyticsService: CortexAnalyticsService,
     private cortexVocabularyService: CortexVocabularyService,
+    private cortexDecisionService: CortexDecisionService,
 
     // Utils
     private pricingService: PricingService,
@@ -248,6 +250,19 @@ export class OptimizationService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Synchronous token count via TokenCounterService (gpt-tokenizer / model-aware paths).
+   * Prefer over char/4 heuristics for Cortex metrics and dashboards.
+   */
+  private countTextTokens(text: string, model?: string): number {
+    if (!text) return 0;
+    const result = this.tokenCounterService.countTokens(
+      text,
+      model ? { model } : {},
+    );
+    return result?.tokens ?? 0;
+  }
+
   async onModuleDestroy(): Promise<void> {
     this.cleanup();
     await Promise.resolve();
@@ -274,21 +289,8 @@ export class OptimizationService implements OnModuleDestroy {
   }> {
     const startTime = Date.now();
 
-    // 🎯 Initialize training data collection (fire-and-forget)
-    const sessionId = generateSecureId('cortex');
+    let sessionId: string | undefined;
     const trainingCollector = this.cortexTrainingDataCollector as any;
-
-    trainingCollector.startSession?.(sessionId, userId, originalPrompt, {
-      service: 'optimization',
-      category: 'prompt_optimization',
-      complexity:
-        originalPrompt.length > 500
-          ? 'complex'
-          : originalPrompt.length > 100
-            ? 'medium'
-            : 'simple',
-      language: 'en',
-    });
 
     try {
       // 🎯 Step 0: Check semantic cache first
@@ -332,6 +334,95 @@ export class OptimizationService implements OnModuleDestroy {
           tokenReduction: cachedResult.tokenReduction,
         };
       }
+
+      // Near-duplicate / paraphrase cache (semantic hash similarity across entries)
+      const promptSemanticHash =
+        this.cortexCacheService.getSemanticHashForText(originalPrompt);
+      const semanticCandidates =
+        this.cortexCacheService.findAcrossSemanticSimilarity(
+          promptSemanticHash,
+          0.82,
+          5,
+        );
+      for (const semEntry of semanticCandidates) {
+        const semVal = semEntry.value as {
+          optimizedPrompt?: string;
+          createdAt?: Date;
+          accessCount?: number;
+          cortexMetadata?: Record<string, unknown>;
+          tokenReduction?: unknown;
+        };
+        if (
+          semVal &&
+          typeof semVal === 'object' &&
+          semVal.optimizedPrompt != null
+        ) {
+          this.logger.log('Using semantically similar cached Cortex result', {
+            userId,
+            cacheKey: semEntry.key,
+            processingTime: Date.now() - startTime,
+          });
+          return {
+            optimizedPrompt: semVal.optimizedPrompt,
+            cortexMetadata: {
+              ...(semVal.cortexMetadata ?? {}),
+              processingTime: Date.now() - startTime,
+              cacheHit: true,
+              semanticCacheHit: true,
+              originalCacheTime:
+                (semVal.cortexMetadata as { processingTime?: number })
+                  ?.processingTime ?? 0,
+            },
+            tokenReduction: semVal.tokenReduction as
+              | {
+                  originalTokens: number;
+                  cortexTokens: number;
+                  reductionPercentage: number;
+                }
+              | undefined,
+          };
+        }
+      }
+
+      const breakeven = this.cortexDecisionService.shouldUseCortex({
+        prompt: originalPrompt,
+        baselineModel: model || cortexConfig?.model,
+        encoderModel: cortexConfig?.encoding?.model,
+        coreModel: cortexConfig?.coreProcessing?.model,
+        decoderModel: cortexConfig?.decoding?.model,
+        estimatedOutputTokens: cortexConfig?.estimatedOutputTokens,
+        forceCortex: cortexConfig?.forceCortex === true,
+      });
+      if (!breakeven.useCortex) {
+        this.logger.log('Cortex skipped by breakeven policy', {
+          userId,
+          reason: breakeven.reason,
+        });
+        return {
+          optimizedPrompt: originalPrompt,
+          cortexMetadata: {
+            processingTime: Date.now() - startTime,
+            skipped: true,
+            breakeven: true,
+            breakevenReason: breakeven.reason,
+            breakevenDetails: breakeven,
+          },
+        };
+      }
+
+      // Training session only when we will run the full pipeline (not cache / breakeven skip)
+      sessionId = generateSecureId('cortex');
+      trainingCollector.startSession?.(sessionId, userId, originalPrompt, {
+        service: 'optimization',
+        category: 'prompt_optimization',
+        complexity:
+          originalPrompt.length > 500
+            ? 'complex'
+            : originalPrompt.length > 100
+              ? 'medium'
+              : 'simple',
+        language: 'en',
+      });
 
       this.logger.log('Starting Cortex processing pipeline...', { userId });
 
@@ -557,14 +648,40 @@ export class OptimizationService implements OnModuleDestroy {
         finalAnswerContent = decodingResult.text;
       }
 
+      const decodeQuality = this.cortexAnalyticsService.validateDecodeQuality(
+        originalPrompt,
+        finalAnswerContent,
+      );
+      let decodeQualityFallback = false;
+      if (!decodeQuality.pass) {
+        this.recordCortexFailure();
+        this.logger.warn(
+          'Cortex decode quality gate failed, using direct LLM fallback',
+          {
+            userId,
+            score: decodeQuality.score,
+          },
+        );
+        finalAnswerContent = await this.invokeDirectAnswerFallback(
+          originalPrompt,
+          model || cortexConfig?.model || 'amazon.nova-pro-v1:0',
+        );
+        decodeQualityFallback = true;
+      }
+
       // Token calculation: compare what the user sent (original prompt) vs the LISP-compressed
       // intermediate representation. This reflects true Cortex compression savings.
       // The final answer content length is NOT compared because answers are inherently longer.
-      const lispAnswerTokens = Math.ceil(
-        JSON.stringify(processingResult.output).length / 4,
+      const lispSerialized = JSON.stringify(processingResult.output);
+      const lispAnswerTokens = this.countTextTokens(
+        lispSerialized,
+        model || cortexConfig?.model,
       );
       // Original prompt tokens (what went in)
-      const originalPromptTokens = Math.ceil(originalPrompt.length / 4);
+      const originalPromptTokens = this.countTextTokens(
+        originalPrompt,
+        model || cortexConfig?.model,
+      );
       // The "optimized" token count is the LISP representation sent to the model, not the answer
       const finalResponseTokens = lispAnswerTokens;
 
@@ -585,6 +702,8 @@ export class OptimizationService implements OnModuleDestroy {
           core: 'anthropic.claude-sonnet-4-6',
           decoder: 'mistral.mistral-large-3-675b-instruct',
         },
+        decodeQualityScore: decodeQuality.score,
+        decodeQualityFallback,
         // Use ACTUAL token difference (can be negative)
         tokensSaved: actualTokenDifference,
         reductionPercentage: actualReductionPercentage,
@@ -622,7 +741,13 @@ export class OptimizationService implements OnModuleDestroy {
           createdAt: new Date(),
           accessCount: 0,
         } as any,
-        { ttl: 3600000, type: 'processing' },
+        {
+          ttl: 3600000,
+          type: 'processing',
+          semanticHash: this.cortexCacheService.getSemanticHashForText(
+            originalPrompt,
+          ),
+        },
       );
 
       // Analyze the actual impact of Cortex optimization
@@ -701,6 +826,51 @@ export class OptimizationService implements OnModuleDestroy {
         ),
       };
     }
+  }
+
+  /**
+   * Public entry for Cortex pipeline (e.g. template execution, integrations).
+   */
+  async runCortexPromptOptimization(
+    originalPrompt: string,
+    userId: string,
+    cortexConfig: Record<string, unknown> = {},
+    model?: string,
+    cortexOperation?: string,
+  ): Promise<{
+    optimizedPrompt: string;
+    cortexMetadata: Record<string, unknown>;
+    tokenReduction?: {
+      originalTokens: number;
+      cortexTokens: number;
+      reductionPercentage: number;
+    };
+    impactMetrics?: CortexImpactMetrics;
+  }> {
+    return this.processCortexOptimization(
+      originalPrompt,
+      cortexConfig,
+      userId,
+      model,
+      cortexOperation as CortexOperationType | undefined,
+    );
+  }
+
+  /**
+   * Single-call answer when Cortex decode quality is too low.
+   */
+  private async invokeDirectAnswerFallback(
+    originalPrompt: string,
+    model: string,
+  ): Promise<string> {
+    const res = await this.aiRouterService.invokeModel({
+      model,
+      prompt: `Answer the following query clearly and completely:\n\n${originalPrompt}`,
+      parameters: { temperature: 0.7, maxTokens: 2048 },
+    });
+    return typeof res?.response === 'string'
+      ? res.response
+      : String(res?.response ?? '');
   }
 
   /**
@@ -965,10 +1135,12 @@ REPLY FORMAT (JSON only):
     cortexTokens: number;
     reductionPercentage: number;
   } {
-    const originalTokens = original.length / 4; // Rough estimate
-    const cortexTokens = optimized.length / 4;
+    const originalTokens = this.countTextTokens(original);
+    const cortexTokens = this.countTextTokens(optimized);
     const reductionPercentage =
-      ((originalTokens - cortexTokens) / originalTokens) * 100;
+      originalTokens > 0
+        ? ((originalTokens - cortexTokens) / originalTokens) * 100
+        : 0;
 
     return {
       originalTokens,
@@ -1012,7 +1184,7 @@ REPLY FORMAT (JSON only):
       return this.tokenEstimationCache.get(cacheKey)!;
     }
     const result = this.tokenCounterService.countTokens(text, { model });
-    const tokens = result?.tokens ?? Math.ceil(text.length / 4);
+    const tokens = result?.tokens ?? this.countTextTokens(text, model);
     if (this.tokenEstimationCache.size >= this.TOKEN_CACHE_SIZE) {
       const first = this.tokenEstimationCache.keys().next().value;
       if (first) this.tokenEstimationCache.delete(first);
@@ -1901,9 +2073,14 @@ REPLY FORMAT (JSON only):
             appliedOptimizations: ['compression'],
             metadata: {
               processingTime: 1,
-              originalTokens: createDto.prompt.length / 4,
-              optimizedTokens:
-                createDto.prompt.replace(/\s+/g, ' ').trim().length / 4,
+              originalTokens: this.countTextTokens(
+                createDto.prompt,
+                createDto.model,
+              ),
+              optimizedTokens: this.countTextTokens(
+                createDto.prompt.replace(/\s+/g, ' ').trim(),
+                createDto.model,
+              ),
               techniques: ['compression'],
             },
           };
@@ -3813,7 +3990,15 @@ REPLY FORMAT (JSON only):
 
       const maxContextSize = 2000;
       const currentWindowSize = contextMessages.reduce(
-        (s, m) => s + (m.content?.length ? Math.ceil(m.content.length / 4) : 0),
+        (s, m) =>
+          s +
+          (m.content
+            ? this.countTextTokens(
+                typeof m.content === 'string'
+                  ? m.content
+                  : String(m.content),
+              )
+            : 0),
         0,
       );
       const trimmedContext =

@@ -50,6 +50,7 @@ import { CortexTrainingDataStoreService } from './services/cortex-training-data-
 import { CortexTrainingDataPersistenceService } from './services/cortex-training-data-persistence.service';
 import { CortexRelayService } from './services/cortex-relay.service';
 import { CortexPrimitiveLearnerService } from './services/cortex-primitive-learner.service';
+import { CortexDecisionService } from './services/cortex-decision.service';
 
 // Utils
 import { UtilsModule } from '../utils/utils.module';
@@ -108,6 +109,7 @@ import { CortexStreamingController } from './cortex-streaming.controller';
     CortexTrainingDataPersistenceService,
     CortexRelayService,
     CortexPrimitiveLearnerService,
+    CortexDecisionService,
   ],
   exports: [
     // Main Cortex Service
@@ -138,6 +140,7 @@ import { CortexStreamingController } from './cortex-streaming.controller';
     CortexTrainingDataPersistenceService,
     CortexRelayService,
     CortexPrimitiveLearnerService,
+    CortexDecisionService,
   ],
 })
 export class CortexModule {}
