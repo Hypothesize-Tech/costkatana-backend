@@ -6,7 +6,7 @@ import { BenchmarkFetcherService } from './services/benchmark-fetcher.service';
 import { RoiCalculatorService } from './services/roi-calculator.service';
 import type { CalculateRoiDto } from './dto/calculate-roi.dto';
 import type { RoiResultDto } from './dto/roi-result.dto';
-import { RoiLead } from '../../schemas/roi/roi-lead.schema';
+import { RoiLead } from '../../schemas/misc/roi-lead.schema';
 import { EmailService } from '../email/email.service';
 
 @Injectable()

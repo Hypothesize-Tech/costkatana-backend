@@ -4,7 +4,7 @@ import { ActivityService } from './activity.service';
 import {
   Activity,
   ActivitySchema,
-} from '../../schemas/logging/activity.schema';
+} from '../../schemas/core/activity.schema';
 
 @Module({
   imports: [

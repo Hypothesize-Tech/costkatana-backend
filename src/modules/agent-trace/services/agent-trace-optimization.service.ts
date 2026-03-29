@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Usage } from '../../../schemas/core/usage.schema';
-import { Activity } from '../../../schemas/team-project/activity.schema';
+import { Activity } from '../../../schemas/core/activity.schema';
 
 export interface WorkflowOptimizationRecommendation {
   type: 'immediate' | 'short_term' | 'long_term';

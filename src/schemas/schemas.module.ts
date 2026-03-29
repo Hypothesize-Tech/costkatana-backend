@@ -58,7 +58,7 @@ import {
   Organization,
   OrganizationSchema,
 } from './team-project/organization.schema';
-import { Activity, ActivitySchema } from './team-project/activity.schema';
+import { Activity, ActivitySchema } from './core/activity.schema';
 
 // Integration schemas
 import {
@@ -143,7 +143,7 @@ import {
 import {
   DeadLetterJob,
   DeadLetterJobSchema,
-} from './jobs/dead-letter-job.schema';
+} from './core/dead-letter-job.schema';
 
 // Analytics schemas
 import {
@@ -377,7 +377,7 @@ import {
 import {
   GatewayProviderMetrics,
   GatewayProviderMetricsSchema,
-} from './gateway/gateway-provider-metrics.schema';
+} from './ai/gateway-provider-metrics.schema';
 
 // Auto-simulation schemas
 import {

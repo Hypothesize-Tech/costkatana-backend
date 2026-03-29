@@ -11,7 +11,7 @@ import {
 import {
   RAGExample,
   RAGExampleDocument,
-} from '../../../schemas/rag/rag-example.schema';
+} from '../../../schemas/document/rag-example.schema';
 
 export interface DemonstrateModuleConfig extends ModuleConfig {
   numExamples?: number;

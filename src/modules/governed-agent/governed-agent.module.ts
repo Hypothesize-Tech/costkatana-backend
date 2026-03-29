@@ -18,7 +18,7 @@ import { GenAITelemetryService } from '../../utils/genaiTelemetry';
 import {
   GovernedTask,
   GovernedTaskSchema,
-} from '../../schemas/governed-agent/governed-task.schema';
+} from '../../schemas/agent/governed-task.schema';
 import {
   ChatMessage,
   ChatMessageSchema,

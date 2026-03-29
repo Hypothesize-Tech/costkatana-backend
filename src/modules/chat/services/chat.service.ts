@@ -20,7 +20,7 @@ import {
 import {
   GovernedTask,
   GovernedTaskDocument,
-} from '../../../schemas/governed-agent/governed-task.schema';
+} from '../../../schemas/agent/governed-task.schema';
 import {
   ChatTaskLink,
   ChatTaskLinkDocument,

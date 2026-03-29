@@ -11,7 +11,7 @@ import type { GatewayContext } from '../interfaces/gateway.interfaces';
 import {
   GatewayProviderMetrics,
   GatewayProviderMetricsDocument,
-} from '../../../schemas/gateway/gateway-provider-metrics.schema';
+} from '../../../schemas/ai/gateway-provider-metrics.schema';
 import { CostSimulatorService } from '../../cost-simulator/cost-simulator.service';
 import { estimateTokens } from '../../../utils/tokenCounter';
 

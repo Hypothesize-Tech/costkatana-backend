@@ -22,7 +22,7 @@ import { Usage, UsageSchema } from '../../schemas/core/usage.schema';
 import {
   Activity,
   ActivitySchema,
-} from '../../schemas/logging/activity.schema';
+} from '../../schemas/core/activity.schema';
 import { Alert, AlertSchema } from '../../schemas/core/alert.schema';
 import {
   OptimizationTemplate,

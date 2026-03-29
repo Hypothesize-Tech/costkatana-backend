@@ -10,7 +10,7 @@ import {
 import {
   Activity,
   ActivitySchema,
-} from '../../schemas/team-project/activity.schema';
+} from '../../schemas/core/activity.schema';
 import { CommonModule } from '../../common/common.module';
 import { WorkflowModule } from '../workflow/workflow.module';
 import { GuardrailsModule } from '../guardrails/guardrails.module';

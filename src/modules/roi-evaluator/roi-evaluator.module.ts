@@ -4,7 +4,7 @@ import { RoiEvaluatorController } from './roi-evaluator.controller';
 import { RoiEvaluatorService } from './roi-evaluator.service';
 import { BenchmarkFetcherService } from './services/benchmark-fetcher.service';
 import { RoiCalculatorService } from './services/roi-calculator.service';
-import { RoiLead, RoiLeadSchema } from '../../schemas/roi/roi-lead.schema';
+import { RoiLead, RoiLeadSchema } from '../../schemas/misc/roi-lead.schema';
 import { UtilsModule } from '../utils/utils.module';
 import { EmailModule } from '../email/email.module';
 

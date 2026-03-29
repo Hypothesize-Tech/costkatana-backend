@@ -8,7 +8,7 @@ import { AICostTrackingService } from './ai-cost-tracking.service';
 import {
   AICallRecord,
   AICallRecordSchema,
-} from '../../schemas/admin/ai-call-record.schema';
+} from '../../schemas/ai/ai-call-record.schema';
 
 @Module({
   imports: [

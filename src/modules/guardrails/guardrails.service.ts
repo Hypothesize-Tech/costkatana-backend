@@ -11,7 +11,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import mongoose from 'mongoose';
 import { Usage } from '../../schemas/core/usage.schema';
-import { Activity } from '../../schemas/team-project/activity.schema';
+import { Activity } from '../../schemas/core/activity.schema';
 import { Alert } from '../../schemas/core/alert.schema';
 import { Project } from '../../schemas/team-project/project.schema';
 import { User } from '../../schemas/user/user.schema';

@@ -31,7 +31,7 @@ import {
 import {
   DeadLetterJob,
   DeadLetterJobSchema,
-} from '../../schemas/jobs/dead-letter-job.schema';
+} from '../../schemas/core/dead-letter-job.schema';
 import { Usage, UsageSchema } from '../../schemas/core/usage.schema';
 import {
   Project,

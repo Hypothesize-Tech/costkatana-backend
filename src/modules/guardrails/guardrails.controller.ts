@@ -22,7 +22,7 @@ import { SimulateUsageDto } from './dto/simulate-usage.dto';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import mongoose from 'mongoose';
-import { Activity } from '../../schemas/team-project/activity.schema';
+import { Activity } from '../../schemas/core/activity.schema';
 import { Alert } from '../../schemas/core/alert.schema';
 import { Usage } from '../../schemas/core/usage.schema';
 

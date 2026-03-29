@@ -13,7 +13,7 @@ import axios from 'axios';
 import {
   GeminiCache,
   GeminiCacheDocument,
-} from '../../../../schemas/prompt-template/gemini-cache.schema';
+} from '../../../../schemas/prompt/gemini-cache.schema';
 
 export interface GeminiCacheContent {
   role: 'user' | 'model';
