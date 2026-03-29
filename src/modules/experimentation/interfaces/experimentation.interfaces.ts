@@ -22,7 +22,10 @@ export interface ExperimentResult {
 }
 
 export interface ModelComparisonRequest {
-  prompt: string;
+  /** Single prompt (default path); optional when `prompts` is provided */
+  prompt?: string;
+  /** When set, runs comparison across each prompt and aggregates per model */
+  prompts?: string[];
   models: Array<{
     provider: string;
     model: string;
@@ -87,6 +90,7 @@ export interface ComparisonProgress {
   message: string;
   results?: any[];
   error?: string;
+  experimentId?: string;
   analysis?: {
     winner?: { model: string; reason: string };
     costPerformanceAnalysis?: string;
@@ -131,6 +135,14 @@ export interface CreateWhatIfScenarioRequest {
   changes: any;
   timeframe: any;
   baselineData: any;
+  lifecycleStatus?:
+    | 'draft'
+    | 'approved'
+    | 'implemented'
+    | 'measured'
+    | 'created'
+    | 'analyzed'
+    | 'applied';
 }
 
 export interface WhatIfScenario {
@@ -144,6 +156,10 @@ export interface WhatIfScenario {
   isUserCreated: boolean;
   createdAt: Date;
   analysis?: any;
+  implementedAt?: Date;
+  measuredAt?: Date;
+  projectedMonthlySavings?: number;
+  actualMonthlySavings?: number;
 }
 
 export interface EstimateExperimentCostRequest {

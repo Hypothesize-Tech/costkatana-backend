@@ -10,6 +10,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Param,
   Body,
@@ -19,7 +20,9 @@ import {
   UnauthorizedException,
   NotFoundException,
   Logger,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { Sse, MessageEvent } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { JwtService } from '@nestjs/jwt';
@@ -117,15 +120,21 @@ export class ExperimentationController {
    */
   @Get('available-models')
   async getAvailableModels() {
-    const availableRoutes = await this.aiRouterService.getAvailableModels();
+    const allRoutes = await this.aiRouterService.getFullModelRegistry();
 
-    const data = availableRoutes.map((route: ModelRoute) => ({
+    const data = allRoutes.map((route: ModelRoute) => ({
       provider: route.provider,
       model: route.model,
       region: route.region,
       status: route.isActive ? 'available' : 'unavailable',
+      availabilityStatus: route.isActive
+        ? 'available'
+        : ('not_configured' as const),
       healthScore: route.healthScore,
       priority: route.priority,
+      notes: route.isActive
+        ? undefined
+        : 'Enable this model in AWS Bedrock (account/region) or adjust router config.',
     }));
 
     return {
@@ -134,7 +143,7 @@ export class ExperimentationController {
       metadata: {
         totalModels: data.length,
         providers: [...new Set(data.map((m) => m.provider))],
-        note: 'Only showing models accessible in your AWS account',
+        note: 'Includes inactive routes so you can see the full catalog; inactive models are greyed out in the UI.',
         generatedAt: new Date().toISOString(),
       },
     };
@@ -379,6 +388,92 @@ export class ExperimentationController {
       data: simulation,
       message: 'Real-time simulation completed successfully',
     };
+  }
+
+  /**
+   * Persisted comparison job (SSE reconnect / poll)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('comparison-job/:sessionId')
+  async getComparisonJob(
+    @Param('sessionId') sessionId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    const job = await this.experimentationService.getComparisonJobState(
+      sessionId,
+      userId,
+    );
+    if (!job) {
+      throw new NotFoundException('Comparison job not found');
+    }
+    return { success: true, data: job };
+  }
+
+  /**
+   * Fine-tuning ROI / usage analysis (heuristic)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('fine-tuning-analysis')
+  async getFineTuningAnalysis(
+    @CurrentUser('id') userId: string,
+    @Query('projectId') projectId?: string,
+  ) {
+    const data = await this.experimentationService.getFineTuningAnalysis(
+      userId,
+      projectId ?? 'default',
+    );
+    return { success: true, data };
+  }
+
+  /**
+   * Update what-if scenario lifecycle status
+   */
+  @UseGuards(JwtAuthGuard)
+  @Patch('what-if-scenarios/:scenarioName/lifecycle')
+  async updateWhatIfLifecycle(
+    @Param('scenarioName') scenarioName: string,
+    @Body()
+    body: { status: string; projectedMonthlySavings?: number },
+    @CurrentUser('id') userId: string,
+  ) {
+    const updated =
+      await this.experimentationService.updateWhatIfScenarioLifecycle(
+        userId,
+        scenarioName,
+        body.status,
+        { projectedMonthlySavings: body.projectedMonthlySavings },
+      );
+    if (!updated) {
+      throw new NotFoundException('Scenario not found');
+    }
+    return {
+      success: true,
+      data: updated,
+      message: 'Scenario lifecycle updated',
+    };
+  }
+
+  /**
+   * Export experiment results (JSON or CSV) — must be registered before GET :experimentId
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get(':experimentId/export')
+  async exportExperimentResults(
+    @Param('experimentId') experimentId: string,
+    @Query('format') format: string | undefined,
+    @CurrentUser('id') userId: string,
+    @Res() res: Response,
+  ) {
+    const fmt = format === 'csv' ? 'csv' : 'json';
+    const { buffer, contentType, filename } =
+      await this.experimentationService.exportExperimentResults(
+        experimentId,
+        userId,
+        fmt,
+      );
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   }
 
   /**

@@ -134,10 +134,39 @@ export class WhatIfScenario {
 
   @Prop({
     type: String,
-    enum: ['created', 'analyzed', 'applied'],
-    default: 'created',
+    enum: [
+      'draft',
+      'approved',
+      'implemented',
+      'measured',
+      'created',
+      'analyzed',
+      'applied',
+    ],
+    default: 'draft',
   })
-  status: 'created' | 'analyzed' | 'applied';
+  status:
+    | 'draft'
+    | 'approved'
+    | 'implemented'
+    | 'measured'
+    | 'created'
+    | 'analyzed'
+    | 'applied';
+
+  /** When status becomes implemented (optional) */
+  @Prop({ type: Date })
+  implementedAt?: Date;
+
+  /** Actual vs projected reconciliation */
+  @Prop({ type: Number })
+  projectedMonthlySavings?: number;
+
+  @Prop({ type: Number })
+  actualMonthlySavings?: number;
+
+  @Prop({ type: Date })
+  measuredAt?: Date;
 
   @Prop({ type: Boolean, default: true })
   isUserCreated: boolean;

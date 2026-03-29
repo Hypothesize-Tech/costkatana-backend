@@ -5,10 +5,16 @@
  * Handles model comparisons, what-if scenarios, fine-tuning analysis, and real-time experiments.
  */
 
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { JwtService } from '@nestjs/jwt';
 import { EventEmitter } from 'events';
 import { LRUCache } from 'lru-cache';
@@ -25,6 +31,10 @@ import {
   Experiment,
   ExperimentDocument,
 } from '../../../schemas/analytics/experiment.schema';
+import {
+  ExperimentSession,
+  ExperimentSessionDocument,
+} from '../../../schemas/analytics/experiment-session.schema';
 import {
   WhatIfScenario,
   WhatIfScenarioDocument,
@@ -77,6 +87,8 @@ export class ExperimentationService {
   constructor(
     @InjectModel(Experiment.name)
     private experimentModel: Model<ExperimentDocument>,
+    @InjectModel(ExperimentSession.name)
+    private experimentSessionModel: Model<ExperimentSessionDocument>,
     @InjectModel(WhatIfScenario.name)
     private whatIfScenarioModel: Model<WhatIfScenarioDocument>,
     @InjectModel(Usage.name) private usageModel: Model<UsageDocument>,
@@ -93,6 +105,214 @@ export class ExperimentationService {
    */
   getProgressEmitter(): EventEmitter {
     return this.progressEmitter;
+  }
+
+  /**
+   * Resolve prompt list: prompts[] wins over single prompt
+   */
+  getEffectivePrompts(request: ModelComparisonRequest): string[] {
+    const fromList =
+      request.prompts?.filter((p) => p && p.trim().length > 0) ?? [];
+    if (fromList.length > 0) return fromList;
+    if (request.prompt?.trim()) return [request.prompt.trim()];
+    return [];
+  }
+
+  /**
+   * Persisted job state for SSE reconnect (ExperimentSession)
+   */
+  async getComparisonJobState(sessionId: string, userId: string) {
+    const doc = await this.experimentSessionModel.findOne({ sessionId }).exec();
+    if (!doc) return null;
+    if (doc.userId.toString() !== userId) {
+      throw new ForbiddenException('Not authorized for this comparison job');
+    }
+    return {
+      sessionId: doc.sessionId,
+      status: doc.status,
+      progress: doc.progress,
+      stage: doc.stage,
+      message: doc.message,
+      partialResults: doc.partialResults,
+      experimentId: doc.experimentId,
+      error: doc.error,
+      lastUpdatedAt: doc.lastUpdatedAt,
+    };
+  }
+
+  private async upsertComparisonJobSession(
+    sessionId: string,
+    userId: string,
+  ): Promise<void> {
+    await this.experimentSessionModel.findOneAndUpdate(
+      { sessionId },
+      {
+        $set: {
+          userId: new Types.ObjectId(userId),
+          sessionId,
+          experimentType: 'model_comparison',
+          status: 'active',
+          progress: 0,
+          stage: 'starting',
+          message: 'Initializing model comparison...',
+          lastUpdatedAt: new Date(),
+        },
+      },
+      { upsert: true },
+    );
+  }
+
+  private async persistComparisonJobFromProgress(
+    sessionId: string,
+    p: ComparisonProgress,
+  ): Promise<void> {
+    try {
+      const jobStatus =
+        p.stage === 'completed'
+          ? 'completed'
+          : p.stage === 'failed'
+            ? 'cancelled'
+            : 'active';
+      await this.experimentSessionModel.findOneAndUpdate(
+        { sessionId },
+        {
+          $set: {
+            progress: p.progress,
+            stage: p.stage,
+            message: p.message,
+            partialResults: p.results,
+            experimentId: p.experimentId,
+            error: p.error,
+            status: jobStatus,
+            lastUpdatedAt: new Date(),
+          },
+        },
+        { upsert: false },
+      );
+    } catch (e) {
+      this.logger.warn('persistComparisonJobFromProgress failed', e);
+    }
+  }
+
+  private mergeStaticModelResults(
+    partials: ModelComparisonResult[],
+    model: ModelComparisonRequest['models'][0],
+  ): ModelComparisonResult {
+    const n = partials.length;
+    if (n === 1) return partials[0];
+    const avgCost =
+      partials.reduce((s, p) => s + p.metrics.cost, 0) / n;
+    const avgLatency =
+      partials.reduce((s, p) => s + p.metrics.latency, 0) / n;
+    const avgQuality =
+      partials.reduce((s, p) => s + (p.metrics.qualityScore ?? 0), 0) / n;
+    const totalTokens = partials.reduce(
+      (s, p) => s + p.metrics.tokenCount,
+      0,
+    );
+    const response = partials
+      .map((p, i) => `--- Prompt ${i + 1} ---\n${p.response}`)
+      .join('\n\n');
+    const first = partials[0];
+    return {
+      id: `${model.provider}-${model.model}-agg-${Date.now()}`,
+      provider: model.provider,
+      model: model.model,
+      response,
+      metrics: {
+        cost: avgCost,
+        latency: avgLatency,
+        tokenCount: Math.round(totalTokens / n),
+        qualityScore: Math.round(avgQuality),
+        errorRate: first.metrics.errorRate,
+      },
+      performance: {
+        responseTime: avgLatency,
+        throughput: 1000 / Math.max(avgLatency, 1),
+        reliability: first.performance.reliability,
+      },
+      costBreakdown: {
+        inputTokens: Math.round(
+          partials.reduce((s, p) => s + p.costBreakdown.inputTokens, 0) / n,
+        ),
+        outputTokens: Math.round(
+          partials.reduce((s, p) => s + p.costBreakdown.outputTokens, 0) / n,
+        ),
+        inputCost:
+          partials.reduce((s, p) => s + p.costBreakdown.inputCost, 0) / n,
+        outputCost:
+          partials.reduce((s, p) => s + p.costBreakdown.outputCost, 0) / n,
+        totalCost:
+          partials.reduce((s, p) => s + p.costBreakdown.totalCost, 0) / n,
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  private mergeRealtimeRoundResults(
+    rounds: RealTimeComparisonResult[][],
+    models: ModelComparisonRequest['models'],
+  ): RealTimeComparisonResult[] {
+    if (rounds.length === 0) return [];
+    if (rounds.length === 1) return rounds[0];
+
+    return models.map((model, modelIndex) => {
+      const slices = rounds
+        .map((r) => r[modelIndex])
+        .filter((x): x is RealTimeComparisonResult => !!x);
+      if (slices.length === 0) {
+        throw new Error(`No results for model ${model.model}`);
+      }
+      if (slices.length === 1) return slices[0];
+
+      const n = slices.length;
+      const avgActual =
+        slices.reduce((s, x) => s + (x.actualCost ?? 0), 0) / n;
+      const avgExec =
+        slices.reduce((s, x) => s + (x.executionTime ?? 0), 0) / n;
+      const combinedResponse = slices
+        .map((s, i) => `--- Prompt ${i + 1} ---\n${s.response ?? ''}`)
+        .join('\n\n');
+
+      const mergedMetrics = { ...slices[0].metrics };
+      mergedMetrics.cost = avgActual;
+      mergedMetrics.latency = avgExec;
+      mergedMetrics.tokenCount = Math.round(
+        slices.reduce((s, x) => s + (x.metrics?.tokenCount ?? 0), 0) / n,
+      );
+
+      const mergedCostBreakdown = { ...slices[0].costBreakdown };
+      mergedCostBreakdown.totalCost = avgActual;
+      mergedCostBreakdown.inputCost =
+        slices.reduce((s, x) => s + (x.costBreakdown?.inputCost ?? 0), 0) / n;
+      mergedCostBreakdown.outputCost =
+        slices.reduce((s, x) => s + (x.costBreakdown?.outputCost ?? 0), 0) / n;
+      mergedCostBreakdown.inputTokens = Math.round(
+        slices.reduce((s, x) => s + (x.costBreakdown?.inputTokens ?? 0), 0) /
+          n,
+      );
+      mergedCostBreakdown.outputTokens = Math.round(
+        slices.reduce((s, x) => s + (x.costBreakdown?.outputTokens ?? 0), 0) /
+          n,
+      );
+
+      return {
+        ...slices[0],
+        id: `${slices[0].id}_merged_${Date.now()}`,
+        response: combinedResponse,
+        metrics: mergedMetrics,
+        performance: {
+          responseTime: avgExec,
+          throughput:
+            combinedResponse.length / Math.max(avgExec / 1000, 1),
+          reliability: slices[0].performance.reliability,
+        },
+        costBreakdown: mergedCostBreakdown,
+        executionTime: avgExec,
+        actualCost: avgActual,
+        aiEvaluation: undefined,
+      };
+    });
   }
 
   /**
@@ -260,13 +480,16 @@ export class ExperimentationService {
     const {
       sessionId,
       executeOnBedrock,
-      prompt,
       models,
       evaluationCriteria,
       comparisonMode,
     } = request;
 
-    // Defensive validation - ensures request passed validation (models/evaluationCriteria required)
+    const effectivePrompts = this.getEffectivePrompts(request);
+    if (effectivePrompts.length === 0) {
+      throw new Error('Prompt is required');
+    }
+
     if (!Array.isArray(models) || models.length === 0) {
       throw new Error('At least one model is required for comparison');
     }
@@ -277,97 +500,113 @@ export class ExperimentationService {
       throw new Error('Session ID is required for real-time comparison');
     }
 
+    const combinedPromptLabel = effectivePrompts.join('\n---\n');
+
     try {
       const experimentStartTime = Date.now();
+      await this.upsertComparisonJobSession(sessionId, userId);
 
-      // Initialize progress
       this.emitProgress(
         sessionId,
         'starting',
         0,
-        'Initializing model comparison...',
+        `Initializing model comparison (${effectivePrompts.length} prompt${effectivePrompts.length > 1 ? 's' : ''})...`,
       );
 
-      const results: RealTimeComparisonResult[] = [];
+      const rounds: RealTimeComparisonResult[][] = [];
       const totalModels = models.length;
-      let completedModels = 0;
+      const BATCH_SIZE = 3;
 
-      // Execute models in parallel batches for optimal performance
-      const BATCH_SIZE = 3; // Process 3 models concurrently to avoid rate limits
-      const batches = this.chunkArray(models, BATCH_SIZE);
+      for (let pi = 0; pi < effectivePrompts.length; pi++) {
+        const promptText = effectivePrompts[pi];
+        const roundResults: RealTimeComparisonResult[] = [];
+        let completedModels = 0;
+        const batches = this.chunkArray(models, BATCH_SIZE);
 
-      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-        const batch = batches[batchIndex];
+        this.emitProgress(
+          sessionId,
+          'executing',
+          Math.round((pi / Math.max(effectivePrompts.length, 1)) * 40),
+          `Prompt ${pi + 1}/${effectivePrompts.length}: running models...`,
+        );
 
-        // Execute batch in parallel
-        const batchPromises = batch.map(async (model, modelIndex) => {
-          const globalIndex = batchIndex * BATCH_SIZE + modelIndex;
-          const progressPercent = Math.round((globalIndex / totalModels) * 70);
+        for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+          const batch = batches[batchIndex];
 
-          this.emitProgress(
-            sessionId,
-            'executing',
-            progressPercent,
-            `Executing ${model.model} on ${executeOnBedrock ? 'Bedrock' : 'simulated environment'}...`,
-            model.model,
-          );
-
-          try {
-            const result = await this.executeModelComparison(
-              userId,
-              model,
-              prompt,
-              executeOnBedrock,
-              comparisonMode,
+          const batchPromises = batch.map(async (model, modelIndex) => {
+            const globalIndex = batchIndex * BATCH_SIZE + modelIndex;
+            const progressPercent = Math.round(
+              (pi / effectivePrompts.length) * 40 +
+                (globalIndex / totalModels) *
+                  (40 / Math.max(effectivePrompts.length, 1)),
             );
 
-            completedModels++;
-            const newProgress = Math.round(
-              (completedModels / totalModels) * 70,
-            );
             this.emitProgress(
               sessionId,
               'executing',
-              newProgress,
-              `Completed ${model.model}`,
-            );
-
-            return result;
-          } catch (error) {
-            completedModels++;
-            const newProgress = Math.round(
-              (completedModels / totalModels) * 70,
-            );
-            this.emitProgress(
-              sessionId,
-              'executing',
-              newProgress,
-              `Failed ${model.model}: ${error.message}`,
+              Math.min(69, progressPercent),
+              `Prompt ${pi + 1}/${effectivePrompts.length}: ${model.model} on ${executeOnBedrock ? 'Bedrock' : 'API'}...`,
               model.model,
             );
-            throw error;
+
+            try {
+              const result = await this.executeModelComparison(
+                userId,
+                model,
+                promptText,
+                executeOnBedrock,
+                comparisonMode,
+              );
+
+              completedModels++;
+              this.emitProgress(
+                sessionId,
+                'executing',
+                Math.min(
+                  69,
+                  Math.round(
+                    (pi / effectivePrompts.length) * 40 +
+                      (completedModels / totalModels) *
+                        (40 / Math.max(effectivePrompts.length, 1)),
+                  ),
+                ),
+                `Completed ${model.model} (prompt ${pi + 1})`,
+              );
+
+              return result;
+            } catch (error) {
+              completedModels++;
+              this.emitProgress(
+                sessionId,
+                'executing',
+                Math.min(69, progressPercent),
+                `Failed ${model.model}: ${error.message}`,
+                model.model,
+              );
+              throw error;
+            }
+          });
+
+          const batchResults = await Promise.allSettled(batchPromises);
+
+          for (const promiseResult of batchResults) {
+            if (promiseResult.status === 'fulfilled') {
+              roundResults.push(promiseResult.value);
+            } else {
+              this.logger.error('Model comparison failed:', promiseResult.reason);
+            }
           }
-        });
 
-        // Wait for current batch to complete before starting next
-        const batchResults = await Promise.allSettled(batchPromises);
-
-        // Process results and collect successful ones
-        for (const promiseResult of batchResults) {
-          if (promiseResult.status === 'fulfilled') {
-            results.push(promiseResult.value);
-          } else {
-            this.logger.error('Model comparison failed:', promiseResult.reason);
+          if (batchIndex < batches.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
           }
         }
 
-        // Small delay between batches to prevent overwhelming the system
-        if (batchIndex < batches.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
+        rounds.push(roundResults);
       }
 
-      // Start AI evaluation phase
+      let results = this.mergeRealtimeRoundResults(rounds, models);
+
       this.emitProgress(
         sessionId,
         'evaluating',
@@ -375,17 +614,15 @@ export class ExperimentationService {
         'Performing AI-driven evaluation...',
       );
 
-      // Perform AI evaluation if we have results
       if (results.length > 0) {
         try {
           const evaluationResults = await this.performAIEvaluation(
             results,
             evaluationCriteria,
-            prompt,
+            combinedPromptLabel,
             models,
           );
 
-          // Attach AI evaluations to results
           evaluationResults.forEach((evaluation, index) => {
             if (results[index]) {
               results[index].aiEvaluation = evaluation;
@@ -393,7 +630,6 @@ export class ExperimentationService {
           });
         } catch (error) {
           this.logger.error('AI evaluation failed:', error);
-          // Continue without AI evaluation - still provide basic comparison
         }
       }
 
@@ -404,7 +640,6 @@ export class ExperimentationService {
         'Generating comparison analysis...',
       );
 
-      // Generate comprehensive analysis
       let analysis;
       try {
         analysis = await this.generateComparisonAnalysis(
@@ -417,7 +652,6 @@ export class ExperimentationService {
         analysis = { summary: 'Analysis unavailable', recommendations: [] };
       }
 
-      // Create experiment record
       const experimentData = {
         userId,
         name: `Model Comparison - ${new Date().toISOString().split('T')[0]}`,
@@ -426,7 +660,8 @@ export class ExperimentationService {
         startTime: new Date(),
         endTime: new Date(),
         results: {
-          prompt,
+          prompt: combinedPromptLabel,
+          prompts: effectivePrompts,
           models: models.map((m) => ({ provider: m.provider, model: m.model })),
           evaluationCriteria,
           comparisonMode,
@@ -442,6 +677,7 @@ export class ExperimentationService {
 
       const experiment = new this.experimentModel(experimentData);
       await experiment.save();
+      const experimentId = experiment._id.toString();
 
       this.emitProgress(
         sessionId,
@@ -452,6 +688,7 @@ export class ExperimentationService {
         results,
         undefined,
         analysis,
+        experimentId,
       );
     } catch (error) {
       this.logger.error('Real-time model comparison failed:', error);
@@ -463,6 +700,8 @@ export class ExperimentationService {
         undefined,
         [],
         error.message,
+        undefined,
+        undefined,
       );
       throw error;
     }
@@ -480,6 +719,7 @@ export class ExperimentationService {
     results?: any[],
     error?: string,
     analysis?: ComparisonProgress['analysis'],
+    experimentId?: string,
   ): void {
     const progressUpdate: ComparisonProgress = {
       sessionId,
@@ -490,9 +730,11 @@ export class ExperimentationService {
       results,
       error,
       analysis,
+      experimentId,
     };
 
     this.progressEmitter.emit('progress', progressUpdate);
+    void this.persistComparisonJobFromProgress(sessionId, progressUpdate);
   }
 
   /**
@@ -1738,11 +1980,8 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
     ) {
       throw new Error('At least one evaluation criterion is required');
     }
-    if (
-      !request?.prompt ||
-      typeof request.prompt !== 'string' ||
-      request.prompt.trim().length === 0
-    ) {
+    const effectivePrompts = this.getEffectivePrompts(request);
+    if (effectivePrompts.length === 0) {
       throw new Error('Prompt is required');
     }
 
@@ -1751,130 +1990,130 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
       const iterations = request.iterations || 1;
       const results: ModelComparisonResult[] = [];
 
-      // Run comparison for each model
       for (let i = 0; i < request.models.length; i++) {
         const model = request.models[i];
         const modelStartTime = Date.now();
+        const partials: ModelComparisonResult[] = [];
 
-        try {
-          this.logger.log(
-            `Running comparison for ${model.provider}/${model.model}`,
-          );
-
-          // Get model response
-          let response = '';
-          let actualCost = 0;
-          let tokenCount = 0;
-          let executionTime = 0;
-
-          // Use real API calls for model comparison (default: true when Bedrock configured)
-          const realCallsEnabled =
-            this.configService.get('ENABLE_REAL_MODEL_COMPARISON', 'true') ===
-            'true';
-
-          if (realCallsEnabled) {
-            const result = await this.callModelAPI(
-              userId,
-              model,
-              request.prompt,
-              false,
-              'balanced',
-            );
-            response = result.response;
-            actualCost = result.actualCost;
-            executionTime = result.executionTime;
-            tokenCount = this.estimateTokenCount(request.prompt, response);
-          } else {
-            // Simulation not supported in production - require real API calls
-            throw new Error(
-              `Model experimentation requires real API execution. ` +
-                `ENABLE_REAL_MODEL_COMPARISON must be set to 'true' to run actual model comparisons. ` +
-                `Cannot simulate responses for ${model.provider}/${model.model}.`,
-            );
-          }
-
-          // Calculate quality score based on evaluation criteria
-          let qualityScore = 0;
+        for (const promptText of effectivePrompts) {
           try {
-            qualityScore = await this.performBasicQualityEvaluation(
-              request.prompt,
-              response,
-              request.evaluationCriteria,
+            this.logger.log(
+              `Running comparison for ${model.provider}/${model.model} (prompt slice)`,
             );
+
+            let response = '';
+            let actualCost = 0;
+            let tokenCount = 0;
+            let executionTime = 0;
+
+            const realCallsEnabled =
+              this.configService.get('ENABLE_REAL_MODEL_COMPARISON', 'true') ===
+              'true';
+
+            if (realCallsEnabled) {
+              const result = await this.callModelAPI(
+                userId,
+                model,
+                promptText,
+                false,
+                'balanced',
+              );
+              response = result.response;
+              actualCost = result.actualCost;
+              executionTime = result.executionTime;
+              tokenCount = this.estimateTokenCount(promptText, response);
+            } else {
+              throw new Error(
+                `Model experimentation requires real API execution. ` +
+                  `ENABLE_REAL_MODEL_COMPARISON must be set to 'true' to run actual model comparisons. ` +
+                  `Cannot simulate responses for ${model.provider}/${model.model}.`,
+              );
+            }
+
+            let qualityScore = 0;
+            try {
+              qualityScore = await this.performBasicQualityEvaluation(
+                promptText,
+                response,
+                request.evaluationCriteria,
+              );
+            } catch (error) {
+              this.logger.error(
+                'Quality evaluation failed, using default score:',
+                error,
+              );
+              qualityScore = 70;
+            }
+
+            const modelResult: ModelComparisonResult = {
+              id: `${model.provider}-${model.model}-${Date.now()}`,
+              provider: model.provider,
+              model: model.model,
+              response,
+              metrics: {
+                cost: actualCost,
+                latency: executionTime,
+                tokenCount,
+                qualityScore,
+                errorRate: 0,
+              },
+              performance: {
+                responseTime: executionTime,
+                throughput: 1000 / Math.max(executionTime, 1),
+                reliability: 1.0,
+              },
+              costBreakdown: {
+                inputTokens: this.estimateTokenCount(promptText, ''),
+                outputTokens: this.estimateTokenCount('', response),
+                inputCost: actualCost * 0.3,
+                outputCost: actualCost * 0.7,
+                totalCost: actualCost,
+              },
+              timestamp: new Date().toISOString(),
+            };
+
+            partials.push(modelResult);
           } catch (error) {
             this.logger.error(
-              'Quality evaluation failed, using default score:',
+              `Model comparison failed for ${model.provider}/${model.model}:`,
               error,
             );
-            qualityScore = 70; // Default score
+            partials.push({
+              id: `${model.provider}-${model.model}-${Date.now()}`,
+              provider: model.provider,
+              model: model.model,
+              response: '',
+              metrics: {
+                cost: 0,
+                latency: Date.now() - modelStartTime,
+                tokenCount: 0,
+                qualityScore: 0,
+                errorRate: 1,
+              },
+              performance: {
+                responseTime: Date.now() - modelStartTime,
+                throughput: 0,
+                reliability: 0,
+              },
+              costBreakdown: {
+                inputTokens: 0,
+                outputTokens: 0,
+                inputCost: 0,
+                outputCost: 0,
+                totalCost: 0,
+              },
+              timestamp: new Date().toISOString(),
+            });
           }
-
-          const modelResult: ModelComparisonResult = {
-            id: `${model.provider}-${model.model}-${Date.now()}`,
-            provider: model.provider,
-            model: model.model,
-            response,
-            metrics: {
-              cost: actualCost,
-              latency: executionTime,
-              tokenCount,
-              qualityScore,
-              errorRate: 0,
-            },
-            performance: {
-              responseTime: executionTime,
-              throughput: 1000 / executionTime, // requests per second
-              reliability: 1.0, // Assume successful
-            },
-            costBreakdown: {
-              inputTokens: this.estimateTokenCount(request.prompt, ''),
-              outputTokens: this.estimateTokenCount('', response),
-              inputCost: actualCost * 0.3, // Estimate
-              outputCost: actualCost * 0.7, // Estimate
-              totalCost: actualCost,
-            },
-            timestamp: new Date().toISOString(),
-          };
-
-          results.push(modelResult);
-        } catch (error) {
-          this.logger.error(
-            `Model comparison failed for ${model.provider}/${model.model}:`,
-            error,
-          );
-
-          // Add failed result
-          results.push({
-            id: `${model.provider}-${model.model}-${Date.now()}`,
-            provider: model.provider,
-            model: model.model,
-            response: '',
-            metrics: {
-              cost: 0,
-              latency: Date.now() - modelStartTime,
-              tokenCount: 0,
-              qualityScore: 0,
-              errorRate: 1,
-            },
-            performance: {
-              responseTime: Date.now() - modelStartTime,
-              throughput: 0,
-              reliability: 0,
-            },
-            costBreakdown: {
-              inputTokens: 0,
-              outputTokens: 0,
-              inputCost: 0,
-              outputCost: 0,
-              totalCost: 0,
-            },
-            timestamp: new Date().toISOString(),
-          });
         }
+
+        results.push(this.mergeStaticModelResults(partials, model));
       }
 
       const endTime = new Date();
       const duration = endTime.getTime() - startTime.getTime();
+
+      const combinedPromptLabel = effectivePrompts.join('\n---\n');
 
       const experimentData = {
         userId,
@@ -1884,7 +2123,8 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
         startTime,
         endTime,
         results: {
-          prompt: request.prompt,
+          prompt: combinedPromptLabel,
+          prompts: effectivePrompts,
           models: request.models.map((m) => ({
             provider: m.provider,
             model: m.model,
@@ -1963,6 +2203,90 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
       this.logger.error('Error getting experiment by ID:', error.message);
       return null;
     }
+  }
+
+  /**
+   * Export experiment as JSON or CSV (attachment) for downloads from the UI.
+   */
+  async exportExperimentResults(
+    experimentId: string,
+    userId: string,
+    format: 'json' | 'csv',
+  ): Promise<{ buffer: Buffer; contentType: string; filename: string }> {
+    const experiment = await this.getExperimentById(experimentId, userId);
+    if (!experiment) {
+      throw new NotFoundException('Experiment not found');
+    }
+
+    if (format === 'json') {
+      return {
+        buffer: Buffer.from(JSON.stringify(experiment, null, 2), 'utf-8'),
+        contentType: 'application/json; charset=utf-8',
+        filename: `experiment-${experimentId}.json`,
+      };
+    }
+
+    const lines: string[] = [];
+    const esc = (v: unknown) => {
+      const s = v === null || v === undefined ? '' : String(v);
+      if (/[",\r\n]/.test(s)) {
+        return `"${s.replace(/"/g, '""')}"`;
+      }
+      return s;
+    };
+
+    lines.push(['key', 'value'].map(esc).join(','));
+    lines.push(['id', experiment.id].map(esc).join(','));
+    lines.push(['name', experiment.name].map(esc).join(','));
+    lines.push(['type', experiment.type].map(esc).join(','));
+    lines.push(['status', experiment.status].map(esc).join(','));
+    lines.push(['startTime', experiment.startTime].map(esc).join(','));
+    if (experiment.endTime) {
+      lines.push(['endTime', experiment.endTime].map(esc).join(','));
+    }
+    lines.push(
+      ['metadata', JSON.stringify(experiment.metadata)].map(esc).join(','),
+    );
+
+    const res = experiment.results as {
+      results?: Array<Record<string, unknown>>;
+    } | null;
+    if (res?.results && Array.isArray(res.results) && res.results.length > 0) {
+      lines.push('');
+      lines.push(
+        ['model', 'provider', 'actualCost', 'executionTime', 'overallScore']
+          .map(esc)
+          .join(','),
+      );
+      for (const row of res.results) {
+        const ae = row.aiEvaluation as
+          | { overallScore?: number; overall_score?: number }
+          | undefined;
+        const score =
+          ae?.overallScore ?? ae?.overall_score ?? '';
+        lines.push(
+          [
+            row.model ?? row.providerModel ?? '',
+            row.provider ?? '',
+            row.actualCost ?? '',
+            row.executionTime ?? '',
+            score,
+          ]
+            .map(esc)
+            .join(','),
+        );
+      }
+    } else {
+      lines.push(
+        ['results_json', JSON.stringify(experiment.results)].map(esc).join(','),
+      );
+    }
+
+    return {
+      buffer: Buffer.from(lines.join('\n'), 'utf-8'),
+      contentType: 'text/csv; charset=utf-8',
+      filename: `experiment-${experimentId}.csv`,
+    };
   }
 
   /**
@@ -2230,6 +2554,10 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
         isUserCreated: scenario.isUserCreated,
         createdAt: scenario.createdAt,
         analysis: scenario.analysis,
+        implementedAt: scenario.implementedAt,
+        measuredAt: scenario.measuredAt,
+        projectedMonthlySavings: scenario.projectedMonthlySavings,
+        actualMonthlySavings: scenario.actualMonthlySavings,
       }));
     } catch (error) {
       this.logger.error('Error getting what-if scenarios:', error.message);
@@ -2262,6 +2590,20 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
         );
       }
 
+      const lifecycleStatus =
+        scenarioData.lifecycleStatus &&
+        [
+          'draft',
+          'approved',
+          'implemented',
+          'measured',
+          'created',
+          'analyzed',
+          'applied',
+        ].includes(scenarioData.lifecycleStatus)
+          ? scenarioData.lifecycleStatus
+          : 'draft';
+
       const scenario = {
         userId,
         name: finalName,
@@ -2269,7 +2611,7 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
         changes: scenarioData.changes,
         timeframe: scenarioData.timeframe,
         baselineData: scenarioData.baselineData,
-        status: 'created' as const,
+        status: lifecycleStatus,
         isUserCreated: true,
       };
 
@@ -2432,6 +2774,86 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
       this.logger.error('Error deleting what-if scenario:', error.message);
       throw error;
     }
+  }
+
+  /**
+   * Update what-if scenario lifecycle (draft → approved → implemented → measured)
+   */
+  async updateWhatIfScenarioLifecycle(
+    userId: string,
+    scenarioName: string,
+    nextStatus: string,
+    options?: { projectedMonthlySavings?: number },
+  ): Promise<WhatIfScenarioInterface | null> {
+    const allowed = [
+      'draft',
+      'approved',
+      'implemented',
+      'measured',
+      'created',
+      'analyzed',
+      'applied',
+    ];
+    if (!allowed.includes(nextStatus)) {
+      throw new BadRequestException(`Invalid lifecycle status: ${nextStatus}`);
+    }
+
+    const existing = await this.whatIfScenarioModel.findOne({
+      userId,
+      name: scenarioName,
+    });
+    if (!existing) {
+      return null;
+    }
+
+    const setDoc: Record<string, unknown> = { status: nextStatus };
+    if (nextStatus === 'implemented') {
+      setDoc.implementedAt = new Date();
+      if (options?.projectedMonthlySavings != null) {
+        setDoc.projectedMonthlySavings = options.projectedMonthlySavings;
+      } else if (existing.analysis?.projectedImpact?.costChange != null) {
+        setDoc.projectedMonthlySavings = Math.abs(
+          existing.analysis.projectedImpact.costChange,
+        );
+      }
+    }
+    if (nextStatus === 'measured') {
+      setDoc.measuredAt = new Date();
+      const usage = await this.analyzeUserUsagePatterns(userId);
+      const baseline = existing.baselineData?.cost ?? 0;
+      const variance =
+        usage.totalCost > 0 && baseline > 0
+          ? Math.max(0, baseline - usage.averageCostPerRequest * usage.totalRequests)
+          : 0;
+      setDoc.actualMonthlySavings = variance;
+    }
+
+    const saved = await this.whatIfScenarioModel
+      .findOneAndUpdate(
+        { userId, name: scenarioName },
+        { $set: setDoc },
+        { new: true },
+      )
+      .exec();
+
+    if (!saved) return null;
+
+    return {
+      id: saved._id.toString(),
+      name: saved.name,
+      description: saved.description,
+      changes: saved.changes,
+      timeframe: saved.timeframe,
+      baselineData: saved.baselineData,
+      status: saved.status,
+      isUserCreated: saved.isUserCreated,
+      createdAt: saved.createdAt,
+      analysis: saved.analysis,
+      implementedAt: saved.implementedAt,
+      measuredAt: saved.measuredAt,
+      projectedMonthlySavings: saved.projectedMonthlySavings,
+      actualMonthlySavings: saved.actualMonthlySavings,
+    };
   }
 
   /**

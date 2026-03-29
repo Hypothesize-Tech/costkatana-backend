@@ -10,6 +10,7 @@ import { Usage, UsageDocument } from '@/schemas/core/usage.schema';
 export interface SimulationTrackingData {
   userId: string;
   sessionId: string;
+  experimentId?: string;
   originalUsageId?: string;
   simulationType:
     | 'real_time_analysis'
@@ -107,6 +108,7 @@ export class SimulationTrackingService {
     const doc = new this.simulationModel({
       userId: new Types.ObjectId(data.userId),
       sessionId: data.sessionId,
+      experimentId: data.experimentId,
       originalUsageId: data.originalUsageId
         ? new Types.ObjectId(data.originalUsageId)
         : undefined,
@@ -360,6 +362,7 @@ export class SimulationTrackingService {
       optimizationsApplied: number;
       averageSavings: number;
       topOptimizationType: string;
+      experimentId?: string;
     }>
   > {
     const matchStage: Record<string, unknown> = {};
@@ -386,6 +389,7 @@ export class SimulationTrackingService {
           },
           optimizationsApplied: { $sum: 1 },
           optimizationTypes: { $push: '$appliedOptimizations.type' },
+          experimentId: { $first: '$experimentId' },
         },
       },
       {
@@ -397,6 +401,7 @@ export class SimulationTrackingService {
             $divide: ['$totalSavings', '$optimizationsApplied'],
           },
           topOptimizationType: { $arrayElemAt: ['$optimizationTypes', 0] },
+          experimentId: 1,
         },
       },
       { $sort: { totalSavings: -1 } },

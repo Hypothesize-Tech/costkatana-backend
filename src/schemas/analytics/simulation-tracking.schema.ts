@@ -141,6 +141,10 @@ export class SimulationTracking {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Project' })
   projectId?: Types.ObjectId;
 
+  /** Optional link to a model-comparison experiment for leaderboard drill-down */
+  @Prop({ type: String })
+  experimentId?: string;
+
   @Prop({ default: Date.now })
   createdAt: Date;
 
