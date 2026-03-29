@@ -117,6 +117,36 @@ export const DEFAULT_CORTEX_OPERATION_POLICY: CortexOperationPolicy = {
 };
 
 // ============================================================================
+// CORTEX BREAKEVEN (MULTI-STAGE VS SINGLE CALL)
+// ============================================================================
+
+/**
+ * Skip Cortex when prompt is too small or estimated 3-stage cost exceeds baseline.
+ * Tunable via env for different deployments.
+ */
+export interface CortexBreakevenPolicy {
+  /** Minimum prompt tokens before multi-stage Cortex is considered */
+  minPromptTokens: number;
+  /** Expected completion tokens for baseline single-call cost comparison */
+  estimatedCompletionTokensDefault: number;
+  /**
+   * If estimated Cortex cost / baseline cost exceeds this, skip Cortex (1.0 = break even).
+   */
+  maxCostRatioVsBaseline: number;
+}
+
+export const DEFAULT_CORTEX_BREAKEVEN_POLICY: CortexBreakevenPolicy = {
+  minPromptTokens: parseInt(process.env.CORTEX_MIN_TOKENS || '150', 10),
+  estimatedCompletionTokensDefault: parseInt(
+    process.env.CORTEX_ESTIMATED_COMPLETION_TOKENS || '150',
+    10,
+  ),
+  maxCostRatioVsBaseline: parseFloat(
+    process.env.CORTEX_MAX_COST_RATIO_VS_BASELINE || '1.0',
+  ),
+};
+
+// ============================================================================
 // FALLBACK PRICING POLICIES
 // ============================================================================
 

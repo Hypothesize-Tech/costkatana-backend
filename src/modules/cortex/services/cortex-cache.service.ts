@@ -197,7 +197,16 @@ export class CortexCacheService {
   }
 
   /**
-   * Find entries by semantic similarity
+   * Semantic hash for a natural-language prompt (used for cache keys and similarity).
+   * Prefer passing this as `semanticHash` when `set()` stores optimization results so
+   * lookups align with the original user text, not the cached object blob.
+   */
+  getSemanticHashForText(text: string): string {
+    return this.generateSemanticHash(text);
+  }
+
+  /**
+   * Find entries by semantic similarity (same index bucket as targetHash)
    */
   findBySemanticSimilarity(
     targetHash: string,
@@ -226,6 +235,34 @@ export class CortexCacheService {
     const results = similar.slice(0, limit).map((item) => item.entry);
     this.stats.semanticMatches += results.length;
 
+    return results;
+  }
+
+  /**
+   * Scan all non-expired entries and rank by semantic hash similarity.
+   * Used after an exact key miss for near-duplicate prompts (paraphrases).
+   */
+  findAcrossSemanticSimilarity(
+    targetHash: string,
+    threshold: number = 0.82,
+    limit: number = 5,
+  ): CacheEntry[] {
+    const similar: Array<{ entry: CacheEntry; similarity: number }> = [];
+    for (const entry of this.cache.values()) {
+      if (this.isExpired(entry)) continue;
+      const similarity = this.calculateSemanticSimilarity(
+        targetHash,
+        entry.semanticHash,
+      );
+      if (similarity >= threshold) {
+        similar.push({ entry, similarity });
+      }
+    }
+    similar.sort((a, b) => b.similarity - a.similarity);
+    const results = similar.slice(0, limit).map((s) => s.entry);
+    if (results.length > 0) {
+      this.stats.semanticMatches += results.length;
+    }
     return results;
   }
 
