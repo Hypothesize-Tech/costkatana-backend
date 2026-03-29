@@ -23,6 +23,28 @@ export class ExperimentSession {
 
   @Prop({ required: true })
   experimentType: string;
+
+  /** Real-time comparison job progress (SSE recovery) */
+  @Prop({ type: Number, default: 0 })
+  progress: number;
+
+  @Prop({ type: String, default: '' })
+  stage: string;
+
+  @Prop({ type: String, default: '' })
+  message: string;
+
+  @Prop({ type: MongooseSchema.Types.Mixed })
+  partialResults?: unknown;
+
+  @Prop({ type: String })
+  experimentId?: string;
+
+  @Prop({ type: String })
+  error?: string;
+
+  @Prop({ type: Date })
+  lastUpdatedAt?: Date;
 }
 
 export const ExperimentSessionSchema =

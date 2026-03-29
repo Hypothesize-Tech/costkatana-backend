@@ -10,7 +10,7 @@ import { Alert, AlertSchema } from '../../schemas/core/alert.schema';
 import {
   ApprovalRequest,
   ApprovalRequestSchema,
-} from '../../schemas/misc/approval-request.schema';
+} from '../../schemas/core/approval-request.schema';
 import {
   TeamMember,
   TeamMemberSchema,

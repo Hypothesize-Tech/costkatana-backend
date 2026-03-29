@@ -15,11 +15,10 @@ function createZodDto<T extends z.ZodTypeAny>(schema: T): new () => z.infer<T> {
   return class {} as new () => z.infer<T>;
 }
 
-/**
- * DTO for running model comparison experiments
- */
-const ModelComparisonDtoSchema = z.object({
-  prompt: z.string().min(1, 'Prompt cannot be empty'),
+/** Shared object shape — must stay a ZodObject so `.extend()` works (`.refine()` yields ZodEffects, which has no `.extend`). */
+const ModelComparisonBaseSchema = z.object({
+  prompt: z.string().optional(),
+  prompts: z.array(z.string().min(1)).optional(),
   models: z
     .array(
       z.object({
@@ -36,6 +35,26 @@ const ModelComparisonDtoSchema = z.object({
   iterations: z.number().int().min(1).max(50).default(1),
 });
 
+function hasPromptOrPrompts(data: {
+  prompt?: string;
+  prompts?: string[];
+}): boolean {
+  const p = data.prompt?.trim() ?? '';
+  const ps = data.prompts?.filter((x) => x.trim().length > 0) ?? [];
+  return p.length > 0 || ps.length > 0;
+}
+
+const promptOrPromptsIssue = {
+  message: 'Provide prompt or at least one prompts[] entry',
+  path: ['prompt'],
+};
+
+/**
+ * DTO for running model comparison experiments
+ */
+const ModelComparisonDtoSchema =
+  ModelComparisonBaseSchema.refine(hasPromptOrPrompts, promptOrPromptsIssue);
+
 export class RunModelComparisonDto extends createZodDto(
   ModelComparisonDtoSchema,
 ) {}
@@ -47,7 +66,7 @@ export { ModelComparisonDtoSchema };
  * DTO for starting real-time model comparison with SSE
  * sessionId is optional - server generates one when not provided (for SSE progress streaming)
  */
-const RealTimeComparisonDtoSchema = ModelComparisonDtoSchema.extend({
+const RealTimeComparisonDtoSchema = ModelComparisonBaseSchema.extend({
   sessionId: z
     .string()
     .min(1, 'Session ID must be non-empty when provided')
@@ -57,7 +76,7 @@ const RealTimeComparisonDtoSchema = ModelComparisonDtoSchema.extend({
   comparisonMode: z
     .enum(['quality', 'cost', 'speed', 'comprehensive'])
     .default('comprehensive'),
-});
+}).refine(hasPromptOrPrompts, promptOrPromptsIssue);
 
 export class StartRealTimeComparisonDto extends createZodDto(
   RealTimeComparisonDtoSchema,
@@ -90,9 +109,22 @@ const CreateWhatIfScenarioDtoSchema = z.object({
     .string()
     .min(1, 'Description is required')
     .max(1000, 'Description must be less than 1000 characters'),
-  changes: z.record(z.any()),
-  timeframe: z.record(z.any()),
-  baselineData: z.record(z.any()),
+  changes: z.union([z.array(z.any()), z.record(z.string(), z.any())]),
+  timeframe: z.union([
+    z.enum(['daily', 'weekly', 'monthly', 'yearly']),
+    z.record(z.string(), z.any()),
+  ]),
+  baselineData: z.union([
+    z.object({
+      cost: z.number(),
+      volume: z.number(),
+      performance: z.number(),
+    }),
+    z.record(z.string(), z.any()),
+  ]),
+  lifecycleStatus: z
+    .enum(['draft', 'approved', 'implemented', 'measured'])
+    .optional(),
 });
 
 export class CreateWhatIfScenarioDto extends createZodDto(

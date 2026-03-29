@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Activity } from '../../schemas/logging/activity.schema';
+import mongoose from 'mongoose';
+import { Activity } from '../../schemas/core/activity.schema';
 
 export interface ActivityOptions {
   type: Activity['type'];
@@ -29,7 +30,7 @@ export class ActivityService {
   ): Promise<Activity | null> {
     try {
       const activity = new this.activityModel({
-        userId,
+        userId: new mongoose.Types.ObjectId(userId),
         ...options,
         createdAt: new Date(),
       });

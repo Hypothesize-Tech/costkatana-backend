@@ -4,11 +4,11 @@
  */
 
 // Schemas
-export { AgentIdentity } from './schemas/agent-identity.schema';
+export { AgentIdentity } from '../../schemas/agent/agent-identity.schema';
 export type {
   IAgentIdentity,
   IAgentCapability,
-} from './schemas/agent-identity.schema';
+} from '../../schemas/agent/agent-identity.schema';
 export {
   AgentDecisionAudit,
   type IAgentDecisionAudit,

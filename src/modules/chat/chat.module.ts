@@ -63,7 +63,7 @@ import { Usage, UsageSchema } from '../../schemas/core/usage.schema';
 import {
   GovernedTask,
   GovernedTaskSchema,
-} from '../../schemas/governed-agent/governed-task.schema';
+} from '../../schemas/agent/governed-task.schema';
 
 // Controllers
 import { ChatController } from './chat.controller';

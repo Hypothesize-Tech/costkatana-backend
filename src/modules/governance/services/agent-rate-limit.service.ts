@@ -6,7 +6,7 @@ import { LoggingService } from '../../../common/services/logging.service';
 import {
   IAgentIdentity,
   AgentIdentity,
-} from '../schemas/agent-identity.schema';
+} from '../../../schemas/agent/agent-identity.schema';
 
 /**
  * Rate Limit Level - Hierarchical enforcement

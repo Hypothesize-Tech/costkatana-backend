@@ -36,7 +36,7 @@ import { RagLocatorRegistrationService } from './rag-locator-registration.servic
 import {
   RAGExample,
   RAGExampleSchema,
-} from '../../schemas/rag/rag-example.schema';
+} from '../../schemas/document/rag-example.schema';
 
 // External dependencies (forwardRef to break circular dependency with AgentModule)
 import { AgentModule } from '../agent/agent.module'; // For VectorStoreService

@@ -25,6 +25,9 @@ export class DocsComment {
   @Prop()
   userAvatar?: string;
 
+  @Prop()
+  userRole?: string;
+
   @Prop({ required: true, maxlength: 5000 })
   content: string;
 

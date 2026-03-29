@@ -73,6 +73,9 @@ export class UserExample {
   @Prop()
   userAvatar?: string;
 
+  @Prop()
+  userRole?: string;
+
   @Prop([{ type: MongooseSchema.Types.ObjectId, ref: 'User' }])
   upvotes: MongooseSchema.Types.ObjectId[];
 

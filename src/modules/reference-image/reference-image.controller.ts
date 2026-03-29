@@ -30,7 +30,7 @@ import {
 import {
   Activity,
   ActivityDocument,
-} from '../../schemas/team-project/activity.schema';
+} from '../../schemas/core/activity.schema';
 import { ReferenceImageS3Service } from './reference-image-s3.service';
 import { ReferenceImageAnalysisService } from './reference-image-analysis.service';
 import { TriggerExtractionDto } from './dto/trigger-extraction.dto';

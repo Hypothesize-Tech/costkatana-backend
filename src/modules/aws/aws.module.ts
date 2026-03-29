@@ -10,11 +10,12 @@ import { BusinessEventLoggingService } from '../../common/services/business-even
 import {
   CostAnomalyHistory,
   CostAnomalyHistorySchema,
+} from '../../schemas/cost/cost-anomaly-history.schema';
+import {
   CustomerCostMetrics,
   CustomerCostMetricsSchema,
-  CostAlert,
-  CostAlertSchema,
-} from '../../schemas/misc/cost-tracking-record.schema';
+} from '../../schemas/cost/customer-cost-metrics.schema';
+import { CostAlert, CostAlertSchema } from '../../schemas/cost/cost-alert.schema';
 
 // Core security services
 import { TenantIsolationService } from './services/tenant-isolation.service';

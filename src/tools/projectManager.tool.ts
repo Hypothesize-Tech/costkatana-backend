@@ -1,7 +1,7 @@
 import { Tool } from '@langchain/core/tools';
 import { Project } from '../schemas/team-project/project.schema';
 import { User } from '../schemas/user/user.schema';
-import { Activity } from '../schemas/team-project/activity.schema';
+import { Activity } from '../schemas/core/activity.schema';
 import { loggingService } from '../common/services/logging.service';
 
 interface ProjectOperation {

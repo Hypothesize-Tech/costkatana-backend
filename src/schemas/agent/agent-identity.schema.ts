@@ -2,6 +2,68 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Schema as MongooseSchema } from 'mongoose';
 import mongoose from 'mongoose';
 
+/** Nested document: agent capability (structured sub-schema). */
+@Schema({ _id: false })
+export class AgentCapability {
+  @Prop({ required: true })
+  name: string;
+
+  @Prop({ required: true })
+  description: string;
+
+  @Prop({ type: [String] })
+  requiredPermissions: string[];
+
+  @Prop({
+    type: String,
+    enum: ['low', 'medium', 'high', 'critical'],
+    default: 'medium',
+  })
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+}
+
+/** Nested document: sandbox resource limits. */
+@Schema({ _id: false })
+export class SandboxConfig {
+  @Prop({ default: 0.5, min: 0.1, max: 4 })
+  maxCpuCores: number;
+
+  @Prop({ default: 512, min: 128, max: 4096 })
+  maxMemoryMB: number;
+
+  @Prop({ default: 100, min: 10, max: 1024 })
+  maxDiskMB: number;
+
+  @Prop({ default: 300, min: 10, max: 3600 })
+  maxExecutionTimeSeconds: number;
+
+  @Prop({ type: [String] })
+  allowedNetworkEndpoints: string[];
+
+  @Prop({ type: [String] })
+  allowedFilesystemPaths: string[];
+
+  @Prop({
+    type: String,
+    enum: ['process', 'container', 'vm'],
+    default: 'container',
+  })
+  isolationLevel: 'process' | 'container' | 'vm';
+}
+
+/** Nested document: allowed execution time window. */
+@Schema({ _id: false })
+export class AllowedTimeWindow {
+  @Prop({ min: 0, max: 23 })
+  startHour: number;
+
+  @Prop({ min: 0, max: 23 })
+  endHour: number;
+
+  @Prop({ type: [{ type: Number, min: 0, max: 6 }] })
+  daysOfWeek: number[];
+}
+
 export interface IAgentCapability {
   name: string;
   description: string;
@@ -110,19 +172,7 @@ export class AgentIdentity implements IAgentIdentityMethods {
 
   // Capabilities
   @Prop({
-    type: [
-      {
-        name: { type: String, required: true },
-        description: { type: String, required: true },
-        requiredPermissions: [{ type: String }],
-        riskLevel: {
-          type: String,
-          enum: ['low', 'medium', 'high', 'critical'],
-          required: true,
-          default: 'medium',
-        },
-      },
-    ],
+    type: [AgentCapability],
     default: [],
   })
   capabilities: IAgentCapability[];
@@ -151,27 +201,7 @@ export class AgentIdentity implements IAgentIdentityMethods {
   @Prop({ type: Boolean, default: true })
   sandboxRequired: boolean;
 
-  @Prop({
-    type: {
-      maxCpuCores: { type: Number, default: 0.5, min: 0.1, max: 4 },
-      maxMemoryMB: { type: Number, default: 512, min: 128, max: 4096 },
-      maxDiskMB: { type: Number, default: 100, min: 10, max: 1024 },
-      maxExecutionTimeSeconds: {
-        type: Number,
-        default: 300,
-        min: 10,
-        max: 3600,
-      }, // 5 minutes
-      allowedNetworkEndpoints: [String],
-      allowedFilesystemPaths: [String],
-      isolationLevel: {
-        type: String,
-        enum: ['process', 'container', 'vm'],
-        default: 'container',
-      },
-    },
-    _id: false,
-  })
+  @Prop({ type: SandboxConfig })
   sandboxConfig?: ISandboxConfig;
 
   // Security
@@ -181,16 +211,7 @@ export class AgentIdentity implements IAgentIdentityMethods {
   @Prop({ type: Boolean, default: false })
   requireMfa: boolean;
 
-  @Prop({
-    type: [
-      {
-        startHour: { type: Number, min: 0, max: 23 },
-        endHour: { type: Number, min: 0, max: 23 },
-        daysOfWeek: [{ type: Number, min: 0, max: 6 }],
-      },
-    ],
-    _id: false,
-  })
+  @Prop({ type: [AllowedTimeWindow] })
   allowedTimeWindows?: IAllowedTimeWindow[];
 
   // Audit

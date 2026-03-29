@@ -220,6 +220,14 @@ export class AIRouterService {
   }
 
   /**
+   * Full catalog (active + inactive) for experimentation UI and availability messaging
+   */
+  async getFullModelRegistry(): Promise<ModelRoute[]> {
+    await this.updateRouteHealth();
+    return [...this.modelRoutes];
+  }
+
+  /**
    * Check model availability and health
    */
   async checkModelHealth(model: string): Promise<{

@@ -76,6 +76,7 @@ import { GitHubModule } from './modules/github/github.module';
 import { GatewayModule } from './modules/gateway/gateway.module';
 import { FileUploadModule } from './modules/file-upload/file-upload.module';
 import { ExperimentationModule } from './modules/experimentation/experimentation.module';
+import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 import { DocsAnalyticsModule } from './modules/docs-analytics/docs-analytics.module';
 import { CkqlModule } from './modules/ckql/ckql.module';
 import { ChatGPTModule } from './modules/chatgpt/chatgpt.module';
@@ -241,6 +242,7 @@ import { ComprehensiveTrackingMiddleware } from './modules/usage/middleware/comp
     GatewayModule,
     FileUploadModule,
     ExperimentationModule,
+    FeatureFlagsModule,
     DocsAnalyticsModule,
     CkqlModule,
     ChatGPTModule,

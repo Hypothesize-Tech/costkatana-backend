@@ -11,7 +11,7 @@ import {
 import {
   Activity,
   ActivityDocument,
-} from '../../schemas/team-project/activity.schema';
+} from '../../schemas/core/activity.schema';
 import { ReferenceImageS3Service } from './reference-image-s3.service';
 
 interface CriterionInput {

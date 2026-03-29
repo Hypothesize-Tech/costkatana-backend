@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Project } from '../../schemas/team-project/project.schema';
-import { Activity } from '../../schemas/team-project/activity.schema';
+import { Activity } from '../../schemas/core/activity.schema';
 import { Telemetry } from '../../schemas/core/telemetry.schema';
 import { Usage } from '../../schemas/core/usage.schema';
 import { Conversation } from '../../schemas/chat/conversation.schema';

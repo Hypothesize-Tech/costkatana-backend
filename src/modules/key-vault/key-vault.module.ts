@@ -2,11 +2,11 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { KeyVaultController } from './key-vault.controller';
 import { KeyVaultService } from './key-vault.service';
-import { ProxyKey, ProxyKeySchema } from '../../schemas/misc/proxy-key.schema';
+import { ProxyKey, ProxyKeySchema } from '../../schemas/security/proxy-key.schema';
 import {
   ProviderKey,
   ProviderKeySchema,
-} from '../../schemas/misc/provider-key.schema';
+} from '../../schemas/security/provider-key.schema';
 import {
   Project,
   ProjectSchema,

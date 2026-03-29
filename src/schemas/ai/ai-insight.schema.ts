@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 
 export type AIInsightDocument = HydratedDocument<AIInsight>;
 
-@Schema({ timestamps: true })
+@Schema({ timestamps: true, collection: 'aiinsights' })
 export class AIInsight {
   @Prop({ required: true })
   type: string;

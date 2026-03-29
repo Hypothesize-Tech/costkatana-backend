@@ -27,7 +27,7 @@ import { User, UserSchema } from '../../schemas/user/user.schema';
 import {
   GeminiCache,
   GeminiCacheSchema,
-} from '../../schemas/prompt-template/gemini-cache.schema';
+} from '../../schemas/prompt/gemini-cache.schema';
 import { PromptTemplateController } from './prompt-template.controller';
 import { PromptTemplateService } from './services/prompt-template.service';
 import { ModelRecommendationService } from './services/model-recommendation.service';

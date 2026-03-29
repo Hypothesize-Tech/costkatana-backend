@@ -1,3 +1,10 @@
+/**
+ * Full trace chat message document: previews, optional full-content URLs, attachments,
+ * and optional semantic embeddings for the trace module.
+ *
+ * For compact, lightweight trace rows (preview text + ids), use {@link TraceMessage}
+ * from `trace-message.schema.ts` instead — different collection and query patterns.
+ */
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
 
@@ -94,6 +101,5 @@ export class Message {
 
 export const MessageSchema = SchemaFactory.createForClass(Message);
 
-// Compound indexes
 MessageSchema.index({ sessionId: 1, timestamp: 1 });
 MessageSchema.index({ traceId: 1, timestamp: 1 });

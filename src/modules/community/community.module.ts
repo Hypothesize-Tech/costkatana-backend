@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
 import { CommunityController } from './community.controller';
 import { LiveChatController } from './controllers/live-chat.controller';
 import { CommunityService } from './community.service';
@@ -10,14 +9,7 @@ import { UserModule } from '../user/user.module';
 import { SecurityModule } from '../security/security.module';
 import { BedrockModule } from '../bedrock/bedrock.module';
 import { AuthModule } from '../auth/auth.module';
-import { DocsComment, DocsCommentSchema } from './schemas/docs-comment.schema';
-import { UserExample, UserExampleSchema } from './schemas/user-example.schema';
-import { Discussion, DiscussionSchema } from './schemas/discussion.schema';
-import {
-  ChatSession,
-  ChatSessionSchema,
-} from '../../schemas/community/chat-session.schema';
-import { ChatMessage, ChatMessageSchema } from './schemas/chat-message.schema';
+import { SchemasModule } from '../../schemas/schemas.module';
 
 @Module({
   imports: [
@@ -25,13 +17,7 @@ import { ChatMessage, ChatMessageSchema } from './schemas/chat-message.schema';
     SecurityModule,
     BedrockModule,
     AuthModule,
-    MongooseModule.forFeature([
-      { name: DocsComment.name, schema: DocsCommentSchema },
-      { name: UserExample.name, schema: UserExampleSchema },
-      { name: Discussion.name, schema: DiscussionSchema },
-      { name: ChatSession.name, schema: ChatSessionSchema },
-      { name: ChatMessage.name, schema: ChatMessageSchema },
-    ]),
+    SchemasModule,
   ],
   controllers: [CommunityController, LiveChatController],
   providers: [

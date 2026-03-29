@@ -6,7 +6,7 @@ import { PricingService } from '../utils/services/pricing.service';
 import {
   AICallRecord as AICallRecordModel,
   AICallRecordDocument,
-} from '../../schemas/admin/ai-call-record.schema';
+} from '../../schemas/ai/ai-call-record.schema';
 import type {
   AICallRecord,
   AICostSummary,

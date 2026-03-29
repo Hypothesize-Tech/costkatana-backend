@@ -5,7 +5,7 @@ import * as crypto from 'crypto';
 import {
   AgentIdentity,
   IAgentIdentity,
-} from '../schemas/agent-identity.schema';
+} from '../../../schemas/agent/agent-identity.schema';
 
 let agentIdentityServiceInstance: AgentIdentityService | null = null;
 

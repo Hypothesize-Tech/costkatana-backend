@@ -19,7 +19,7 @@ import {
   type CostCalculationRequest,
 } from '../../modules/pricing/services/pricing-registry.service';
 import { GatewayCortexService } from '../../modules/gateway/services/gateway-cortex.service';
-import { InterventionLog } from '../../schemas/misc/intervention-log.schema';
+import { InterventionLog } from '../../schemas/logging/intervention-log.schema';
 import { loggingService } from '../services/logging.service';
 import type { Model } from 'mongoose';
 

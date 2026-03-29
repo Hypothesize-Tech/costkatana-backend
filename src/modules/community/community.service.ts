@@ -4,16 +4,16 @@ import { Model, Types } from 'mongoose';
 import {
   DocsComment,
   DocsCommentDocument,
-} from './schemas/docs-comment.schema';
+} from '../../schemas/community/docs-comment.schema';
 import {
   UserExample,
   UserExampleDocument,
-} from './schemas/user-example.schema';
+} from '../../schemas/community/user-example.schema';
 import {
   Discussion,
   DiscussionDocument,
   DiscussionReply,
-} from './schemas/discussion.schema';
+} from '../../schemas/community/discussion.schema';
 
 export interface UserInfo {
   userId: string;

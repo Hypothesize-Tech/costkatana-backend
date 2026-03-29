@@ -3,12 +3,12 @@
  * Central export for governance-related components.
  */
 
-// Schemas (re-export from module)
-export { AgentIdentity } from '../modules/governance/schemas/agent-identity.schema';
+// Schemas (canonical Mongoose definitions)
+export { AgentIdentity } from '../schemas/agent/agent-identity.schema';
 export type {
   IAgentIdentity,
   IAgentCapability,
-} from '../modules/governance/schemas/agent-identity.schema';
+} from '../schemas/agent/agent-identity.schema';
 export {
   AgentDecisionAudit,
   type IAgentDecisionAudit,

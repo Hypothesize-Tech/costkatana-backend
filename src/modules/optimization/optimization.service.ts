@@ -21,7 +21,7 @@ import { Optimization } from '../../schemas/core/optimization.schema';
 import { OptimizationConfig } from '../../schemas/core/optimization-config.schema';
 import { User } from '../../schemas/user/user.schema';
 import { Usage } from '../../schemas/core/usage.schema';
-import { Activity } from '../../schemas/logging/activity.schema';
+import { Activity } from '../../schemas/core/activity.schema';
 import { Alert } from '../../schemas/core/alert.schema';
 import { generateSecureId } from '../../common/utils/secure-id.util';
 
@@ -3703,8 +3703,9 @@ REPLY FORMAT (JSON only):
   ): Promise<void> {
     try {
       await this.activityModel.create({
-        userId,
+        userId: new mongoose.Types.ObjectId(userId),
         type: 'optimization_feedback',
+        title: 'Optimization feedback',
         description: `User provided feedback (rating: ${feedback.rating ?? 0}) for optimization ${optimizationId}`,
         metadata: {
           optimizationId,
@@ -3713,7 +3714,6 @@ REPLY FORMAT (JSON only):
           appliedResult: feedback.appliedResult,
           helpful: (feedback.rating ?? 0) >= 4,
         },
-        timestamp: new Date(),
       });
     } catch (error) {
       this.logger.warn(
