@@ -12,7 +12,7 @@ import { PriorityQueueService } from './modules/gateway/services/priority-queue.
 import { CortexModelRouterService } from './modules/cortex/services/cortex-model-router.service';
 import { GatewayCortexService } from './modules/gateway/services/gateway-cortex.service';
 import { getModelToken } from '@nestjs/mongoose';
-import { InterventionLog } from './schemas/misc/intervention-log.schema';
+import { InterventionLog } from './schemas/logging/intervention-log.schema';
 import { RequestInterceptorMiddleware } from './common/middleware/request-interceptor.middleware';
 import { EnterpriseTrafficManagementMiddleware } from './common/middleware/enterprise-traffic-management.middleware';
 import { TrafficPredictionService } from './modules/analytics/services/traffic-prediction.service';

@@ -4,7 +4,7 @@ import { Model } from 'mongoose';
 import {
   OptimizationTemplate,
   OptimizationTemplateDocument,
-} from '../../../schemas/misc/optimization-template.schema';
+} from '../../../schemas/core/optimization-template.schema';
 
 @Injectable()
 export class OptimizationTemplateService {

@@ -10,7 +10,7 @@ import {
   TraceMessage,
   TraceMessageSchema,
 } from '@/schemas/trace/trace-message.schema';
-import { Message, MessageSchema } from '@/schemas/trace/message.schema';
+import { Message, MessageSchema } from '@/schemas/trace/trace-full-message.schema';
 import { TraceController } from './trace.controller';
 import { TracesIngestController } from './traces-ingest.controller';
 import { TraceService } from './trace.service';

@@ -20,7 +20,7 @@ import { TextExtractionService } from './services/text-extraction.service';
 import {
   CostTrackingRecord,
   CostTrackingRecordSchema,
-} from '../../schemas/misc/cost-tracking-record.schema';
+} from '../../schemas/cost/cost-tracking-record.schema';
 import { Usage, UsageSchema } from '../../schemas/core/usage.schema';
 import {
   Project,

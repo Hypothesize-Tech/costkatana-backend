@@ -6,9 +6,9 @@ import {
   ChatSessionDocument,
 } from '../../../schemas/community/chat-session.schema';
 import {
-  ChatMessage,
-  ChatMessageDocument,
-} from '../schemas/chat-message.schema';
+  CommunityChatMessage,
+  CommunityChatMessageDocument,
+} from '../../../schemas/community/community-chat-message.schema';
 import { CacheService } from '../../../common/cache/cache.service';
 import { LlmSecurityService } from '../../security/llm-security.service';
 
@@ -53,8 +53,8 @@ export class LiveChatService {
   constructor(
     @InjectModel(ChatSession.name)
     private chatSessionModel: Model<ChatSessionDocument>,
-    @InjectModel(ChatMessage.name)
-    private chatMessageModel: Model<ChatMessageDocument>,
+    @InjectModel(CommunityChatMessage.name)
+    private chatMessageModel: Model<CommunityChatMessageDocument>,
     private cacheService: CacheService,
     private llmSecurityService: LlmSecurityService,
   ) {}
@@ -188,7 +188,7 @@ export class LiveChatService {
     isAiGenerated?: boolean;
     ipAddress?: string;
     userAgent?: string;
-  }): Promise<ChatMessageDocument> {
+  }): Promise<CommunityChatMessageDocument> {
     // SECURITY CHECK: Only check user messages (not admin/support/system messages)
     if (data.senderType === 'user' && data.content) {
       try {

@@ -4,7 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import {
   AgentIdentity,
   AgentIdentitySchema,
-} from './schemas/agent-identity.schema';
+} from '../../schemas/agent/agent-identity.schema';
 import {
   AgentDecisionAudit,
   AgentDecisionAuditSchema,

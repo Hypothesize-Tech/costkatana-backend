@@ -5,7 +5,7 @@ import { User, UserDocument } from '../../../schemas/user/user.schema';
 import {
   ProxyKey,
   ProxyKeyDocument,
-} from '../../../schemas/misc/proxy-key.schema';
+} from '../../../schemas/security/proxy-key.schema';
 import { Usage, UsageDocument } from '../../../schemas/core/usage.schema';
 import { ApiKeyStats, ApiKeyUsage, ApiKeyTopUsage } from '../interfaces';
 

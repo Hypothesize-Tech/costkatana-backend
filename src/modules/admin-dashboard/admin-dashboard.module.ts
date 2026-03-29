@@ -20,7 +20,7 @@ import {
   SubscriptionHistory,
   SubscriptionHistorySchema,
 } from '../../schemas/billing/subscription-history.schema';
-import { ProxyKey, ProxyKeySchema } from '../../schemas/misc/proxy-key.schema';
+import { ProxyKey, ProxyKeySchema } from '../../schemas/security/proxy-key.schema';
 import {
   ScheduledReport,
   ScheduledReportSchema,

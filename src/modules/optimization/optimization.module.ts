@@ -27,7 +27,7 @@ import { Alert, AlertSchema } from '../../schemas/core/alert.schema';
 import {
   OptimizationTemplate,
   OptimizationTemplateSchema,
-} from '../../schemas/misc/optimization-template.schema';
+} from '../../schemas/core/optimization-template.schema';
 
 // Services and Controllers
 import { OptimizationService } from './optimization.service';

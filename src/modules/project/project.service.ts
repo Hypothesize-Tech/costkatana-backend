@@ -13,7 +13,7 @@ import { Alert } from '../../schemas/core/alert.schema';
 import {
   ApprovalRequest,
   ApprovalRequestDocument,
-} from '../../schemas/misc/approval-request.schema';
+} from '../../schemas/core/approval-request.schema';
 import {
   TeamMember,
   TeamMemberDocument,

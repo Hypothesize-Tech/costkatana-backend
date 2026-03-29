@@ -192,6 +192,7 @@ import {
   WhatIfScenarioSchema,
 } from './analytics/what-if-scenario.schema';
 import { AILog, AILogSchema } from './ai/ai-log.schema';
+import { AIInsight, AIInsightSchema } from './ai/ai-insight.schema';
 import {
   ModelPerformanceFingerprint,
   ModelPerformanceFingerprintSchema,
@@ -292,28 +293,27 @@ import {
 import {
   CostTrackingRecord,
   CostTrackingRecordSchema,
-} from './misc/cost-tracking-record.schema';
+} from './cost/cost-tracking-record.schema';
 import { Tip, TipSchema } from './misc/tip.schema';
 import {
   InterventionLog,
   InterventionLogSchema,
-} from './misc/intervention-log.schema';
+} from './logging/intervention-log.schema';
 import {
   CalendarAlertSettings,
   CalendarAlertSettingsSchema,
 } from './misc/calendar-alert-settings.schema';
 import { UploadedFile, UploadedFileSchema } from './misc/uploaded-file.schema';
-import { AIInsight, AIInsightSchema } from './misc/ai-insight.schema';
 import {
   RepositoryUserMapping,
   RepositoryUserMappingSchema,
-} from './misc/repository-user-mapping.schema';
+} from './integration/repository-user-mapping.schema';
 import {
   ApprovalRequest,
   ApprovalRequestSchema,
-} from './misc/approval-request.schema';
-import { ProviderKey, ProviderKeySchema } from './misc/provider-key.schema';
-import { ProxyKey, ProxyKeySchema } from './misc/proxy-key.schema';
+} from './core/approval-request.schema';
+import { ProviderKey, ProviderKeySchema } from './security/provider-key.schema';
+import { ProxyKey, ProxyKeySchema } from './security/proxy-key.schema';
 import {
   WorkflowTemplateVersion,
   WorkflowTemplateVersionSchema,
@@ -321,7 +321,7 @@ import {
 import {
   OptimizationTemplate,
   OptimizationTemplateSchema,
-} from './misc/optimization-template.schema';
+} from './core/optimization-template.schema';
 import {
   Session,
   SessionSchema,
@@ -522,7 +522,6 @@ import {
       { name: UploadedFile.name, schema: UploadedFileSchema },
       { name: RepositoryUserMapping.name, schema: RepositoryUserMappingSchema },
       { name: AIInsight.name, schema: AIInsightSchema },
-      { name: McpPermission.name, schema: McpPermissionSchema },
       { name: ApprovalRequest.name, schema: ApprovalRequestSchema },
       { name: ProviderKey.name, schema: ProviderKeySchema },
       { name: ProxyKey.name, schema: ProxyKeySchema },

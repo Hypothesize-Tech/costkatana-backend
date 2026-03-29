@@ -4,11 +4,9 @@ import { Model } from 'mongoose';
 import { LoggerService } from '../../../common/logger/logger.service';
 import { KillSwitchService } from './kill-switch.service';
 import { Interval } from '@nestjs/schedule';
-import {
-  CostAnomalyHistory,
-  CustomerCostMetrics as CustomerCostMetricsSchema,
-  CostAlert,
-} from '../../../schemas/misc/cost-tracking-record.schema';
+import { CostAnomalyHistory } from '../../../schemas/cost/cost-anomaly-history.schema';
+import { CustomerCostMetrics as CustomerCostMetricsSchema } from '../../../schemas/cost/customer-cost-metrics.schema';
+import { CostAlert } from '../../../schemas/cost/cost-alert.schema';
 
 export interface CostThresholds {
   costIncreasePercent: number; // 20% increase triggers alert

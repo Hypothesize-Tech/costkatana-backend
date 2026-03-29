@@ -10,9 +10,13 @@ export interface IDiscussionReply {
   downvotes: MongooseSchema.Types.ObjectId[];
   isEdited: boolean;
   isDeleted: boolean;
+  userRole?: string;
   createdAt: Date;
   updatedAt: Date;
 }
+
+/** Alias for reply documents (matches legacy `DiscussionReply` import path). */
+export type DiscussionReply = IDiscussionReply;
 
 export type DiscussionDocument = HydratedDocument<Discussion>;
 
@@ -60,6 +64,9 @@ export class Discussion {
   @Prop()
   userAvatar?: string;
 
+  @Prop()
+  userRole?: string;
+
   @Prop([{ type: MongooseSchema.Types.ObjectId, ref: 'User' }])
   upvotes: MongooseSchema.Types.ObjectId[];
 
@@ -86,6 +93,7 @@ export class Discussion {
       downvotes: [{ type: MongooseSchema.Types.ObjectId, ref: 'User' }],
       isEdited: { type: Boolean, default: false },
       isDeleted: { type: Boolean, default: false },
+      userRole: String,
     },
   ])
   replies: IDiscussionReply[];
