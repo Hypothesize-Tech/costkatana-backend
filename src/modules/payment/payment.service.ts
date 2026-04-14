@@ -540,11 +540,6 @@ export class PaymentService {
       }
 
       const razorpayGateway = this.paymentGatewayService.getRazorpayGateway();
-      if (!razorpayGateway || !razorpayGateway.razorpay) {
-        throw new InternalServerErrorException(
-          'Razorpay SDK is not initialized. Please check that RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are set in your environment variables.',
-        );
-      }
 
       // Get or create Razorpay customer
       let gatewayCustomerId: string;
@@ -675,7 +670,7 @@ export class PaymentService {
         orderNotes.discountCode = discountCode.toUpperCase().trim();
       }
 
-      const order = await razorpayGateway.razorpay.orders.create({
+      const order = await razorpayGateway.orders.create({
         amount: amountInSmallestUnit,
         currency: orderCurrency,
         receipt: `sub_${plan}_${billingInterval}_${Date.now()}`,
@@ -742,9 +737,6 @@ export class PaymentService {
 
       // Verify payment signature
       const razorpayGateway = this.paymentGatewayService.getRazorpayGateway();
-      if (!razorpayGateway || !razorpayGateway.razorpay) {
-        throw new InternalServerErrorException('Razorpay is not configured');
-      }
 
       const crypto = require('crypto');
       const webhookSecret =
@@ -759,7 +751,7 @@ export class PaymentService {
       }
 
       // Fetch payment details from Razorpay
-      const payment = await razorpayGateway.razorpay.payments.fetch(paymentId);
+      const payment = await razorpayGateway.payments.fetch(paymentId);
 
       if (payment.status !== 'captured' && payment.status !== 'authorized') {
         throw new BadRequestException(
