@@ -39,11 +39,23 @@ export interface BudgetRecommendation {
   estimatedSavings: number;
 }
 
+export interface BudgetPacing {
+  isOverPacing: boolean;
+  dailyBurnUsd: number;
+  projectedMonthlyCostUsd: number;
+  projectedHitDate?: string;
+  daysUntilHit?: number;
+  daysOfRunway: number;
+  topOffenderModel?: string;
+  topOffenderCostUsd?: number;
+}
+
 export interface BudgetStatus {
   overall: BudgetStatusOverall;
   projects: BudgetStatusProject[];
   alerts: BudgetAlert[];
   recommendations: BudgetRecommendation[];
+  pacing?: BudgetPacing;
 }
 
 const DEFAULT_USER_BUDGET_TOKENS = 100_000;
@@ -94,13 +106,127 @@ export class BudgetService {
 
     const alerts = this.generateAlerts(overall, projectUsage, userId);
     const recommendations = this.generateRecommendations(overall, projectUsage);
+    const pacing = await this.computePacing(
+      userId,
+      startOfMonth,
+      endOfMonth,
+      overall,
+    );
+
+    if (pacing.isOverPacing) {
+      alerts.push({
+        type: 'budget_pacing',
+        message: pacing.projectedHitDate
+          ? `At the current burn rate, you'll blow the monthly budget by ${pacing.projectedHitDate}.`
+          : `Current burn rate is trending over monthly budget.`,
+        severity: 'high',
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     return {
       overall,
       projects: projectUsage,
       alerts,
       recommendations,
+      pacing,
     };
+  }
+
+  /**
+   * Compute burn rate + projection so the decision layer can surface
+   * "you'll blow budget by Friday" instead of a static threshold alert.
+   */
+  private async computePacing(
+    userId: string,
+    startOfMonth: Date,
+    endOfMonth: Date,
+    overall: BudgetStatusOverall,
+  ): Promise<BudgetPacing> {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const windowStart = sevenDaysAgo > startOfMonth ? sevenDaysAgo : startOfMonth;
+    const windowDays = Math.max(
+      1,
+      (now.getTime() - windowStart.getTime()) / (24 * 60 * 60 * 1000),
+    );
+
+    const recentAgg = await this.usageModel
+      .aggregate<{ _id: string; totalCost: number }>([
+        {
+          $match: {
+            userId: new mongoose.Types.ObjectId(userId),
+            createdAt: { $gte: windowStart, $lte: now },
+          },
+        },
+        {
+          $group: {
+            _id: { $ifNull: ['$model', '$aiModel'] },
+            totalCost: { $sum: '$cost' },
+          },
+        },
+        { $sort: { totalCost: -1 } },
+      ])
+      .exec()
+      .catch(() => [] as { _id: string; totalCost: number }[]);
+
+    const totalRecentCost = recentAgg.reduce((sum, r) => sum + r.totalCost, 0);
+    const dailyBurnUsd = totalRecentCost / windowDays;
+    const daysLeftInMonth = Math.max(
+      0,
+      (endOfMonth.getTime() - now.getTime()) / (24 * 60 * 60 * 1000),
+    );
+    const projectedMonthlyCostUsd =
+      overall.cost + dailyBurnUsd * daysLeftInMonth;
+
+    // Convert token budget to approximate USD budget using the blended
+    // observed rate; if no data yet fall back to overall.cost threshold.
+    const tokensPerDollar = overall.used > 0 ? overall.used / overall.cost : 0;
+    const budgetUsd =
+      tokensPerDollar > 0 ? overall.budget / tokensPerDollar : overall.cost * 2;
+    const remainingUsd = Math.max(0, budgetUsd - overall.cost);
+    const daysOfRunway = dailyBurnUsd > 0 ? remainingUsd / dailyBurnUsd : Infinity;
+
+    const willBlowBudget =
+      projectedMonthlyCostUsd > budgetUsd && budgetUsd > 0;
+
+    let projectedHitDate: string | undefined;
+    let daysUntilHit: number | undefined;
+    if (willBlowBudget && dailyBurnUsd > 0) {
+      const daysOut = Math.ceil(daysOfRunway);
+      const hit = new Date(now.getTime() + daysOut * 24 * 60 * 60 * 1000);
+      projectedHitDate = hit.toISOString().slice(0, 10);
+      daysUntilHit = daysOut;
+    }
+
+    return {
+      isOverPacing: willBlowBudget,
+      dailyBurnUsd,
+      projectedMonthlyCostUsd,
+      projectedHitDate,
+      daysUntilHit,
+      daysOfRunway: Number.isFinite(daysOfRunway) ? daysOfRunway : 9999,
+      topOffenderModel: recentAgg[0]?._id,
+      topOffenderCostUsd: recentAgg[0]?.totalCost,
+    };
+  }
+
+  /**
+   * Public accessor so the decision layer can compute pacing without
+   * re-running the full budget status aggregation.
+   */
+  async getBudgetPacing(userId: string): Promise<BudgetPacing> {
+    const { startOfMonth, endOfMonth } = this.getMonthDateRange();
+    const overall = await this.getOverallUsage(userId, startOfMonth, endOfMonth);
+    const userBudget = DEFAULT_USER_BUDGET_TOKENS;
+    const overallStatus: BudgetStatusOverall = {
+      budget: userBudget,
+      used: overall.totalTokens,
+      remaining: Math.max(0, userBudget - overall.totalTokens),
+      cost: overall.totalCost,
+      usagePercentage: (overall.totalTokens / userBudget) * 100,
+    };
+    return this.computePacing(userId, startOfMonth, endOfMonth, overallStatus);
   }
 
   private async getOverallUsage(
