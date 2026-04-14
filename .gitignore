@@ -93,3 +93,7 @@ data/faiss/
 faiss_temp/
 faiss_backup/
 .faiss_cache/
+
+# Graphify output (large generated files)
+*graphify*/
+graphify-out/

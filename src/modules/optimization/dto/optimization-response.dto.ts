@@ -1,3 +1,5 @@
+import type { DecisionContext } from '../../decision-layer/types/decision-context';
+
 export class OptimizationResultDto {
   id: string;
   userQuery: string;
@@ -34,4 +36,8 @@ export class OptimizationResultDto {
   tokenReduction?: number;
   /** Original prompt (for listing) */
   prompt?: string;
+  /** Decision-layer framing when the result itself is actionable */
+  decision?: DecisionContext;
+  /** Short narrative (headline + story) rendered on the result card */
+  narrative?: { headline: string; story: string };
 }

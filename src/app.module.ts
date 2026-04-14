@@ -52,6 +52,7 @@ import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { OAuthModule } from './modules/oauth/oauth.module';
 import { NotebookModule } from './modules/notebook/notebook.module';
 import { ProactiveSuggestionsModule } from './modules/proactive-suggestions/proactive-suggestions.module';
+import { DecisionLayerModule } from './modules/decision-layer/decision-layer.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { PredictiveIntelligenceModule } from './modules/predictive-intelligence/predictive-intelligence.module';
 import { PerformanceCostAnalysisModule } from './modules/performance-cost-analysis/performance-cost-analysis.module';
@@ -218,6 +219,7 @@ import { ComprehensiveTrackingMiddleware } from './modules/usage/middleware/comp
     OAuthModule,
     NotebookModule,
     ProactiveSuggestionsModule,
+    DecisionLayerModule,
     PricingModule,
     PredictiveIntelligenceModule,
     PerformanceCostAnalysisModule,

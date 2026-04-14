@@ -87,6 +87,43 @@ export class ProactiveSuggestionsService {
     private optimizationFeedbackLoop: OptimizationFeedbackLoopService,
   ) {}
 
+  /**
+   * Score a suggestion by urgency, not just raw priority × savings.
+   * Recent + spike-triggered + high-confidence items float to the top so the
+   * UI can surface a single "this matters right now" decision.
+   */
+  private computeUrgencyScore(s: CostSavingSuggestion): number {
+    const priorityWeight: Record<CostSavingSuggestion['priority'], number> = {
+      critical: 4,
+      high: 3,
+      medium: 2,
+      low: 1,
+    };
+    const ageMs = Date.now() - new Date(s.createdAt).getTime();
+    const ageHours = ageMs / (60 * 60 * 1000);
+    const recencyBoost =
+      ageHours < 24 ? 2.0 : ageHours < 24 * 7 ? 1.5 : 1.0;
+    const spikeBoost =
+      s.type === 'model_downgrade' && s.savingsPercentage >= 50
+        ? 1.3
+        : 1.0;
+    const confidenceMultiplier = Math.max(
+      0.5,
+      Math.min(1.2, 0.5 + (s.confidence ?? 0.5) * 0.7),
+    );
+    // Normalize savings on a $/week basis so items with different timeframes
+    // compare fairly. CostSavingSuggestion.estimatedSavings is monthly today.
+    const weeklySavings = s.estimatedSavings / 4.33;
+
+    return (
+      priorityWeight[s.priority] *
+      recencyBoost *
+      spikeBoost *
+      confidenceMultiplier *
+      Math.max(1, weeklySavings)
+    );
+  }
+
   async generateSuggestionsForUser(
     userId: string,
   ): Promise<CostSavingSuggestion[]> {
@@ -105,11 +142,10 @@ export class ProactiveSuggestionsService {
         ...compression,
         ...summarization,
       ];
-      const priorityWeight = { critical: 4, high: 3, medium: 2, low: 1 };
-      const sorted = all.sort((a, b) => {
-        const diff = priorityWeight[b.priority] - priorityWeight[a.priority];
-        return diff !== 0 ? diff : b.estimatedSavings - a.estimatedSavings;
-      });
+      const sorted = all
+        .map((s) => ({ s, score: this.computeUrgencyScore(s) }))
+        .sort((a, b) => b.score - a.score)
+        .map(({ s }) => s);
       for (const s of sorted) {
         await this.proactiveSuggestionModel.findOneAndUpdate(
           { id: s.id },
@@ -118,7 +154,9 @@ export class ProactiveSuggestionsService {
         );
       }
       if (sorted.length > 0) {
-        await this.pushSuggestionsToUser(userId, sorted.slice(0, 3));
+        // Decision-layer rule: lead with the single highest-urgency item.
+        // The full queue is still available via the list endpoint.
+        await this.pushSuggestionsToUser(userId, sorted.slice(0, 1));
       }
       this.logger.log('Generated proactive suggestions', {
         userId,
