@@ -12,6 +12,7 @@ import {
   stripGatewayPrefixFromPath,
 } from '../utils/gateway-target-url.util';
 import { isOfficialAnthropicGatewayTarget } from '../utils/gateway-anthropic-bedrock.util';
+import { applyClaudePromptCachingToBody } from '../utils/claude-prompt-cache-enricher.util';
 
 /**
  * Request Processing Service - Handles request validation, transformation, and routing logic
@@ -514,6 +515,77 @@ export class RequestProcessingService {
               : String(cortexError),
         },
       );
+    }
+
+    return proxyRequest;
+  }
+
+  /**
+   * Apply Anthropic/Bedrock-compatible prompt caching breakpoints to the final Claude
+   * Messages body. Runs after summarization / compiler / Cortex so breakpoints match
+   * the payload actually sent upstream.
+   */
+  applyClaudePromptCachingIfApplicable(
+    request: Request,
+    proxyRequest: ProxyRequestConfig,
+  ): ProxyRequestConfig {
+    const providerPath = stripGatewayPrefixFromPath(request.path || '');
+    const providerPathLower = providerPath.toLowerCase();
+    const isAnthropicMessagesPost =
+      request.method?.toUpperCase() === 'POST' &&
+      /\/v1\/messages(\/|$|\?)/.test(providerPathLower);
+
+    if (!isAnthropicMessagesPost) {
+      return proxyRequest;
+    }
+
+    const headerOptOut =
+      String(
+        request.headers['costkatana-prompt-caching'] ??
+          request.headers['CostKatana-Prompt-Caching'] ??
+          '',
+      ).toLowerCase() === 'off';
+    if (headerOptOut) {
+      return proxyRequest;
+    }
+
+    const raw =
+      proxyRequest.data && typeof proxyRequest.data === 'object'
+        ? (proxyRequest.data as Record<string, unknown>)
+        : request.body && typeof request.body === 'object'
+          ? (request.body as Record<string, unknown>)
+          : null;
+    if (!raw) {
+      return proxyRequest;
+    }
+
+    const result = applyClaudePromptCachingToBody(raw);
+    if (result.appliedBreakpoints === 0) {
+      return proxyRequest;
+    }
+
+    request.body = result.body;
+    proxyRequest.data = result.body;
+
+    if (result.outboundAnthropicBeta && !proxyRequest.internalBedrockAnthropic) {
+      const prev = proxyRequest.headers as Record<string, string> | undefined;
+      const h: Record<string, string> = { ...(prev || {}) };
+      const key = 'anthropic-beta';
+      const existing = h[key] ?? h['Anthropic-Beta'];
+      if (existing && !String(existing).includes(result.outboundAnthropicBeta)) {
+        h[key] = `${existing},${result.outboundAnthropicBeta}`;
+      } else if (!existing) {
+        h[key] = result.outboundAnthropicBeta;
+      }
+      proxyRequest.headers = h as ProxyRequestConfig['headers'];
+
+      this.logger.debug('Claude prompt caching: direct Anthropic beta header set', {
+        breakpoints: result.appliedBreakpoints,
+      });
+    } else {
+      this.logger.debug('Claude prompt caching breakpoints applied (Bedrock path)', {
+        breakpoints: result.appliedBreakpoints,
+      });
     }
 
     return proxyRequest;

@@ -196,6 +196,11 @@ export class GatewayService {
         request,
         proxyRequest,
       );
+      proxyRequest =
+        this.requestProcessingService.applyClaudePromptCachingIfApplicable(
+          request,
+          proxyRequest,
+        );
 
       // Bedrock Anthropic SSE: one long-lived response; skip axios, buffer moderation, and JSON send.
       if (
