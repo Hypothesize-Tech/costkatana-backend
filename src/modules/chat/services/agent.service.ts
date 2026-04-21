@@ -2302,29 +2302,52 @@ export class AgentService {
     query: string,
     previousMessages: Array<{ role: string; content: string }>,
   ): string {
-    const systemBlock = [
+    const roleDirectives = [
       'You are Cost Katana, an AI-powered cost optimization assistant.',
       'Your mission is to help users monitor, analyze, and reduce their AI API spending across all providers.',
-      "You have access to this user's actual Cost Katana account data shown below.",
-      'Always answer questions about their usage, costs, and models using this data — never say you lack access to their records.',
-      '',
-      '=== USER ACCOUNT DATA ===',
-      'Real-time analytics data will be provided as context when available.',
-      '=== END USER ACCOUNT DATA ===',
+      "You have access to this user's actual Cost Katana account data in <costkatana_user_account_data> below.",
+      'Always answer questions about their usage, costs, and models using that data — never say you lack access to their records.',
     ].join('\n');
 
+    const accountData =
+      'Real-time analytics data will be provided as context when available.';
+
     const recent = previousMessages.slice(-6);
-    const historyLines = recent.map(
-      (m) =>
-        `${m.role === 'user' ? 'Human' : 'Assistant'}: ${(m.content || '').trim()}`,
+    const historyInner = recent
+      .map(
+        (m) =>
+          `${m.role === 'user' ? 'Human' : 'Assistant'}: ${(m.content || '').trim()}`,
+      )
+      .join('\n\n');
+
+    const parts: string[] = [
+      '<costkatana_assistant_directives>',
+      roleDirectives,
+      '</costkatana_assistant_directives>',
+      '',
+      '<costkatana_user_account_data>',
+      accountData,
+      '</costkatana_user_account_data>',
+    ];
+
+    if (historyInner.trim().length > 0) {
+      parts.push(
+        '',
+        '<costkatana_prior_turns>',
+        historyInner,
+        '</costkatana_prior_turns>',
+      );
+    }
+
+    parts.push(
+      '',
+      '<costkatana_current_user_message>',
+      query.trim(),
+      '</costkatana_current_user_message>',
+      '',
+      'Assistant:',
     );
 
-    return [
-      `System: ${systemBlock}`,
-      '',
-      ...historyLines,
-      `Human: ${query}`,
-      'Assistant:',
-    ].join('\n\n');
+    return parts.join('\n');
   }
 }

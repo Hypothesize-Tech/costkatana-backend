@@ -540,6 +540,75 @@ export class IngestionService {
         : null,
     });
 
+    // **Guaranteed persistence**: unconditionally save every valid chunk to
+    // MongoDB BEFORE the vector pipeline runs. Empty-embedding rows are
+    // still retrievable by documentId via RagRetrievalService's direct-fetch
+    // fast path and by the preview / Files Library endpoints. If the vector
+    // pipeline later embeds + inserts duplicates, the unique (contentHash,
+    // userId, documentId) index rejects them cleanly (already handled in
+    // langchain-vector-store). So the user's upload is ALWAYS visible, even
+    // if Bedrock embeddings, Atlas vector search, or FAISS are down.
+    try {
+      const validChunks = chunks.filter(
+        (c) => c.content && c.content.trim().length > 0,
+      );
+      if (validChunks.length > 0) {
+        const guaranteedDocs = validChunks.map((chunk) => ({
+          content: chunk.content.trim(),
+          contentHash: chunk.contentHash,
+          embedding: [] as number[],
+          metadata: {
+            ...chunk.metadata,
+            // Force userId to a string so retrieval + preview filters match.
+            userId: String(chunk.metadata.userId ?? ''),
+            source: (chunk.metadata.source as string) || 'user-upload',
+          },
+          chunkIndex: chunk.chunkIndex,
+          totalChunks: chunk.totalChunks,
+          ingestedAt: new Date(),
+          status: 'active' as const,
+          accessCount: 0,
+        }));
+        try {
+          const inserted = await this.documentModel.insertMany(guaranteedDocs, {
+            ordered: false,
+          });
+          this.logger.log(
+            `Guaranteed pre-save: inserted ${inserted.length}/${validChunks.length} chunks to MongoDB`,
+            {
+              documentId: validChunks[0].metadata.documentId,
+              userId: validChunks[0].metadata.userId,
+            },
+          );
+        } catch (dupErr: unknown) {
+          const e = dupErr as { code?: number; writeErrors?: unknown[] };
+          if (e?.code === 11000 || Array.isArray(e?.writeErrors)) {
+            const writeErrors = Array.isArray(e.writeErrors)
+              ? e.writeErrors.length
+              : 0;
+            this.logger.log(
+              `Guaranteed pre-save: ${validChunks.length - writeErrors} inserted, ${writeErrors} duplicates skipped`,
+              {
+                documentId: validChunks[0].metadata.documentId,
+              },
+            );
+          } else {
+            throw dupErr;
+          }
+        }
+      }
+    } catch (preSaveErr) {
+      this.logger.error(
+        'Guaranteed pre-save failed — vectorization will still be attempted',
+        {
+          error:
+            preSaveErr instanceof Error
+              ? preSaveErr.message
+              : String(preSaveErr),
+        },
+      );
+    }
+
     const BATCH_SIZE = 10; // Process 10 chunks at a time
     const DELAY_MS = 200; // 200ms delay between batches
 
@@ -663,6 +732,58 @@ export class IngestionService {
             totalBatches,
           });
 
+          // Resilience fallback: when vectorization fails (embedding service
+          // down, Atlas vector index missing, FAISS disk error, etc.), still
+          // persist the chunk text directly to MongoDB with an empty
+          // embedding. This keeps the document retrievable by documentId
+          // via the direct-fetch path in RagRetrievalService, so users can
+          // chat against their uploaded documents even when the vector
+          // pipeline is degraded. Search-by-similarity won't work on these
+          // rows, but attached-doc chat will.
+          try {
+            const validBatchChunks = batchChunks.filter(
+              (c) => c.content && c.content.trim().length > 0,
+            );
+            if (validBatchChunks.length > 0) {
+              const fallbackDocs = validBatchChunks.map((chunk) => ({
+                content: chunk.content.trim(),
+                contentHash: chunk.contentHash,
+                embedding: [] as number[],
+                metadata: {
+                  ...chunk.metadata,
+                  // Enforce enum source value — never let a file path leak in.
+                  source: (chunk.metadata.source as string) || 'user-upload',
+                },
+                chunkIndex: chunk.chunkIndex,
+                totalChunks: chunk.totalChunks,
+                ingestedAt: new Date(),
+                status: 'active' as const,
+                accessCount: 0,
+              }));
+              const inserted = await this.documentModel.insertMany(
+                fallbackDocs,
+                { ordered: false },
+              );
+              totalInserted += inserted.length;
+              this.logger.warn(
+                `Fallback save: inserted ${inserted.length} chunks without embeddings (batch ${i + 1})`,
+                {
+                  batch: i + 1,
+                  documentId: validBatchChunks[0].metadata.documentId,
+                  userId: validBatchChunks[0].metadata.userId,
+                },
+              );
+            }
+          } catch (fallbackErr) {
+            this.logger.error('Fallback MongoDB save also failed', {
+              error:
+                fallbackErr instanceof Error
+                  ? fallbackErr.message
+                  : String(fallbackErr),
+              batch: i + 1,
+            });
+          }
+
           // Emit error progress
           if (uploadId) {
             this.emitProgress({
@@ -679,6 +800,56 @@ export class IngestionService {
           }
 
           // Continue with next batch instead of failing completely
+        }
+      }
+
+      // Final safety net: if nothing was inserted by the vector pipeline
+      // (embeddings service down, Atlas vector index misconfigured, silent
+      // failure inside addDocuments, or a crash right before the per-batch
+      // catch), force-save every chunk directly to MongoDB with empty
+      // embeddings. Without this, the user uploads a file, the request
+      // returns 201, but zero chunks reach the collection — making the
+      // document invisible to preview, Files Library, and retrieval.
+      if (totalInserted === 0 && chunks.length > 0) {
+        try {
+          const validChunks = chunks.filter(
+            (c) => c.content && c.content.trim().length > 0,
+          );
+          if (validChunks.length > 0) {
+            const safetyDocs = validChunks.map((chunk) => ({
+              content: chunk.content.trim(),
+              contentHash: chunk.contentHash,
+              embedding: [] as number[],
+              metadata: {
+                ...chunk.metadata,
+                source: (chunk.metadata.source as string) || 'user-upload',
+              },
+              chunkIndex: chunk.chunkIndex,
+              totalChunks: chunk.totalChunks,
+              ingestedAt: new Date(),
+              status: 'active' as const,
+              accessCount: 0,
+            }));
+            const inserted = await this.documentModel.insertMany(safetyDocs, {
+              ordered: false,
+            });
+            totalInserted += inserted.length;
+            this.logger.warn(
+              `Safety-net save: inserted ${inserted.length}/${validChunks.length} chunks after vector pipeline produced 0`,
+              {
+                documentId: validChunks[0].metadata.documentId,
+                userId: validChunks[0].metadata.userId,
+              },
+            );
+          }
+        } catch (safetyErr) {
+          this.logger.error('Safety-net MongoDB save failed', {
+            error:
+              safetyErr instanceof Error
+                ? safetyErr.message
+                : String(safetyErr),
+            totalChunks: chunks.length,
+          });
         }
       }
 
@@ -1058,17 +1229,38 @@ export class IngestionService {
     chunksCount: number;
     fileName?: string;
   } | null> {
-    const chunks = await this.documentModel
+    const userIdStr = String(userId);
+    // First: strict userId-scoped lookup — the normal path.
+    let chunks = await this.documentModel
       .find({
         'metadata.documentId': documentId,
-        'metadata.userId': userId,
+        'metadata.userId': userIdStr,
         status: 'active',
       })
       .sort({ chunkIndex: 1 })
       .limit(maxChunks)
-      .select('content metadata.fileName')
+      .select('content metadata.fileName metadata.userId')
       .lean()
       .exec();
+
+    // Fallback: historical chunks may have been written with an ObjectId
+    // instead of a string for `metadata.userId`. Try the documentId alone
+    // and verify userId matches after coercing both sides to string.
+    if (!chunks || chunks.length === 0) {
+      const loose = await this.documentModel
+        .find({
+          'metadata.documentId': documentId,
+          status: 'active',
+        })
+        .sort({ chunkIndex: 1 })
+        .limit(maxChunks)
+        .select('content metadata.fileName metadata.userId')
+        .lean()
+        .exec();
+      chunks = loose.filter(
+        (c) => String((c as any)?.metadata?.userId ?? '') === userIdStr,
+      );
+    }
 
     if (!chunks || chunks.length === 0) {
       return null;

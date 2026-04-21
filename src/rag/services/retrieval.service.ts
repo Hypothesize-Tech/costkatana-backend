@@ -36,6 +36,8 @@ export interface RetrievalOptions {
     preferredTopics?: string[];
     recentQueries?: string[];
   };
+  /** RRF: weight for vector ranks (0–1); lexical uses `1 - hybridVectorWeight`. */
+  hybridVectorWeight?: number;
 }
 
 export interface RetrievalResult {
@@ -201,6 +203,29 @@ class RetrievalServiceImpl {
       clearCache?: (userId?: string) => Promise<void>;
     } | null;
     if (rag?.clearCache) await rag.clearCache(userId);
+  }
+
+  /**
+   * Direct fetch by `metadata.documentId`. Skips vector search entirely so
+   * an explicitly-attached document is always loaded regardless of FAISS /
+   * Atlas / embeddings state. The retrieve module calls this before any
+   * strategy selection when the request carries a `documentIds` filter.
+   */
+  async retrieveByDocumentIds(
+    documentIds: string[],
+    options: RetrievalOptions = {},
+  ): Promise<RetrievalResult> {
+    const rag = getRagRetrieval() as {
+      retrieveByDocumentIds?: (
+        documentIds: string[],
+        options: RetrievalOptions,
+        startTime?: number,
+      ) => Promise<RetrievalResult>;
+    } | null;
+    if (rag?.retrieveByDocumentIds) {
+      return rag.retrieveByDocumentIds(documentIds, options);
+    }
+    return emptyResult(0);
   }
 }
 

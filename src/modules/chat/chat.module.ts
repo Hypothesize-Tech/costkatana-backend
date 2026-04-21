@@ -41,6 +41,8 @@ import { SharedPreferencesModule } from '../shared-preferences/shared-preference
 
 // Services
 import { WebSearchService } from './services/web-search.service';
+import { ToolRegistryService } from './tools/tool-registry.service';
+import { WebSearchTool } from './tools/web-search.tool';
 import { ContextAssemblerService } from './services/context-assembler.service';
 import { ContextAssemblyService } from './services/context-assembly.service';
 import { IntegrationMcpMapperService } from './services/integration-mcp-mapper.service';
@@ -87,6 +89,7 @@ import { VercelChatAgentService } from './services/vercel-chat-agent.service';
 import { GithubChatAgentService } from './services/github-chat-agent.service';
 import { AWSChatAgentService } from './services/aws-chat-agent.service';
 import { ChatSSEService } from './services/chat-sse.service';
+import { CitationsOrchestratorService } from './services/citations-orchestrator.service';
 
 // Handlers
 import { MCPHandler } from './handlers/mcp.handler';
@@ -182,10 +185,13 @@ import { LangchainOrchestratorService } from './langchain/langchain-orchestrator
     MCPClientService,
     IntegrationFormatterService,
     WebSearchService,
+    WebSearchTool,
+    ToolRegistryService,
     VercelChatAgentService,
     GithubChatAgentService,
     AWSChatAgentService,
     ChatSSEService,
+    CitationsOrchestratorService,
     ContextAssemblerService,
     ContextAssemblyService,
     IntegrationMcpMapperService,
@@ -235,6 +241,7 @@ import { LangchainOrchestratorService } from './langchain/langchain-orchestrator
     ChatEventsRedisService,
     ConversationalFlowService,
     MultiAgentFlowService, // Full 15-node LangGraph implementation for agent/chat flows
+    CitationsOrchestratorService,
   ],
 })
 export class ChatModule implements NestModule {

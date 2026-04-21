@@ -59,7 +59,6 @@ import {
   ExperimentHistoryFilters,
   CreateWhatIfScenarioRequest,
   WhatIfScenario as WhatIfScenarioInterface,
-  EstimateExperimentCostRequest,
   ExperimentCostEstimate,
 } from '../interfaces/experimentation.interfaces';
 
@@ -200,16 +199,11 @@ export class ExperimentationService {
   ): ModelComparisonResult {
     const n = partials.length;
     if (n === 1) return partials[0];
-    const avgCost =
-      partials.reduce((s, p) => s + p.metrics.cost, 0) / n;
-    const avgLatency =
-      partials.reduce((s, p) => s + p.metrics.latency, 0) / n;
+    const avgCost = partials.reduce((s, p) => s + p.metrics.cost, 0) / n;
+    const avgLatency = partials.reduce((s, p) => s + p.metrics.latency, 0) / n;
     const avgQuality =
       partials.reduce((s, p) => s + (p.metrics.qualityScore ?? 0), 0) / n;
-    const totalTokens = partials.reduce(
-      (s, p) => s + p.metrics.tokenCount,
-      0,
-    );
+    const totalTokens = partials.reduce((s, p) => s + p.metrics.tokenCount, 0);
     const response = partials
       .map((p, i) => `--- Prompt ${i + 1} ---\n${p.response}`)
       .join('\n\n');
@@ -266,8 +260,7 @@ export class ExperimentationService {
       if (slices.length === 1) return slices[0];
 
       const n = slices.length;
-      const avgActual =
-        slices.reduce((s, x) => s + (x.actualCost ?? 0), 0) / n;
+      const avgActual = slices.reduce((s, x) => s + (x.actualCost ?? 0), 0) / n;
       const avgExec =
         slices.reduce((s, x) => s + (x.executionTime ?? 0), 0) / n;
       const combinedResponse = slices
@@ -288,8 +281,7 @@ export class ExperimentationService {
       mergedCostBreakdown.outputCost =
         slices.reduce((s, x) => s + (x.costBreakdown?.outputCost ?? 0), 0) / n;
       mergedCostBreakdown.inputTokens = Math.round(
-        slices.reduce((s, x) => s + (x.costBreakdown?.inputTokens ?? 0), 0) /
-          n,
+        slices.reduce((s, x) => s + (x.costBreakdown?.inputTokens ?? 0), 0) / n,
       );
       mergedCostBreakdown.outputTokens = Math.round(
         slices.reduce((s, x) => s + (x.costBreakdown?.outputTokens ?? 0), 0) /
@@ -303,8 +295,7 @@ export class ExperimentationService {
         metrics: mergedMetrics,
         performance: {
           responseTime: avgExec,
-          throughput:
-            combinedResponse.length / Math.max(avgExec / 1000, 1),
+          throughput: combinedResponse.length / Math.max(avgExec / 1000, 1),
           reliability: slices[0].performance.reliability,
         },
         costBreakdown: mergedCostBreakdown,
@@ -327,8 +318,7 @@ export class ExperimentationService {
 
       // Attempt to decode JWT token
       const jwtSecret =
-        this.configService.get<string>('JWT_SECRET') ??
-        process.env.JWT_SECRET;
+        this.configService.get<string>('JWT_SECRET') ?? process.env.JWT_SECRET;
       if (!jwtSecret) {
         this.logger.warn(
           'JWT_SECRET not configured - session validation will fail',
@@ -593,7 +583,10 @@ export class ExperimentationService {
             if (promiseResult.status === 'fulfilled') {
               roundResults.push(promiseResult.value);
             } else {
-              this.logger.error('Model comparison failed:', promiseResult.reason);
+              this.logger.error(
+                'Model comparison failed:',
+                promiseResult.reason,
+              );
             }
           }
 
@@ -949,7 +942,7 @@ export class ExperimentationService {
         'llama3-1-8b': 'meta.llama3-1-8b-instruct-v1:0',
         'llama3-1-70b': 'meta.llama3-1-70b-instruct-v1:0',
         'llama3-1-405b': 'meta.llama3-1-405b-instruct-v1:0',
-        'llama3-2-1b': 'meta.llama3-2-1b-instruct-v1:0',
+        'llama3-2-1b': 'meta.llama4-scout-17b-instruct-v1:0',
         'llama3-2-3b': 'meta.llama3-2-3b-instruct-v1:0',
       },
       mistral: {
@@ -1138,19 +1131,50 @@ export class ExperimentationService {
     responses: Array<{ model: string; response: string }>,
     criteria: string[],
   ): string {
-    return `You are an expert AI evaluator. Compare the following model responses to the original prompt and evaluate them based on the given criteria.
+    const modelResponsesBlock = responses
+      .map(
+        (r, i) =>
+          `<model_response index="${i + 1}" model="${r.model}">\n${r.response}\n</model_response>`,
+      )
+      .join('\n\n');
 
-Original Prompt: "${originalPrompt}"
+    return `You are an expert AI evaluator. Compare the model responses to the original prompt and score each one against the given criteria.
 
-Evaluation Criteria: ${criteria.join(', ')}
+Here is an example input with an ideal evaluation:
 
-Model Responses:
-${responses
-  .map(
-    (r, i) => `Model ${i + 1} (${r.model}):
-${r.response}`,
-  )
-  .join('\n\n')}
+<sample_input>
+<original_prompt>Explain why prompt caching reduces API costs.</original_prompt>
+<evaluation_criteria>accuracy, completeness, conciseness</evaluation_criteria>
+<model_responses>
+<model_response index="1" model="gpt-4o">
+Prompt caching saves money by storing the processed version of repeated prompt prefixes. Instead of re-tokenizing the same system prompt on every call, the provider reuses the cached computation — reducing billable input tokens by up to 90% on cached portions.
+</model_response>
+<model_response index="2" model="nova-lite">
+Caching helps.
+</model_response>
+</model_responses>
+</sample_input>
+
+<ideal_output>
+Model 1 (gpt-4o): overallScore: 95, criteriaScores: { accuracy: 100, completeness: 90, conciseness: 95 }, reasoning: "Accurately explains the mechanism and quantifies the savings with a real figure. Covers both the how and the why concisely.", recommendation: "Use this response as the gold standard."
+Model 2 (nova-lite): overallScore: 10, criteriaScores: { accuracy: 30, completeness: 5, conciseness: 80 }, reasoning: "Technically not wrong but provides no useful information — far too vague to be actionable.", recommendation: "Reject; requires a more detailed prompt or a higher-capability model."
+</ideal_output>
+
+This evaluation is ideal because each score is grounded in specific observations about the response content, not just a numeric guess — and the recommendation is actionable.
+
+Now evaluate the actual responses below:
+
+<original_prompt>
+${originalPrompt}
+</original_prompt>
+
+<evaluation_criteria>
+${criteria.join(', ')}
+</evaluation_criteria>
+
+<model_responses>
+${modelResponsesBlock}
+</model_responses>
 
 Please provide a detailed evaluation for each model response. For each model, give:
 1. overallScore (0-100)
@@ -2262,8 +2286,7 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
         const ae = row.aiEvaluation as
           | { overallScore?: number; overall_score?: number }
           | undefined;
-        const score =
-          ae?.overallScore ?? ae?.overall_score ?? '';
+        const score = ae?.overallScore ?? ae?.overall_score ?? '';
         lines.push(
           [
             row.model ?? row.providerModel ?? '',
@@ -2823,7 +2846,10 @@ Example: [{"overallScore": 85, "criteriaScores": {"accuracy": 90, "relevance": 8
       const baseline = existing.baselineData?.cost ?? 0;
       const variance =
         usage.totalCost > 0 && baseline > 0
-          ? Math.max(0, baseline - usage.averageCostPerRequest * usage.totalRequests)
+          ? Math.max(
+              0,
+              baseline - usage.averageCostPerRequest * usage.totalRequests,
+            )
           : 0;
       setDoc.actualMonthlySavings = variance;
     }

@@ -709,24 +709,31 @@ Provide a concise summary highlighting the most relevant and current information
     const useLangchainIntegration =
       this.shouldUseLangchainIntegration(userMessage);
 
+    const memorySection = state.memoryContext
+      ? `\n<conversation_memory>\n${JSON.stringify(state.memoryContext)}\n</conversation_memory>`
+      : '';
+
+    const webSection =
+      state.scrapingResults && state.scrapingResults.length > 0
+        ? `\n<web_search_results>\n${state.scrapingResults
+            .map(
+              (r: any) =>
+                r.content?.content ||
+                r.content?.extractedText ||
+                r.snippet ||
+                '',
+            )
+            .filter(Boolean)
+            .join('\n')}\n</web_search_results>`
+        : '';
+
     const systemPrompt = `You are Cost Katana, an AI-powered cost optimization assistant for developers and organizations.
 
+<assistant_directives>
 You help users monitor, analyze, and optimize their AI API costs across multiple providers. Provide helpful, accurate responses while being mindful of API costs.
+</assistant_directives>${memorySection}${webSection}`;
 
-${state.memoryContext ? `Context from previous conversations: ${JSON.stringify(state.memoryContext)}` : ''}
-${
-  state.scrapingResults && state.scrapingResults.length > 0
-    ? `Web search results: ${state.scrapingResults
-        .map(
-          (r: any) =>
-            r.content?.content || r.content?.extractedText || r.snippet || '',
-        )
-        .filter(Boolean)
-        .join(' ')}`
-    : ''
-}`;
-
-    const prompt = `${systemPrompt}\n\nUser: ${userMessage}\n\nAssistant:`;
+    const prompt = `${systemPrompt}\n\n<user_message>\n${userMessage}\n</user_message>\n\nAssistant:`;
 
     try {
       const modelId = useLangchainIntegration

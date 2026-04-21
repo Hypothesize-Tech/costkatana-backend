@@ -58,6 +58,56 @@ export class RetrieveModule extends BaseRAGModule {
     }
 
     try {
+      // **Hard bypass**: when the caller explicitly attached documents (the
+      // chat send carried `documentIds`), skip strategy selection AND the
+      // vector pipeline entirely. Pull the chunks straight from MongoDB by
+      // documentId. This guarantees the user's attached file is loaded even
+      // when FAISS only has pre-seeded KB items, Atlas vector search isn't
+      // configured, or embeddings are degraded.
+      const directIds = effectiveConfig.filters?.documentIds;
+      if (directIds && directIds.length > 0) {
+        loggingService.info(
+          'RetrieveModule: documentIds bypass — direct fetch from MongoDB',
+          {
+            component: 'RetrieveModule',
+            documentIds: directIds,
+            userId: context?.userId,
+          },
+        );
+        const direct = await retrievalService.retrieveByDocumentIds(
+          directIds,
+          retrievalOptions,
+        );
+        if (direct.documents.length > 0) {
+          loggingService.info(
+            'RetrieveModule: documentIds bypass succeeded',
+            {
+              component: 'RetrieveModule',
+              chunksLoaded: direct.documents.length,
+              sources: direct.sources,
+            },
+          );
+          return {
+            ...this.createSuccessOutput(direct, {
+              strategy: 'documentIds_direct',
+              documentCount: direct.documents.length,
+              totalResults: direct.totalResults,
+              cacheHit: direct.cacheHit,
+              sources: direct.sources,
+              retrievalTime: direct.retrievalTime,
+            }),
+            documents: direct.documents,
+          };
+        }
+        loggingService.warn(
+          'RetrieveModule: direct fetch returned 0 chunks for documentIds — falling through to vector search',
+          {
+            component: 'RetrieveModule',
+            documentIds: directIds,
+          },
+        );
+      }
+
       // Determine retrieval strategy
       const strategy = this.determineStrategy(query, effectiveConfig);
 
@@ -201,36 +251,35 @@ export class RetrieveModule extends BaseRAGModule {
   }
 
   /**
-   * Hybrid search combining vector and keyword search
+   * Hybrid search — delegates to `retrievalService.retrieve`, which already
+   * runs vector + BM25-style `$text` search in parallel and fuses with weighted RRF
+   * in `RagRetrievalService`. A second retrieve + merge would double-apply fusion.
+   *
+   * `hybridAlpha` (0–1) maps to vector rank weight in RRF; lexical weight is `1 - hybridAlpha`.
    */
   async hybridSearch(
     query: string,
     options: RetrievalConfig,
   ): Promise<Document[]> {
-    const alpha = options.hybridAlpha ?? 0.5;
+    const limit = options.limit ?? 5;
+    const hybridVectorWeight = options.hybridAlpha ?? 0.6;
 
-    // Get vector search results
-    const vectorResults = await retrievalService.retrieve(query, {
-      limit: (options.limit ?? 5) * 2,
-      ...options.filters,
+    const result = await retrievalService.retrieve(query, {
+      limit,
+      filters: options.filters,
+      useCache: true,
+      rerank: false,
+      hybridVectorWeight,
     });
 
-    // Weight vector results by alpha
-    const weightedResults = vectorResults.documents.map((doc) => ({
-      ...doc,
-      metadata: {
-        ...doc.metadata,
-        hybridScore: ((doc.metadata.score as number) ?? 0.5) * alpha,
-      },
-    }));
+    loggingService.debug('hybridSearch completed (single fused retrieve)', {
+      component: 'RetrieveModule',
+      query: query.substring(0, 80),
+      documents: result.documents.length,
+      hybridVectorWeight,
+    });
 
-    // Sort by hybrid score and return top results
-    weightedResults.sort(
-      (a, b) =>
-        (b.metadata.hybridScore as number) - (a.metadata.hybridScore as number),
-    );
-
-    return weightedResults.slice(0, options.limit ?? 5);
+    return result.documents;
   }
 
   protected getDescription(): string {

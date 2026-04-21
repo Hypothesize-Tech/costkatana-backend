@@ -12,6 +12,7 @@ import {
   ValidateNested,
   IsMongoId,
   ValidateBy,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -77,6 +78,21 @@ export class AttachmentDto {
   fileType?: string;
 }
 
+export class ThinkingOptionsDto {
+  @IsBoolean()
+  enabled: boolean;
+
+  @IsEnum(['low', 'medium', 'high', 'max'])
+  @IsOptional()
+  effort?: 'low' | 'medium' | 'high' | 'max';
+
+  @IsInt()
+  @Min(1024)
+  @Max(64000)
+  @IsOptional()
+  budgetTokens?: number;
+}
+
 export class SelectionResponseDto {
   @IsString()
   parameterName: string;
@@ -123,6 +139,17 @@ export class SendMessageDto {
   @IsOptional()
   maxTokens?: number;
 
+  /** Overrides the default Bedrock/Claude system prompt for this message. */
+  @IsString()
+  @IsOptional()
+  @MaxLength(200000)
+  system?: string;
+
+  /** When false, no system block is sent (custom `system` is ignored). */
+  @IsBoolean()
+  @IsOptional()
+  useSystemPrompt?: boolean;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AttachmentDto)
@@ -141,6 +168,16 @@ export class SendMessageDto {
   @IsString({ each: true })
   @IsOptional()
   documentIds?: string[];
+
+  /**
+   * Enables Claude's native citations feature. When true (default when
+   * `documentIds` or `attachments` are present), attached/retrieved documents
+   * are passed as `document` content blocks with `citations.enabled: true`
+   * and the response carries a structured `citations[]` array.
+   */
+  @IsBoolean()
+  @IsOptional()
+  useCitations?: boolean;
 
   @IsBoolean()
   @IsOptional()
@@ -202,4 +239,9 @@ export class SendMessageDto {
   @IsBoolean()
   @IsOptional()
   useCortexStreaming?: boolean;
+
+  @ValidateNested()
+  @Type(() => ThinkingOptionsDto)
+  @IsOptional()
+  thinking?: ThinkingOptionsDto;
 }

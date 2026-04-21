@@ -47,7 +47,7 @@ function getDisplayName(modelId: string, modelName?: string): string {
     'meta.llama3-1-8b-instruct-v1:0': 'Llama 3.1 8B',
     'meta.llama3-1-70b-instruct-v1:0': 'Llama 3.1 70B',
     'meta.llama3-1-405b-instruct-v1:0': 'Llama 3.1 405B',
-    'meta.llama3-2-1b-instruct-v1:0': 'Llama 3.2 1B',
+    'meta.llama4-scout-17b-instruct-v1:0': 'Llama 3.2 1B',
     'meta.llama3-2-3b-instruct-v1:0': 'Llama 3.2 3B',
     'mistral.mistral-7b-instruct-v0:2': 'Mistral 7B',
     'mistral.mixtral-8x7b-instruct-v0:1': 'Mixtral 8x7B',
@@ -263,7 +263,7 @@ export class ModelRegistry {
         'Large model for complex reasoning tasks',
       'meta.llama3-1-405b-instruct-v1:0':
         'Most capable Llama model for advanced tasks',
-      'meta.llama3-2-1b-instruct-v1:0':
+      'meta.llama4-scout-17b-instruct-v1:0':
         'Compact, efficient model for basic tasks',
       'meta.llama3-2-3b-instruct-v1:0': 'Efficient model for general tasks',
       'mistral.mistral-7b-instruct-v0:2': 'Efficient open-source model',

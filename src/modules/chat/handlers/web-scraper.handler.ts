@@ -225,22 +225,46 @@ export class WebScraperHandler {
       )
       .join('\n\n');
 
-    const responsePrompt = `You are a factual AI assistant. The user asked: "${query}"
+    const responsePrompt = `You are a factual AI assistant. Based ONLY on the provided web search results, answer the user's question accurately.
 
-Web search results from Google Custom Search API:
-
-${searchResultsText}
-
-CRITICAL ACCURACY RULES - FOLLOW EXACTLY:
-1. ONLY use information explicitly stated in the search results above
+<accuracy_rules>
+1. ONLY use information explicitly stated in the search results
 2. If information is NOT in the results, clearly state "The searched sources do not contain information about [specific topic]"
 3. NEVER add information from your training data or make assumptions
 4. Always cite specific sources with URLs when stating facts
 5. If sources contradict each other, present both perspectives with their sources
 6. For pricing queries: Quote exact numbers if found, or explicitly state "Pricing information not available in sources"
 7. If you're uncertain, say so rather than guessing
+</accuracy_rules>
 
-Based ONLY on the search results above, provide a factual answer:`;
+Here is an example input with an ideal response:
+
+<sample_input>
+<user_question>What is the price of Claude 3.5 Sonnet per million tokens?</user_question>
+<web_search_results>
+[1] Anthropic Pricing Page
+URL: https://www.anthropic.com/pricing
+Content: Claude 3.5 Sonnet costs $3.00 per million input tokens and $15.00 per million output tokens as of June 2025.
+</web_search_results>
+</sample_input>
+
+<ideal_output>
+According to Anthropic's pricing page (https://www.anthropic.com/pricing), Claude 3.5 Sonnet costs **$3.00 per million input tokens** and **$15.00 per million output tokens** as of June 2025.
+</ideal_output>
+
+This response is ideal because it quotes exact numbers directly from the source, includes the URL, and does not add any information not present in the search result.
+
+Now answer the actual question:
+
+<user_question>
+${query}
+</user_question>
+
+<web_search_results>
+${searchResultsText}
+</web_search_results>
+
+Answer:`;
 
     // === Implement AI synthesis using Bedrock service ===
     let aiResponse: string;

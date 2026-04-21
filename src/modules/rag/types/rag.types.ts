@@ -16,6 +16,13 @@ export interface RAGContext {
   projectId?: string;
   recentMessages?: Array<{ role: string; content: string }>;
   domain?: string;
+  /**
+   * Documents the user explicitly attached to this chat turn. When present,
+   * the RetrieveModule short-circuits vector search and pulls the chunks
+   * straight from MongoDB by `metadata.documentId`. Set by KnowledgeBaseHandler
+   * from the chat DTO's `documentIds` field.
+   */
+  documentIds?: string[];
 }
 
 export interface OrchestratorInput {

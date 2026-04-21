@@ -352,12 +352,12 @@ export class AttachmentProcessor {
     valid: boolean;
     error?: string;
   } {
-    // Check file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024; // 10MB
+    // Check file size (max 50MB)
+    const maxSize = 50 * 1024 * 1024; // 50MB
     if (attachment.fileSize > maxSize) {
       return {
         valid: false,
-        error: `File size (${this.formatFileSize(attachment.fileSize)}) exceeds maximum allowed size (10MB)`,
+        error: `File size (${this.formatFileSize(attachment.fileSize)}) exceeds maximum allowed size (50MB)`,
       };
     }
 

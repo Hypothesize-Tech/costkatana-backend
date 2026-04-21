@@ -76,7 +76,13 @@ export class ChatSecurityHandlerService {
     },
     {
       // eslint-disable-next-line no-control-regex -- intentional: detect control characters in user input
-      pattern: /[\u0000-\u001F\u007F-\u009F]/g,
+      // Exclude legitimate whitespace controls — TAB (U+0009), LF (U+000A),
+      // and CR (U+000D) — which appear in any normal multi-line chat
+      // message (e.g. "@file:foo.pdf<NL><NL>what does it contain"). Without
+      // these exemptions the security filter rejects with 403 "Control
+      // characters detected" and the user can never send a message with
+      // a paragraph break.
+      pattern: /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g,
       category: 'control_characters',
       severity: 'medium',
       description: 'Control characters detected',

@@ -111,7 +111,11 @@ export class IngestionController {
     @CurrentUser() user: any,
   ) {
     const { fileName, fileData, mimeType, projectId, tags, description } = body;
-    const userId = user.id || user._id || user.userId;
+    // Always coerce to string — user.id can arrive as an ObjectId in some
+    // auth flows, which causes `metadata.userId` filters on the chunk side
+    // (preview, Files Library, chat retrieval) to miss when they query with
+    // a string user id. String-on-both-sides eliminates that class of bug.
+    const userId = String(user.id || user._id || user.userId || '');
 
     if (!fileName || !fileData) {
       throw new BadRequestException('fileName and fileData are required');

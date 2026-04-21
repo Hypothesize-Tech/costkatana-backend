@@ -93,6 +93,10 @@ export class KnowledgeBaseHandler {
       // Build RAG context with all available context
       const ragContext: any = {
         userId: request.userId,
+        // Surface attached documentIds inside the context so the RetrieveModule
+        // (the live one in /src/modules/rag/modules) can short-circuit vector
+        // search and load these chunks directly from MongoDB.
+        documentIds: request.documentIds,
         conversationId:
           (
             context.conversation as { _id?: { toString(): string } } | undefined
@@ -178,6 +182,32 @@ export class KnowledgeBaseHandler {
           mongodb: !!request.mongodbContext,
         },
       });
+
+      // The active modular RAG orchestrator (in /src/modules/rag/) only
+      // RETRIEVES documents — it does not synthesize an answer. Without this
+      // step the KB handler always falls through to the generic "I don't have
+      // enough information" branch even when retrieval succeeded. Synthesize
+      // an answer here from the retrieved chunks before deciding success.
+      if (
+        ragResult.success &&
+        !ragResult.answer &&
+        ragResult.documents &&
+        ragResult.documents.length > 0
+      ) {
+        try {
+          ragResult.answer = await this.generateAnswerFromDocuments(
+            request.message ?? '',
+            ragResult.documents,
+            request.modelId,
+          );
+        } catch (synthErr) {
+          this.logger.warn('Failed to synthesize answer from retrieved docs', {
+            error:
+              synthErr instanceof Error ? synthErr.message : String(synthErr),
+            documentCount: ragResult.documents.length,
+          });
+        }
+      }
 
       if (ragResult.success && ragResult.answer) {
         // Enhance response with Google Drive context if available but no knowledge base results
@@ -445,5 +475,60 @@ Please analyze the content from the Google Drive files above and provide a relev
       );
       return 'Unable to process Google Drive content at this time.';
     }
+  }
+
+  /**
+   * Synthesize an answer from RAG-retrieved document chunks. Called by the
+   * KB handler when the modular RAG orchestrator returns documents but no
+   * answer (its current contract). Truncates per-chunk content to keep the
+   * prompt within model limits and returns the model's text response.
+   */
+  private async generateAnswerFromDocuments(
+    userMessage: string,
+    documents: Array<{ content: string; metadata?: Record<string, unknown> }>,
+    modelId: string,
+  ): Promise<string> {
+    const PER_CHUNK_LIMIT = 4000;
+    const TOTAL_CHUNK_LIMIT = 12;
+    const contextBlocks = documents
+      .slice(0, TOTAL_CHUNK_LIMIT)
+      .map((doc, i) => {
+        const fileName =
+          (doc.metadata as { fileName?: string } | undefined)?.fileName ??
+          `document-${i + 1}`;
+        const text = (doc.content ?? '').slice(0, PER_CHUNK_LIMIT);
+        return `--- ${fileName} (chunk ${i + 1}) ---\n${text}`;
+      })
+      .join('\n\n');
+
+    const prompt = `You are answering a question using ONLY the document excerpts below. If the answer is in the excerpts, give a clear, concise response and cite the file name when relevant. If the excerpts don't cover the question, say so explicitly — do not invent details.
+
+# Document excerpts
+
+${contextBlocks}
+
+# User question
+
+${userMessage}
+
+# Answer`;
+
+    // Claude on Bedrock requires the Anthropic Messages body shape — NOT
+    // `{prompt, max_tokens}`. Sending the wrong shape causes Bedrock to
+    // reject the call, which would surface as 3 retries (~9s of wasted
+    // latency) and an undefined response → empty answer → KB fallback.
+    const response = await BedrockService.invokeModelDirectly(
+      modelId || 'anthropic.claude-sonnet-4-5-20250929-v1:0',
+      {
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 1500,
+        temperature: 0.2,
+        messages: [{ role: 'user', content: prompt }],
+      },
+    );
+    return (
+      response.response?.trim() ||
+      'I retrieved the document but could not generate an answer.'
+    );
   }
 }

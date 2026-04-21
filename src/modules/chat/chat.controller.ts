@@ -107,7 +107,28 @@ export class ChatController {
   @Public()
   async getAvailableModels() {
     const models = await this.chatService.getAvailableModels();
-    return { success: true, data: models };
+    const { getThinkingCapability } = await import(
+      '../bedrock/thinking-capability'
+    );
+    // Tool use is supported on Converse-capable chat models: Claude 3.5+,
+    // Claude 4.x, Llama 3.1+, Llama 4, and Amazon Nova. Kept conservative —
+    // we can broaden this later without a client change.
+    const supportsToolsForModel = (id: string): boolean => {
+      const m = (id || '').toLowerCase();
+      if (!m) return false;
+      if (/claude-3-5|claude-3-7|claude-opus-4|claude-sonnet-4|claude-haiku-4/.test(m)) {
+        return true;
+      }
+      if (/llama3-1|llama3-2|llama3-3|llama4/.test(m)) return true;
+      if (/nova-(micro|lite|pro)/.test(m)) return true;
+      return false;
+    };
+    const enriched = (models || []).map((m: any) => ({
+      ...m,
+      thinkingCapability: getThinkingCapability(m?.id || ''),
+      supportsTools: supportsToolsForModel(m?.id || ''),
+    }));
+    return { success: true, data: enriched };
   }
 
   /**

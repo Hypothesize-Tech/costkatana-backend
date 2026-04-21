@@ -13,6 +13,10 @@ export interface HandlerRequest {
   conversationId?: string;
   temperature?: number;
   maxTokens?: number;
+  /** Optional Bedrock system prompt override */
+  system?: string;
+  /** When false, omit system block entirely */
+  useSystemPrompt?: boolean;
   chatMode?: 'fastest' | 'cheapest' | 'balanced';
   useMultiAgent?: boolean;
   useWebSearch?: boolean;
@@ -58,6 +62,11 @@ export interface HandlerRequest {
     pendingAction: string;
     collectedParams: Record<string, unknown>;
     integration?: string;
+  };
+  thinking?: {
+    enabled: boolean;
+    effort?: 'low' | 'medium' | 'high' | 'max';
+    budgetTokens?: number;
   };
 }
 
@@ -107,6 +116,32 @@ export interface HandlerResult {
   strategyFormed?: any;
   autonomousActions?: string[];
   proactiveInsights?: string[];
+
+  // Extended thinking (reasoning) output from Claude on Bedrock
+  reasoning?: {
+    content: string;
+    mode?: 'adaptive' | 'enabled';
+    effort?: 'low' | 'medium' | 'high' | 'max';
+    budgetTokens?: number;
+  };
+
+  // Tool call history produced during streamed tool-use loops
+  toolCalls?: Array<{
+    id: string;
+    name: string;
+    input: unknown;
+    output?: {
+      content: string;
+      sources?: Array<{ title: string; url: string; description?: string }>;
+      data?: unknown;
+    };
+    status: 'success' | 'error';
+    startedAt: Date;
+    finishedAt: Date;
+    durationMs: number;
+  }>;
+  // Aggregated source citations across all tool results
+  sources?: Array<{ title: string; url: string; description?: string }>;
 
   // Success indicator
   success?: boolean;
