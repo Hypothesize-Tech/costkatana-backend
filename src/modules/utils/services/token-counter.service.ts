@@ -8,6 +8,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { encode as gptEncode, encodeChat } from 'gpt-tokenizer';
+import { countTokens as canonicalCountTokens } from '@/utils/token-counting';
 
 export interface TokenCountResult {
   /** Total number of tokens */
@@ -379,15 +380,16 @@ export class TokenCounterService {
       }
     }
 
-    // For Claude models, use similar tokenization to GPT (close approximation)
+    // For Claude models, use Anthropic's official tokenizer (legacy Claude
+    // BPE vocabulary). For Claude 3+ this drifts ~3-7% — callers needing exact
+    // counts for billing should use the messages/count_tokens API endpoint via
+    // `countTokensAuthoritative` in src/utils/token-counting.
     if (model && this.isAnthropicModel(model)) {
-      try {
-        const tokens = gptEncode(text);
-        // Claude tokenization is very similar to GPT, typically within 5%
-        return Math.ceil(tokens.length * 1.02);
-      } catch (error) {
-        this.logger.warn('Failed to tokenize for Claude, using fallback');
-      }
+      const result = canonicalCountTokens(text, {
+        provider: 'anthropic',
+        model,
+      });
+      if (result.tokens > 0 || !text) return result.tokens;
     }
 
     // For other models, use strategy-based estimation

@@ -1,101 +1,43 @@
 /**
- * Token counting utilities
- * Accepts optional provider/model for future provider-specific tokenization
+ * Token counting utilities — delegates to the canonical token-counting module
+ * so all call sites get provider-aware tokenization (real BPE for OpenAI,
+ * Anthropic, Mistral; provider heuristics for Google/Cohere).
+ *
+ * Public API is preserved for backwards compatibility with the call sites
+ * already importing from this file.
  */
+import { countTokens, countChatMessageTokens } from './token-counting';
 
 /**
- * Estimates the number of tokens for a piece of text, using
- * provider/model-specific heuristics when those are known, and falls back to
- * a default estimation otherwise.
+ * Estimates the number of tokens for a piece of text using a provider-aware
+ * tokenizer. Returns 0 for empty/non-string input.
  *
- * @param text - The text to estimate token count for.
- * @param provider - The AI provider (e.g., 'openai', 'anthropic', 'cohere', ...).
- * @param model - The specific model name (e.g., 'gpt-3.5-turbo', 'claude-instant').
- * @returns The estimated token count.
+ * For maximum accuracy use `countTokensAuthoritative` from
+ * `./token-counting` instead — that calls the provider's count-tokens
+ * endpoint when an API key is supplied.
  */
 export function estimateTokens(
   text: string,
   provider?: string,
   model?: string,
 ): number {
-  if (!text || typeof text !== 'string') {
-    return 0;
-  }
-
-  const cleanText = text.trim();
-
-  // Fast lookup heuristics per provider/model, fallback to default approximation
-  // For future: Plug in true tokenizers where available
-
-  // OpenAI heuristics (incl. GPT-3/GPT-4, Whisper, DALL-E, etc)
-  if (provider?.toLowerCase() === 'openai') {
-    if (!model || model.toLowerCase().includes('gpt')) {
-      // OpenAI estimates: ~4 chars/token for English, ~1.33 tokens/word
-      const charCount = cleanText.length;
-      const estimatedTokens = Math.ceil(charCount / 4);
-      // Overhead for system/user/assistant role & special tokens
-      const overhead = Math.ceil(estimatedTokens * 0.1) + 3;
-      return estimatedTokens + overhead;
-    }
-    // Other OpenAI models: fallback to char-based estimation
-  }
-
-  // Anthropic Claude models
-  if (provider?.toLowerCase() === 'anthropic') {
-    // Claude is somewhat more efficient: closer to 5 chars/token
-    const charCount = cleanText.length;
-    const estimatedTokens = Math.ceil(charCount / 5);
-    const overhead = Math.ceil(estimatedTokens * 0.08) + 2;
-    return estimatedTokens + overhead;
-  }
-
-  // Cohere models
-  if (provider?.toLowerCase() === 'cohere') {
-    // Cohere's BPE is similar to OpenAI's, usually 4 chars/token
-    const charCount = cleanText.length;
-    const estimatedTokens = Math.ceil(charCount / 4);
-    const overhead = Math.ceil(estimatedTokens * 0.1);
-    return estimatedTokens + overhead;
-  }
-
-  // Stable Diffusion/Other Image Models - not meaningful for text; caller should use estimateTokensForImage
-
-  // Google Palm/Bard models (notoriously word-based)
-  if (
-    provider?.toLowerCase() === 'google' ||
-    provider?.toLowerCase() === 'palm'
-  ) {
-    // Usually 1 token ≈ 1 word
-    const wordCount = cleanText
-      .split(/\s+/)
-      .filter((word) => word.length > 0).length;
-    const overhead = Math.ceil(wordCount * 0.05);
-    return wordCount + overhead;
-  }
-
-  // Add additional provider/model heuristics here as needed
-
-  // Generic fallback: English-like text, 4 chars/token
-  const charCount = cleanText.length;
-  const estimatedTokens = Math.ceil(charCount / 4);
-  const overhead = Math.ceil(estimatedTokens * 0.1);
-  return estimatedTokens + overhead;
+  if (!text || typeof text !== 'string') return 0;
+  return countTokens(text, { provider, model }).tokens;
 }
 
 /** Async version for consistency with legacy callers */
-export async function estimateTokensAsync(text: string): Promise<number> {
-  return estimateTokens(text);
+export async function estimateTokensAsync(
+  text: string,
+  provider?: string,
+  model?: string,
+): Promise<number> {
+  return estimateTokens(text, provider, model);
 }
 
-/** Re-export AIProvider for callers that need it */
 export { AIProvider } from '../types/aiCostTracker.types';
 
 export function countWords(text: string): number {
-  if (!text || typeof text !== 'string') {
-    return 0;
-  }
-
-  // Split by whitespace and filter out empty strings
+  if (!text || typeof text !== 'string') return 0;
   return text
     .trim()
     .split(/\s+/)
@@ -103,37 +45,29 @@ export function countWords(text: string): number {
 }
 
 export function estimateTokensFromWords(wordCount: number): number {
-  // Rough approximation: 1.3 tokens per word on average
+  // Rough conversion when only a word count is available.
   return Math.ceil(wordCount * 1.3);
 }
 
+/**
+ * Token estimate for an image input. Image tokenization is highly
+ * model-specific (OpenAI tile-based, Anthropic patches, Gemini area-based);
+ * this is a coarse approximation. For accurate counts, use the response
+ * `usage` field after the call.
+ */
 export function estimateTokensForImage(
   width: number = 512,
   height: number = 512,
 ): number {
-  // Rough estimation for image tokens
-  // Different models have different tokenization for images
-  // This is a simple approximation
   const pixels = width * height;
-  const tokensPerPixel = 0.001; // Very rough approximation
+  const tokensPerPixel = 0.001;
   return Math.ceil(pixels * tokensPerPixel);
 }
 
 export function estimateTokensForMessages(
   messages: Array<{ role: string; content: string }>,
+  provider?: string,
+  model?: string,
 ): number {
-  let totalTokens = 0;
-
-  for (const message of messages) {
-    // Add tokens for role indicator
-    totalTokens += 10; // Rough estimate for role metadata
-
-    // Add tokens for content
-    totalTokens += estimateTokens(message.content);
-
-    // Add spacing/formatting overhead
-    totalTokens += 5;
-  }
-
-  return totalTokens;
+  return countChatMessageTokens(messages, { provider, model }).tokens;
 }

@@ -4,6 +4,10 @@ import {
   InvokeModelWithResponseStreamCommand,
 } from '@aws-sdk/client-bedrock-runtime';
 import { aiLogger } from '../services/aiLogger.service';
+import {
+  countTokens as canonicalCountTokens,
+  extractUsageFromResponse,
+} from './token-counting';
 
 /**
  * Bedrock Client Interceptor
@@ -39,6 +43,9 @@ export function wrapBedrockClient(
     let modelId = 'unknown';
     let inputTokens = 0;
     let outputTokens = 0;
+    let cacheReadInputTokens: number | undefined;
+    let cacheCreationInputTokens: number | undefined;
+    let tokensEstimated = true;
     let prompt = '';
     let parameters: any = {};
     let operation = 'unknown';
@@ -61,13 +68,13 @@ export function wrapBedrockClient(
           // Extract prompt (different formats for different models)
           if (body.messages) {
             prompt = JSON.stringify(body.messages);
-            inputTokens = estimateTokens(prompt);
+            inputTokens = estimateTokens(prompt, modelId);
           } else if (body.prompt) {
             prompt = body.prompt;
-            inputTokens = estimateTokens(prompt);
+            inputTokens = estimateTokens(prompt, modelId);
           } else if (body.inputText) {
             prompt = body.inputText;
-            inputTokens = estimateTokens(prompt);
+            inputTokens = estimateTokens(prompt, modelId);
           }
 
           // Extract parameters
@@ -93,7 +100,7 @@ export function wrapBedrockClient(
           prompt = body.messages
             ? JSON.stringify(body.messages)
             : body.prompt || '';
-          inputTokens = estimateTokens(prompt);
+          inputTokens = estimateTokens(prompt, modelId);
           parameters = {
             temperature: body.temperature,
             maxTokens: body.max_tokens || body.maxTokens,
@@ -123,19 +130,27 @@ export function wrapBedrockClient(
         if (responseBody.content) {
           result = JSON.stringify(responseBody.content);
           outputTokens =
-            responseBody.usage?.output_tokens || estimateTokens(result);
+            responseBody.usage?.output_tokens || estimateTokens(result, modelId);
         } else if (responseBody.completion) {
           result = responseBody.completion;
-          outputTokens = estimateTokens(result);
+          outputTokens = estimateTokens(result, modelId);
         } else if (responseBody.results) {
           result = responseBody.results[0]?.outputText || '';
-          outputTokens = estimateTokens(result);
+          outputTokens = estimateTokens(result, modelId);
         }
 
-        // Extract token usage from response
-        if (responseBody.usage) {
-          inputTokens = responseBody.usage.input_tokens || inputTokens;
-          outputTokens = responseBody.usage.output_tokens || outputTokens;
+        // Prefer authoritative usage from the response. Captures Anthropic
+        // prompt-cache fields when present (Claude on Bedrock with caching).
+        const usage = extractUsageFromResponse(responseBody, {
+          provider: 'bedrock',
+          model: modelId,
+        });
+        if (usage) {
+          inputTokens = usage.inputTokens || inputTokens;
+          outputTokens = usage.outputTokens || outputTokens;
+          cacheReadInputTokens = usage.cacheReadInputTokens;
+          cacheCreationInputTokens = usage.cacheCreationInputTokens;
+          tokensEstimated = false;
         }
 
         // Calculate cost
@@ -157,6 +172,9 @@ export function wrapBedrockClient(
         responseTime,
         inputTokens,
         outputTokens,
+        cacheReadInputTokens,
+        cacheCreationInputTokens,
+        tokensEstimated,
         prompt,
         parameters,
         result,
@@ -232,12 +250,16 @@ export function createLoggedBedrockClient(
 }
 
 /**
- * Estimate tokens from text (rough approximation)
+ * Estimate tokens from text using the canonical provider-aware tokenizer.
+ * Routes Bedrock model IDs ("anthropic.claude-3-..", "mistral.mixtral-..", etc.)
+ * to the right tokenizer instead of a universal char/4 heuristic.
  */
-function estimateTokens(text: string): number {
+function estimateTokens(text: string, modelId?: string): number {
   if (!text) return 0;
-  // Rough estimate: 1 token ≈ 4 characters
-  return Math.ceil(text.length / 4);
+  return canonicalCountTokens(text, {
+    provider: 'bedrock',
+    model: modelId,
+  }).tokens;
 }
 
 /**

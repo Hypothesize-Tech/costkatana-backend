@@ -77,6 +77,7 @@ export class AiLoggingMiddleware implements NestMiddleware {
                 : responseBody;
 
             // Log AI response metrics
+            const u = responseData.usage;
             this.logger.log('AI Request Completed', {
               requestId,
               userId,
@@ -85,13 +86,16 @@ export class AiLoggingMiddleware implements NestMiddleware {
               duration,
               model: responseData.model || req.body?.model,
               tokensUsed:
-                responseData.usage?.total_tokens ||
-                (responseData.usage?.prompt_tokens || 0) +
-                  (responseData.usage?.completion_tokens || 0),
-              promptTokens: responseData.usage?.prompt_tokens,
-              completionTokens: responseData.usage?.completion_tokens,
+                u?.total_tokens ||
+                (u?.prompt_tokens || u?.input_tokens || 0) +
+                  (u?.completion_tokens || u?.output_tokens || 0),
+              promptTokens: u?.prompt_tokens ?? u?.input_tokens,
+              completionTokens: u?.completion_tokens ?? u?.output_tokens,
+              cacheReadInputTokens: u?.cache_read_input_tokens,
+              cacheCreationInputTokens: u?.cache_creation_input_tokens,
+              reasoningTokens: u?.completion_tokens_details?.reasoning_tokens,
               cost: this.calculateEstimatedCost(
-                responseData.usage,
+                u,
                 responseData.model || req.body?.model,
               ),
               finishReason: responseData.choices?.[0]?.finish_reason,
@@ -152,8 +156,8 @@ export class AiLoggingMiddleware implements NestMiddleware {
     try {
       const costResult = this.pricingRegistryService.calculateCost({
         modelId: model,
-        inputTokens: usage.prompt_tokens || 0,
-        outputTokens: usage.completion_tokens || 0,
+        inputTokens: usage.prompt_tokens ?? usage.input_tokens ?? 0,
+        outputTokens: usage.completion_tokens ?? usage.output_tokens ?? 0,
       });
 
       return costResult ? costResult.totalCost : 0;
@@ -163,9 +167,9 @@ export class AiLoggingMiddleware implements NestMiddleware {
         error,
       );
       // Fallback estimation
-      return (
-        ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0)) * 0.0001
-      );
+      const inputT = usage.prompt_tokens ?? usage.input_tokens ?? 0;
+      const outputT = usage.completion_tokens ?? usage.output_tokens ?? 0;
+      return (inputT + outputT) * 0.0001;
     }
   }
 }
