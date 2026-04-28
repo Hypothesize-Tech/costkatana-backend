@@ -64,8 +64,6 @@ export interface INetworking {
 }
 
 export interface IPayload {
-  requestBody?: any;
-  responseBody?: any;
   requestSize: number;
   responseSize: number;
   contentType: string;
@@ -446,8 +444,6 @@ export class Usage implements IUsageMethods {
         tlsHandshakeTime: Number,
       },
       payload: {
-        requestBody: mongoose.Schema.Types.Mixed,
-        responseBody: mongoose.Schema.Types.Mixed,
         requestSize: { type: Number, min: 0, default: 0 },
         responseSize: { type: Number, min: 0, default: 0 },
         contentType: String,

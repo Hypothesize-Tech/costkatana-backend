@@ -1336,11 +1336,12 @@ export class GatewayAnalyticsService {
   }
 
   /**
-   * Merge comprehensive middleware tracking with gateway request/response bodies for Usage.requestTracking.
+   * Merge comprehensive middleware tracking with gateway timing/headers for Usage.requestTracking.
+   * Request/response bodies are intentionally not retained for compliance.
    */
   private mergeGatewayRequestTracking(
     request: any,
-    responseBody: unknown | undefined,
+    _responseBody: unknown | undefined,
     processingTimeMs: number,
   ): Record<string, unknown> {
     const existing = request.requestTracking as
@@ -1350,11 +1351,7 @@ export class GatewayAnalyticsService {
       (existing?.payload as Record<string, unknown> | undefined) || {};
     const payload: Record<string, unknown> = {
       ...payloadBase,
-      requestBody: request.body,
     };
-    if (responseBody !== undefined) {
-      payload.responseBody = responseBody;
-    }
     const perfBase = (existing?.performance as Record<string, unknown>) || {
       networkTime: 0,
       serverProcessingTime: 0,

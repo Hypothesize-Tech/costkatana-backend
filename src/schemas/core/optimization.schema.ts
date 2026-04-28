@@ -111,8 +111,6 @@ export interface INetworking {
 }
 
 export interface IPayload {
-  requestBody?: any;
-  responseBody?: any;
   requestSize: number;
   responseSize: number;
   contentType: string;

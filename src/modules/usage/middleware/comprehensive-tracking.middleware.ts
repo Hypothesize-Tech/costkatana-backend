@@ -36,8 +36,6 @@ interface Networking {
 }
 
 interface Payload {
-  requestBody?: any;
-  responseBody?: any;
   requestSize: number;
   responseSize: number;
   contentType: string;
@@ -114,9 +112,6 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
 
       // Estimate request payload size
       const payload: Payload = {
-        requestBody: this.shouldCaptureBody(req)
-          ? this.sanitizeBody(req.body)
-          : undefined,
         requestSize: this.estimatePayloadSize(req.body),
         responseSize: 0, // Will be updated on response
         contentType: inHeaders['content-type'] || 'application/json',
@@ -224,19 +219,19 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
     const middlewareSelf = this;
     let responseSize = 0;
 
-    // Capture response data
-    const chunks: Buffer[] = [];
+    // Track response chunk sizes only (no body retention) for size/compression metrics.
+    const chunkSizes: number[] = [];
 
-    // Override write method to capture response chunks
+    // Override write method to track response chunk sizes (we never store the body itself).
     res.write = function (chunk: any, ...args: any[]) {
       if (chunk) {
         if (Buffer.isBuffer(chunk)) {
-          chunks.push(chunk);
+          chunkSizes.push(chunk.length);
           responseSize += chunk.length;
         } else if (typeof chunk === 'string') {
-          const buffer = Buffer.from(chunk, args[0] || 'utf8');
-          chunks.push(buffer);
-          responseSize += buffer.length;
+          const len = Buffer.byteLength(chunk, args[0] || 'utf8');
+          chunkSizes.push(len);
+          responseSize += len;
         }
       }
       return originalWrite.apply(this, [chunk, ...args]);
@@ -267,12 +262,8 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
             ? Math.min(100, (responseSize / totalDataTransferred) * 100)
             : 100;
 
-        // Update payload information
+        // Update payload size only — request/response bodies are intentionally not retained.
         requestTracking.payload.responseSize = responseSize;
-        requestTracking.payload.responseBody =
-          middlewareSelf.shouldCaptureResponse(req, resRef)
-            ? middlewareSelf.extractResponseBody(chunks)
-            : undefined;
 
         // Update response headers
         requestTracking.headers.response = middlewareSelf.sanitizeHeaders(
@@ -282,7 +273,7 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
         // Calculate compression ratio if applicable
         if (resRef.getHeader('content-encoding')) {
           requestTracking.payload.compressionRatio =
-            middlewareSelf.calculateCompressionRatio(chunks);
+            middlewareSelf.calculateCompressionRatio(chunkSizes);
         }
 
         // Store final tracking data
@@ -372,36 +363,6 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
   }
 
   /**
-   * Sanitize request/response body for tracking
-   */
-  private sanitizeBody(body: any): any {
-    if (!body || typeof body !== 'object') {
-      return body;
-    }
-
-    const sanitized = { ...body };
-
-    // Remove sensitive fields
-    const sensitiveFields = [
-      'password',
-      'token',
-      'apiKey',
-      'secret',
-      'creditCard',
-      'cvv',
-      'ssn',
-    ];
-
-    sensitiveFields.forEach((field) => {
-      if (sanitized[field]) {
-        sanitized[field] = '[REDACTED]';
-      }
-    });
-
-    return sanitized;
-  }
-
-  /**
    * Estimate payload size
    */
   private estimatePayloadSize(body: any): number {
@@ -421,92 +382,12 @@ export class ComprehensiveTrackingMiddleware implements NestMiddleware {
   }
 
   /**
-   * Determine if request body should be captured
+   * Calculate compression ratio from observed response chunk sizes.
    */
-  private shouldCaptureBody(req: Request): boolean {
-    const h = ComprehensiveTrackingMiddleware.incomingHeaders(req);
-    const contentType = (h['content-type'] as string) || '';
-    const method = req.method;
+  private calculateCompressionRatio(chunkSizes: number[]): number {
+    if (chunkSizes.length === 0) return 1;
 
-    // Only capture for relevant methods and content types
-    if (!['POST', 'PUT', 'PATCH'].includes(method)) {
-      return false;
-    }
-
-    // Only capture JSON and form data
-    if (
-      !contentType.includes('application/json') &&
-      !contentType.includes('application/x-www-form-urlencoded') &&
-      !contentType.includes('multipart/form-data')
-    ) {
-      return false;
-    }
-
-    // Skip if body is too large (> 1MB)
-    const contentLength = parseInt((h['content-length'] as string) || '0');
-    if (contentLength > 1024 * 1024) {
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Determine if response body should be captured
-   */
-  private shouldCaptureResponse(req: Request, res: Response): boolean {
-    const contentType = (res.getHeader('content-type') as string) || '';
-    const statusCode = res.statusCode;
-
-    // Only capture successful responses
-    if (statusCode < 200 || statusCode >= 300) {
-      return false;
-    }
-
-    // Only capture JSON responses
-    if (!contentType.includes('application/json')) {
-      return false;
-    }
-
-    // Skip if response is too large (> 1MB)
-    const contentLength = parseInt(
-      (res.getHeader('content-length') as string) || '0',
-    );
-    if (contentLength > 1024 * 1024) {
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Extract response body from captured chunks
-   */
-  private extractResponseBody(chunks: Buffer[]): any {
-    if (chunks.length === 0) return undefined;
-
-    try {
-      const fullBuffer = Buffer.concat(chunks);
-      const bodyString = fullBuffer.toString('utf8');
-
-      // Try to parse as JSON
-      return JSON.parse(bodyString);
-    } catch {
-      // If not JSON or parsing fails, return undefined
-      return undefined;
-    }
-  }
-
-  /**
-   * Calculate compression ratio
-   */
-  private calculateCompressionRatio(chunks: Buffer[]): number {
-    if (chunks.length === 0) return 1;
-
-    const compressedSize = chunks.reduce(
-      (total, chunk) => total + chunk.length,
-      0,
-    );
+    const compressedSize = chunkSizes.reduce((total, len) => total + len, 0);
 
     // Estimate uncompressed size (rough approximation)
     // This is a simplified calculation
