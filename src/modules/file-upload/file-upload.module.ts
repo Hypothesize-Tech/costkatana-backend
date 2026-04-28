@@ -13,6 +13,10 @@ import {
   ChatMessage,
   ChatMessageSchema,
 } from '../../schemas/chat/chat-message.schema';
+import {
+  Document as IngestedDocument,
+  DocumentSchema,
+} from '../../schemas/document/document.schema';
 import { StorageModule } from '../storage/storage.module';
 import { IngestionModule } from '../ingestion/ingestion.module';
 import { AuthModule } from '../auth/auth.module';
@@ -27,6 +31,7 @@ import { FileUploadService } from './file-upload.service';
     MongooseModule.forFeature([
       { name: UploadedFile.name, schema: UploadedFileSchema },
       { name: ChatMessage.name, schema: ChatMessageSchema },
+      { name: IngestedDocument.name, schema: DocumentSchema },
     ]),
   ],
   controllers: [FileUploadController],

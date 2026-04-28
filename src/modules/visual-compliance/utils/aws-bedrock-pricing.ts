@@ -896,7 +896,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
 
   // Llama 3.2 Series
   {
-    modelId: 'meta.llama3-2-1b-instruct-v1:0',
+    modelId: 'meta.llama4-scout-17b-instruct-v1:0',
     modelName: 'Llama 3.2 Instruct (1B)',
     provider: 'AWS Bedrock',
     inputPrice: 0.1,

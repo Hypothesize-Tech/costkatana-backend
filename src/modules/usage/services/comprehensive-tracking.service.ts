@@ -63,8 +63,6 @@ interface ServerSideData {
     tlsHandshakeTime?: number;
   };
   payload: {
-    requestBody?: any;
-    responseBody?: any;
     requestSize: number;
     responseSize: number;
     contentType: string;

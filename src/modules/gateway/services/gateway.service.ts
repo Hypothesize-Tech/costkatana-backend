@@ -196,6 +196,76 @@ export class GatewayService {
         request,
         proxyRequest,
       );
+      proxyRequest =
+        this.requestProcessingService.applyClaudePromptCachingIfApplicable(
+          request,
+          proxyRequest,
+        );
+
+      // Bedrock Anthropic SSE: one long-lived response; skip axios, buffer moderation, and JSON send.
+      if (
+        proxyRequest.internalBedrockAnthropic &&
+        request.body &&
+        typeof request.body === 'object' &&
+        (request.body as Record<string, unknown>).stream === true
+      ) {
+        this.logger.debug('Step 6: Bedrock Anthropic streaming (SSE)', {
+          requestId,
+        });
+        const streamMeta =
+          await this.gatewayAnthropicBedrockService.executeStream(
+            request,
+            response,
+            proxyRequest,
+          );
+
+        await this.analyticsService.trackUsage(
+          request,
+          streamMeta.mockResponseBody,
+          0,
+        );
+
+        if (budgetCheck.reservationId) {
+          await this.budgetService.trackRequestCost(
+            request,
+            { data: streamMeta.mockResponseBody },
+            (request as { gatewayContext?: { cost?: number } }).gatewayContext
+              ?.cost ?? 0,
+          );
+        }
+
+        setImmediate(async () => {
+          try {
+            if (!context.failoverEnabled) {
+              const provider =
+                this.requestProcessingService.inferServiceFromUrl(
+                  context.targetUrl || '',
+                );
+              await this.analyticsService.trackLatency(
+                provider,
+                String(request.body?.model || 'unknown'),
+                Date.now() - startTime,
+                true,
+              );
+            }
+          } catch (e) {
+            this.logger.warn('Stream analytics follow-up failed', {
+              requestId,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
+        });
+
+        this.logger.log(
+          '=== GATEWAY REQUEST PROCESSING COMPLETED (ANTHROPIC STREAM) ===',
+          {
+            component: 'GatewayService',
+            requestId,
+            processingTime: `${Date.now() - startTime}ms`,
+          },
+        );
+        return;
+      }
 
       // Step 6: Execute request (single provider or failover)
       this.logger.debug('Step 6: Executing request', { requestId });
@@ -264,11 +334,10 @@ export class GatewayService {
         this.logger.debug('Executing single provider request', { requestId });
 
         if (proxyRequest.internalBedrockAnthropic) {
-          axiosResponse =
-            await this.gatewayAnthropicBedrockService.execute(
-              request,
-              proxyRequest,
-            );
+          axiosResponse = await this.gatewayAnthropicBedrockService.execute(
+            request,
+            proxyRequest,
+          );
           retryAttempts = 0;
         } else if (context.retryEnabled) {
           const retryResult = await this.retryService.executeWithRetry(
@@ -327,13 +396,16 @@ export class GatewayService {
           response,
           moderatedResponse,
         );
-        this.logger.log('=== GATEWAY REQUEST PROCESSING COMPLETED (MODERATION BLOCK) ===', {
-          component: 'GatewayService',
-          operation: 'processGatewayRequest',
-          type: 'gateway_request_moderation_blocked',
-          requestId,
-          processingTime: `${Date.now() - startTime}ms`,
-        });
+        this.logger.log(
+          '=== GATEWAY REQUEST PROCESSING COMPLETED (MODERATION BLOCK) ===',
+          {
+            component: 'GatewayService',
+            operation: 'processGatewayRequest',
+            type: 'gateway_request_moderation_blocked',
+            requestId,
+            processingTime: `${Date.now() - startTime}ms`,
+          },
+        );
         return;
       }
 
@@ -504,7 +576,9 @@ export class GatewayService {
 
       // Prefer Nest HttpException (Bedrock, validation, etc.) — do not treat as Axios.
       if (error instanceof HttpException) {
-        const status = GatewayService.normalizeOutboundStatus(error.getStatus());
+        const status = GatewayService.normalizeOutboundStatus(
+          error.getStatus(),
+        );
         const body = error.getResponse();
         if (typeof body === 'string') {
           response.status(status).json({
@@ -637,9 +711,8 @@ export class GatewayService {
         appLevelCacheHitRatePercent: 0,
       };
       if (userId) {
-        const g = await this.analyticsService.getGatewayUsageCacheSummary(
-          userId,
-        );
+        const g =
+          await this.analyticsService.getGatewayUsageCacheSummary(userId);
         gateway = { ...g };
       }
       return {

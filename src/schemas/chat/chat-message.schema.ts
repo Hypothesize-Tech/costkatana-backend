@@ -32,6 +32,59 @@ export interface IMessageMetadata {
   outputTokens?: number;
 }
 
+export interface IMessageThinking {
+  content: string;
+  mode?: 'adaptive' | 'enabled';
+  effort?: 'low' | 'medium' | 'high' | 'max';
+  budgetTokens?: number;
+  durationMs?: number;
+}
+
+export interface IToolCallSource {
+  title: string;
+  url: string;
+  description?: string;
+}
+
+export interface IMessageCitation {
+  /** Stable citation id "cit_<n>" assigned by the gateway. */
+  id: string;
+  /** Which assistant text block this citation belongs to. */
+  textBlockIndex: number;
+  /** Char offsets of the citing span inside that text block. */
+  startOffset: number;
+  endOffset: number;
+  /** The exact text Claude copied from the source document. */
+  citedText: string;
+  document: {
+    index: number;
+    documentId?: string;
+    title: string;
+    url?: string;
+    sourceType: 'attachment' | 'upload' | 'rag';
+  };
+  /** Where in the source the cited span lives (page / char / chunk). */
+  location: {
+    type: 'page' | 'char' | 'chunk';
+    start: number;
+    end: number;
+  };
+}
+
+export interface IToolCall {
+  id: string;
+  name: string;
+  input?: unknown;
+  output?: {
+    content: string;
+    sources?: IToolCallSource[];
+  };
+  status?: 'success' | 'error';
+  startedAt?: Date;
+  finishedAt?: Date;
+  durationMs?: number;
+}
+
 export interface IFormattedResult {
   type: 'table' | 'json' | 'list' | 'text';
   data: any;
@@ -125,6 +178,91 @@ export class ChatMessage {
     _id: false,
   })
   metadata?: IMessageMetadata;
+
+  @Prop({
+    type: {
+      content: { type: String, maxlength: 200000 },
+      mode: { type: String, enum: ['adaptive', 'enabled'] },
+      effort: { type: String, enum: ['low', 'medium', 'high', 'max'] },
+      budgetTokens: { type: Number, min: 0 },
+      durationMs: { type: Number, min: 0 },
+    },
+    _id: false,
+  })
+  thinking?: IMessageThinking;
+
+  @Prop({
+    type: [
+      {
+        id: { type: String, required: true },
+        name: { type: String, required: true },
+        input: mongoose.Schema.Types.Mixed,
+        output: {
+          content: String,
+          sources: [
+            {
+              title: String,
+              url: String,
+              description: String,
+              _id: false,
+            },
+          ],
+        },
+        status: { type: String, enum: ['success', 'error'] },
+        startedAt: Date,
+        finishedAt: Date,
+        durationMs: { type: Number, min: 0 },
+        _id: false,
+      },
+    ],
+  })
+  toolCalls?: IToolCall[];
+
+  @Prop({
+    type: [
+      {
+        title: { type: String, required: true },
+        url: { type: String, required: true },
+        description: String,
+        _id: false,
+      },
+    ],
+  })
+  sources?: IToolCallSource[];
+
+  @Prop({
+    type: [
+      {
+        id: { type: String, required: true },
+        textBlockIndex: { type: Number, required: true, min: 0 },
+        startOffset: { type: Number, required: true, min: 0 },
+        endOffset: { type: Number, required: true, min: 0 },
+        citedText: { type: String, required: true },
+        document: {
+          index: { type: Number, required: true, min: 0 },
+          documentId: String,
+          title: { type: String, required: true },
+          url: String,
+          sourceType: {
+            type: String,
+            enum: ['attachment', 'upload', 'rag'],
+            required: true,
+          },
+        },
+        location: {
+          type: {
+            type: String,
+            enum: ['page', 'char', 'chunk'],
+            required: true,
+          },
+          start: { type: Number, required: true },
+          end: { type: Number, required: true },
+        },
+        _id: false,
+      },
+    ],
+  })
+  citations?: IMessageCitation[];
 
   @Prop({
     type: String,

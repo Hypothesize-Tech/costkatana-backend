@@ -5,12 +5,31 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { BedrockService } from '../../bedrock/bedrock.service';
+import { ToolRegistryService } from '../tools/tool-registry.service';
+import type { ToolResult } from '../tools/tool.types';
 import {
   HandlerRequest,
   HandlerResult,
   ProcessingContext,
   FallbackResult,
 } from './types/handler.types';
+
+export interface ToolStreamCallbacks {
+  onToolCall?: (call: {
+    id: string;
+    name: string;
+    input: unknown;
+    startedAt: Date;
+  }) => void | Promise<void>;
+  onToolResult?: (result: {
+    id: string;
+    name: string;
+    output: ToolResult;
+    status: 'success' | 'error';
+    durationMs: number;
+    sources?: Array<{ title: string; url: string; description?: string }>;
+  }) => void | Promise<void>;
+}
 
 @Injectable()
 export class FallbackHandler {
@@ -25,7 +44,10 @@ export class FallbackHandler {
   private readonly BACKOFF_MULTIPLIER = 2; // Double each time
   private readonly JITTER_PERCENTAGE = 0.1; // ±10% jitter
 
-  constructor(private readonly bedrockService: BedrockService) {}
+  constructor(
+    private readonly bedrockService: BedrockService,
+    private readonly toolRegistry: ToolRegistryService,
+  ) {}
 
   /**
    * Handle circuit breaker fallback with exponential backoff
@@ -110,6 +132,8 @@ export class FallbackHandler {
     request: HandlerRequest,
     context: ProcessingContext,
     streamingCallback?: (chunk: string, done: boolean) => void | Promise<void>,
+    reasoningCallback?: (chunk: string, done: boolean) => void | Promise<void>,
+    toolCallbacks?: ToolStreamCallbacks,
   ): Promise<HandlerResult> {
     // Build contextual messages for streaming
     const messages = this.buildContextualMessages(
@@ -118,8 +142,22 @@ export class FallbackHandler {
     );
 
     let responseText: string;
+    let reasoningText = '';
     let inputTokens = 0;
     let outputTokens = 0;
+    let streamToolCalls: Awaited<
+      ReturnType<typeof BedrockService.streamModelResponse>
+    >['toolCalls'];
+
+    // Thinking on = advertise tools (currently web_search) to the LLM.
+    const tools =
+      streamingCallback && request.thinking?.enabled
+        ? this.toolRegistry.getAvailableTools({
+            userId: request.userId,
+            modelId: request.modelId,
+            thinkingEnabled: true,
+          })
+        : [];
 
     if (streamingCallback) {
       // Use streaming response for real-time token delivery
@@ -127,14 +165,56 @@ export class FallbackHandler {
         messages,
         request.modelId || 'nova-pro-v1:0',
         {
-          maxTokens: request.maxTokens || 1000,
-          temperature: request.temperature || 0.7,
+          maxTokens: request.maxTokens ?? 1000,
+          temperature: request.temperature ?? 0.7,
+          system: request.system,
+          useSystemPrompt: request.useSystemPrompt,
           onChunk: streamingCallback,
+          thinking: request.thinking,
+          onReasoningChunk: reasoningCallback,
+          ...(tools.length
+            ? {
+                tools,
+                onToolCall: async (call) => {
+                  await toolCallbacks?.onToolCall?.({
+                    ...call,
+                    startedAt: new Date(),
+                  });
+                },
+                onToolResult: async (r) => {
+                  await toolCallbacks?.onToolResult?.({
+                    id: r.id,
+                    name: r.name,
+                    output: r.output,
+                    status: r.status,
+                    durationMs: r.durationMs,
+                    sources: r.output?.sources,
+                  });
+                },
+                executeTool: async (name, input) => {
+                  const exec = await this.toolRegistry.executeTool(
+                    name,
+                    input,
+                    {
+                      userId: request.userId,
+                      conversationId: request.conversationId,
+                      modelId: request.modelId,
+                      userMessage: request.message,
+                    },
+                  );
+                  return exec.ok
+                    ? exec.result
+                    : { content: `Error: ${exec.error}` };
+                },
+              }
+            : {}),
         },
       );
       responseText = streamResult.fullResponse;
+      reasoningText = streamResult.fullReasoning ?? '';
       inputTokens = streamResult.inputTokens;
       outputTokens = streamResult.outputTokens;
+      streamToolCalls = streamResult.toolCalls;
     } else {
       // Use regular invocation for non-streaming
       const response = await BedrockService.invokeModel(
@@ -142,7 +222,10 @@ export class FallbackHandler {
         request.modelId || 'nova-pro-v1:0',
         {
           recentMessages: context.recentMessages,
-          useSystemPrompt: true,
+          useSystemPrompt: request.useSystemPrompt ?? true,
+          system: request.system,
+          temperature: request.temperature,
+          maxTokens: request.maxTokens,
         },
       );
       responseText =
@@ -165,8 +248,11 @@ export class FallbackHandler {
       optimizations.push('multi_turn_context');
       optimizations.push('system_prompt');
     }
+    if (request.thinking?.enabled && reasoningText) {
+      optimizations.push('extended_thinking');
+    }
 
-    return {
+    const result: HandlerResult = {
       response: responseText,
       agentPath: ['bedrock_direct'],
       optimizationsApplied: optimizations,
@@ -174,6 +260,49 @@ export class FallbackHandler {
       riskLevel: 'low',
       success: true,
     };
+
+    if (request.thinking?.enabled && reasoningText) {
+      const { getThinkingCapability } = await import(
+        '../../bedrock/thinking-capability'
+      );
+      const mode = getThinkingCapability(request.modelId);
+      result.reasoning = {
+        content: reasoningText,
+        mode: mode === 'none' ? undefined : mode,
+        effort: request.thinking.effort,
+        budgetTokens: request.thinking.budgetTokens,
+      };
+    }
+
+    if (streamToolCalls?.length) {
+      result.toolCalls = streamToolCalls.map((tc) => ({
+        id: tc.id,
+        name: tc.name,
+        input: tc.input,
+        output: tc.output,
+        status: tc.status,
+        startedAt: tc.startedAt,
+        finishedAt: tc.finishedAt,
+        durationMs: tc.durationMs,
+      }));
+      // Aggregate unique sources across all tool results.
+      const sourceMap = new Map<
+        string,
+        { title: string; url: string; description?: string }
+      >();
+      for (const tc of streamToolCalls) {
+        for (const s of tc.output?.sources ?? []) {
+          if (!s?.url) continue;
+          if (!sourceMap.has(s.url)) sourceMap.set(s.url, s);
+        }
+      }
+      if (sourceMap.size > 0) {
+        result.sources = Array.from(sourceMap.values());
+      }
+      optimizations.push('tool_use');
+    }
+
+    return result;
   }
 
   /**

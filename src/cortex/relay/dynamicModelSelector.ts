@@ -157,7 +157,7 @@ export class DynamicModelSelector {
       contextWindow: 128000,
     },
     // Meta Llama 3.2 1B
-    'meta.llama3-2-1b-instruct-v1:0': {
+    'meta.llama4-scout-17b-instruct-v1:0': {
       reasoning: 0.3,
       speed: 0.98,
       cost: 0.98,

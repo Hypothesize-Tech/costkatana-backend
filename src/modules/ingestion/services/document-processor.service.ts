@@ -1070,11 +1070,23 @@ export class DocumentProcessorService {
       const allChunks: ProcessedDocument[] = [];
 
       for (const doc of documents) {
+        // LangChain loaders (PDFLoader et al.) put `source: <filePath>` into
+        // each document's metadata. That collides with our own `source` enum
+        // (`user-upload` | `knowledge-base` | `conversation` | ...) which the
+        // downstream vector strategy validates. Pull LangChain's `source` out
+        // (it's the raw file path, useful only as `filePath`) and preserve the
+        // caller-provided `source` from `metadata`.
+        const { source: loaderFilePath, ...loaderRest } =
+          (doc.metadata ?? {}) as Record<string, unknown> & { source?: unknown };
         const chunks = await this.processContent(
           doc.pageContent,
           {
             ...metadata,
-            ...doc.metadata,
+            ...loaderRest,
+            ...(typeof loaderFilePath === 'string' && !metadata?.filePath
+              ? { filePath: loaderFilePath }
+              : {}),
+            ...(metadata?.source ? { source: metadata.source } : {}),
             fileName,
             fileSize: buffer.length,
             sourceType,

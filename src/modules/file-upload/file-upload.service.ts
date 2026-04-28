@@ -15,6 +15,10 @@ import {
   ChatMessage,
   ChatMessageDocument,
 } from '../../schemas/chat/chat-message.schema';
+import {
+  Document as IngestedDocument,
+  DocumentDocument,
+} from '../../schemas/document/document.schema';
 import { StorageService } from '../storage/storage.service';
 import { IngestionService } from '../ingestion/services/ingestion.service';
 import { generateSecureId } from '../../common/utils/secure-id.util';
@@ -74,6 +78,8 @@ export class FileUploadService {
     private readonly uploadedFileModel: Model<UploadedFileDocument>,
     @InjectModel(ChatMessage.name)
     private readonly chatMessageModel: Model<ChatMessageDocument>,
+    @InjectModel(IngestedDocument.name)
+    private readonly ingestedDocumentModel: Model<DocumentDocument>,
     private readonly storageService: StorageService,
     private readonly ingestionService: IngestionService,
   ) {}
@@ -351,6 +357,55 @@ export class FileUploadService {
           }
         }
       }
+    }
+
+    // Include documents uploaded directly via /api/ingestion/upload that
+    // haven't yet been referenced in a chat. Without this, a user can upload
+    // a PDF, see it succeed, but find nothing in the Files Library until
+    // they actually chat with it. Group by `metadata.documentId` and emit
+    // one row per distinct document.
+    const ingestedDocs = await this.ingestedDocumentModel.aggregate([
+      {
+        $match: {
+          'metadata.userId': String(userId),
+          'metadata.source': 'user-upload',
+          status: 'active',
+          ...(conversationId && Types.ObjectId.isValid(conversationId)
+            ? { 'metadata.conversationId': conversationId }
+            : {}),
+        },
+      },
+      {
+        $group: {
+          _id: '$metadata.documentId',
+          fileName: { $first: '$metadata.fileName' },
+          fileType: { $first: '$metadata.fileType' },
+          fileSize: { $first: '$metadata.fileSize' },
+          uploadedAt: { $min: '$ingestedAt' },
+          chunksCount: { $sum: 1 },
+          conversationId: { $first: '$metadata.conversationId' },
+        },
+      },
+      { $sort: { uploadedAt: -1 } },
+      { $limit: ALL_FILES_UPLOAD_LIMIT },
+    ]);
+
+    for (const row of ingestedDocs) {
+      const documentId = row._id as string | undefined;
+      if (!documentId || seenDocuments.has(documentId)) continue;
+      seenDocuments.add(documentId);
+      allFiles.push({
+        id: documentId,
+        name: row.fileName ?? documentId,
+        size: row.fileSize ?? 0,
+        type: 'document',
+        fileType: row.fileType,
+        uploadedAt: row.uploadedAt ?? new Date(),
+        source: 'Document',
+        chunksCount: row.chunksCount ?? 0,
+        documentId,
+        conversationId: row.conversationId?.toString(),
+      });
     }
 
     allFiles.sort(

@@ -125,6 +125,37 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
     isLatest: true,
     notes: 'Claude 3.5 Haiku v2 - fast and cost-effective',
   },
+  {
+    // Haiku 4.5 is only served on Bedrock via a global cross-region inference
+    // profile, hence the `global.` prefix. The `convertToInferenceProfile`
+    // helper prepends a regional prefix (e.g. `us.global.anthropic...`) before
+    // sending to Bedrock, so we register both forms for pricing lookups.
+    modelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+    modelName: 'Claude Haiku 4.5',
+    provider: 'AWS Bedrock',
+    inputPrice: 1.0,
+    outputPrice: 5.0,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 200000,
+    capabilities: ['text', 'reasoning', 'analysis'],
+    category: 'text',
+    isLatest: true,
+    notes:
+      'Claude Haiku 4.5 - 1/3 the price of Sonnet 4.5, near-Sonnet quality',
+  },
+  {
+    modelId: 'us.global.anthropic.claude-haiku-4-5-20251001-v1:0',
+    modelName: 'Claude Haiku 4.5 (US)',
+    provider: 'AWS Bedrock',
+    inputPrice: 1.0,
+    outputPrice: 5.0,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 200000,
+    capabilities: ['text', 'reasoning', 'analysis'],
+    category: 'text',
+    isLatest: true,
+    notes: 'Claude Haiku 4.5 US global inference profile',
+  },
 
   // Claude 4 and 4.5 models (2025)
   {

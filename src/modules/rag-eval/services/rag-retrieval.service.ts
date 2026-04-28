@@ -33,6 +33,11 @@ export interface RetrievalOptions {
     preferredTopics?: string[];
     recentQueries?: string[];
   };
+  /**
+   * Weight for vector rank contribution in RRF merge (0–1). Lexical weight is `1 - hybridVectorWeight`.
+   * Default 0.6 — matches common “slightly favor semantics” tuning.
+   */
+  hybridVectorWeight?: number;
 }
 
 export interface RetrievalResult {
@@ -71,6 +76,9 @@ interface ScoredDocument {
   score: number;
 }
 
+/** Constant for Reciprocal Rank Fusion — standard value from the BM25+RRF literature */
+const RRF_K = 60;
+
 @Injectable()
 export class RagRetrievalService implements OnModuleInit {
   private readonly logger = new Logger(RagRetrievalService.name);
@@ -98,6 +106,27 @@ export class RagRetrievalService implements OnModuleInit {
         options,
       });
 
+      // Fast path: when the caller has selected specific documentIds (e.g.
+      // user attached a PDF to the chat), skip vector + lexical search and
+      // return all chunks of those documents directly from MongoDB. This
+      // bypasses the vector-search failure modes (Atlas $vectorSearch not
+      // configured, embeddings not built yet, semantic miss on a short
+      // query) that otherwise cause "I don't have enough information"
+      // fallbacks when the answer is literally in the attached file.
+      const directIds = options.filters?.documentIds;
+      if (directIds && directIds.length > 0) {
+        const direct = await this.retrieveByDocumentIds(
+          directIds,
+          options,
+          startTime,
+        );
+        if (direct.documents.length > 0) {
+          return direct;
+        }
+        // If direct fetch found nothing, fall through to vector search so
+        // we at least return something (indexing may still be pending).
+      }
+
       // Check cache first
       if (options.useCache !== false) {
         const cached = await this.getCachedResults(query, options);
@@ -124,8 +153,21 @@ export class RagRetrievalService implements OnModuleInit {
         }
       }
 
-      // Stage 1: Initial vector search
-      const initialResults = await this.vectorSearch(query, limit * 4, options);
+      // Stage 1: Run vector search and BM25 lexical search in parallel
+      const [vectorResults, lexicalResults] = await Promise.all([
+        this.vectorSearch(query, limit * 4, options),
+        this.lexicalSearch(query, limit * 4, options),
+      ]);
+
+      const vectorW = Math.min(
+        1,
+        Math.max(0, options.hybridVectorWeight ?? 0.6),
+      );
+      const initialResults = this.mergeWithRRF(vectorResults, lexicalResults, {
+        vectorWeight: vectorW,
+        lexicalWeight: 1 - vectorW,
+        limit: limit * 4,
+      });
 
       if (initialResults.length === 0) {
         return {
@@ -210,6 +252,103 @@ export class RagRetrievalService implements OnModuleInit {
         },
       };
     }
+  }
+
+  /**
+   * Load all chunks of the given documentIds directly from MongoDB, sorted by
+   * parent-doc ordinal then chunk index. No embeddings or vector search
+   * required. Used when the user explicitly attached documents to the chat —
+   * they want those specific docs, not "most semantically similar" chunks.
+   *
+   * Public so the RetrieveModule can bypass strategy selection and call this
+   * directly when the request carries a `documentIds` filter.
+   */
+  public async retrieveByDocumentIds(
+    documentIds: string[],
+    options: RetrievalOptions,
+    startTime: number = Date.now(),
+  ): Promise<RetrievalResult> {
+    const filter: Record<string, unknown> = {
+      'metadata.documentId': { $in: documentIds },
+      status: 'active',
+    };
+    // Coerce to string so we match chunks regardless of whether the write
+    // side stored the userId as an ObjectId or a string.
+    const userIdStr = options.userId ? String(options.userId) : '';
+    if (userIdStr) {
+      filter['metadata.userId'] = userIdStr;
+    }
+
+    const limit = Math.max(options.limit ?? 5, documentIds.length * 20);
+    let rows = await this.documentModel
+      .find(filter)
+      .sort({ 'metadata.documentId': 1, chunkIndex: 1 })
+      .limit(limit)
+      .lean()
+      .exec();
+
+    // Fallback: if strict userId filter returned nothing but the documentIds
+    // exist with a differently-typed userId, still surface them when the
+    // coerced-string comparison matches. Avoids "I don't have enough
+    // information" on documents the user legitimately owns.
+    if (rows.length === 0 && userIdStr) {
+      const loose = await this.documentModel
+        .find({
+          'metadata.documentId': { $in: documentIds },
+          status: 'active',
+        })
+        .sort({ 'metadata.documentId': 1, chunkIndex: 1 })
+        .limit(limit)
+        .lean()
+        .exec();
+      rows = loose.filter(
+        (r: { metadata?: { userId?: unknown } }) =>
+          String(r.metadata?.userId ?? '') === userIdStr,
+      );
+    }
+
+    const documents: Document[] = rows.map(
+      (row: Record<string, unknown> & { content?: string; metadata?: Record<string, unknown>; chunkIndex?: number; totalChunks?: number }) =>
+        new Document({
+          pageContent: String(row.content ?? ''),
+          metadata: {
+            ...(row.metadata ?? {}),
+            chunkIndex: row.chunkIndex,
+            totalChunks: row.totalChunks,
+            score: 1, // direct fetch — no similarity score
+          },
+        }),
+    );
+
+    const sources = Array.from(
+      new Set(
+        rows
+          .map((r: { metadata?: { fileName?: string; documentId?: string } }) =>
+            r.metadata?.fileName ?? r.metadata?.documentId,
+          )
+          .filter((s: unknown): s is string => typeof s === 'string'),
+      ),
+    );
+
+    this.logger.log('Direct-fetch retrieval by documentIds', {
+      component: 'RagRetrievalService',
+      operation: 'retrieveByDocumentIds',
+      documentIds,
+      chunksFound: rows.length,
+    });
+
+    return {
+      documents,
+      sources,
+      totalResults: rows.length,
+      cacheHit: false,
+      retrievalTime: Date.now() - startTime,
+      stats: {
+        sources,
+        cacheHit: false,
+        retrievalTime: Date.now() - startTime,
+      },
+    };
   }
 
   private async initializeVectorStore(): Promise<void> {
@@ -305,6 +444,115 @@ export class RagRetrievalService implements OnModuleInit {
       });
       throw error;
     }
+  }
+
+  /**
+   * BM25-style lexical search via MongoDB $text index.
+   * Rare, specific terms (e.g. incident IDs, model names) receive higher
+   * TF-IDF weighting, complementing the semantic vector search.
+   */
+  private async lexicalSearch(
+    query: string,
+    limit: number,
+    options: RetrievalOptions,
+  ): Promise<Document[]> {
+    try {
+      const mongoFilters = this.buildMongoFilters(options);
+
+      const pipeline: any[] = [
+        {
+          $match: {
+            ...mongoFilters,
+            $text: { $search: query },
+          },
+        },
+        {
+          $addFields: {
+            textScore: { $meta: 'textScore' },
+          },
+        },
+        { $sort: { textScore: -1 } },
+        { $limit: limit },
+        {
+          $project: {
+            pageContent: 1,
+            metadata: 1,
+            textScore: 1,
+          },
+        },
+      ];
+
+      const results = await this.documentModel.aggregate(pipeline);
+
+      return results.map(
+        (item) =>
+          new Document({
+            pageContent: item.pageContent,
+            metadata: {
+              ...item.metadata,
+              score: item.textScore ?? 0,
+              searchType: 'lexical',
+            },
+          }),
+      );
+    } catch (error) {
+      // Lexical search can fail if the text index doesn't exist yet — degrade
+      // gracefully so the vector path still returns results.
+      this.logger.warn('Lexical search failed, falling back to vector-only', {
+        component: 'RagRetrievalService',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /**
+   * Reciprocal Rank Fusion — merges two ranked lists without needing
+   * their scores to be on the same scale.
+   *
+   * finalScore = vectorWeight × (1 / (RRF_K + vectorRank))
+   *            + lexicalWeight × (1 / (RRF_K + lexicalRank))
+   */
+  private mergeWithRRF(
+    vectorDocs: Document[],
+    lexicalDocs: Document[],
+    opts: { vectorWeight: number; lexicalWeight: number; limit: number },
+  ): Document[] {
+    const { vectorWeight, lexicalWeight, limit } = opts;
+
+    // Map pageContent → combined score; keep best Document object per chunk
+    const scoreMap = new Map<string, { doc: Document; rrfScore: number }>();
+
+    const applyRank = (docs: Document[], weight: number) => {
+      docs.forEach((doc, idx) => {
+        const key = doc.pageContent;
+        const rankScore = weight * (1 / (RRF_K + idx + 1));
+        const existing = scoreMap.get(key);
+        if (existing) {
+          existing.rrfScore += rankScore;
+        } else {
+          scoreMap.set(key, { doc, rrfScore: rankScore });
+        }
+      });
+    };
+
+    applyRank(vectorDocs, vectorWeight);
+    applyRank(lexicalDocs, lexicalWeight);
+
+    return Array.from(scoreMap.values())
+      .sort((a, b) => b.rrfScore - a.rrfScore)
+      .slice(0, limit)
+      .map(
+        ({ doc, rrfScore }) =>
+          new Document({
+            pageContent: doc.pageContent,
+            metadata: {
+              ...doc.metadata,
+              score: rrfScore,
+              searchType: 'hybrid',
+            },
+          }),
+      );
   }
 
   private buildMongoFilters(options: RetrievalOptions): MongoFilters {
@@ -596,6 +844,7 @@ export class RagRetrievalService implements OnModuleInit {
       limit: options.limit,
       filters: options.filters,
       userContext: options.userContext,
+      hybridVectorWeight: options.hybridVectorWeight,
     });
     return `${query}:${optionsStr}`.substring(0, 200); // Limit key length
   }

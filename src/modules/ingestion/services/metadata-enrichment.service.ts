@@ -28,7 +28,10 @@ import {
 
 const METADATA_CONFIG = {
   ENABLED: true,
-  MODEL: 'anthropic.claude-3-haiku-20240307-v1:0',
+  // Claude 3 Haiku was marked Legacy by AWS Bedrock and rejects new requests
+  // after 30 days of inactivity. Use the active Haiku 4.5 inference profile
+  // instead — same cheap-and-fast tier for metadata enrichment.
+  MODEL: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
   BATCH_SIZE: 100,
   FRESHNESS_DECAY_DAYS: 90,
   MAX_TOPICS: 5,

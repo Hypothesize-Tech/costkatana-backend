@@ -153,8 +153,6 @@ export const UpdateUsageDto = z
           tlsHandshakeTime: z.number().optional(),
         }),
         payload: z.object({
-          requestBody: z.any().optional(),
-          responseBody: z.any().optional(),
           requestSize: z.number().min(0),
           responseSize: z.number().min(0),
           contentType: z.string(),

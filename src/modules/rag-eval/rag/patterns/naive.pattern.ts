@@ -150,10 +150,32 @@ export class NaiveRAGPattern extends BaseRAGPattern {
   ): Promise<string> {
     const prompt = `You are a helpful AI assistant. Answer the following question based on the provided context. If the context doesn't contain enough information to answer the question, say so.
 
-Context:
-${context}
+Here is an example input with an ideal response:
 
-Question: ${query}
+<sample_input>
+<retrieved_context>
+GPT-4 Turbo costs $0.01 per 1K input tokens and $0.03 per 1K output tokens. Claude 3 Opus costs $0.015 per 1K input tokens and $0.075 per 1K output tokens.
+</retrieved_context>
+<user_question>
+Which model is cheaper for input tokens — GPT-4 Turbo or Claude 3 Opus?
+</user_question>
+</sample_input>
+
+<ideal_output>
+GPT-4 Turbo is cheaper for input tokens at $0.01 per 1K tokens, compared to Claude 3 Opus at $0.015 per 1K tokens — making GPT-4 Turbo 33% less expensive for input.
+</ideal_output>
+
+This example is ideal because it directly cites the numbers from the context, performs the comparison, and quantifies the difference — without adding facts not found in the provided context.
+
+Now answer the actual question below:
+
+<retrieved_context>
+${context}
+</retrieved_context>
+
+<user_question>
+${query}
+</user_question>
 
 Answer:`;
 

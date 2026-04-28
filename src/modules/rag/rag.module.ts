@@ -37,6 +37,10 @@ import {
   RAGExample,
   RAGExampleSchema,
 } from '../../schemas/document/rag-example.schema';
+import {
+  Document as IngestedDocument,
+  DocumentSchema,
+} from '../../schemas/document/document.schema';
 
 // External dependencies (forwardRef to break circular dependency with AgentModule)
 import { AgentModule } from '../agent/agent.module'; // For VectorStoreService
@@ -117,6 +121,9 @@ function createMockRagRedis(): Redis {
     // Mongoose schemas
     MongooseModule.forFeature([
       { name: RAGExample.name, schema: RAGExampleSchema },
+      // Document chunks — used by RetrieveModule's documentIds bypass to load
+      // attached documents directly from MongoDB.
+      { name: IngestedDocument.name, schema: DocumentSchema },
     ]),
   ],
   providers: [

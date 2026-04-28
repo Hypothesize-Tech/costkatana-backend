@@ -252,12 +252,37 @@ export class AdaptiveRAGPattern extends BaseRAGPattern {
   ): Promise<AdaptiveState> {
     const prompt = `You are a judge deciding whether external information retrieval is needed to answer a question.
 
-Question: "${query}"
-
-Decide if this question requires:
+<retrieval_options>
 - "retrieve": External knowledge/documents needed (recent facts, specific data, detailed technical info)
 - "parametric": Can be answered from general knowledge alone (common facts, general concepts)
 - "hybrid": Benefits from both parametric knowledge and external sources
+</retrieval_options>
+
+Here are examples showing the correct decision for different question types:
+
+<sample_input>
+<candidate_question>What is the current price per token for GPT-4o as of this month?</candidate_question>
+</sample_input>
+<ideal_output>retrieve</ideal_output>
+This requires up-to-date pricing data that changes frequently — general knowledge alone is insufficient.
+
+<sample_input>
+<candidate_question>What does "tokens" mean in the context of large language models?</candidate_question>
+</sample_input>
+<ideal_output>parametric</ideal_output>
+This is a stable concept that can be explained from general knowledge without needing external documents.
+
+<sample_input>
+<candidate_question>How does prompt caching work and what are the current savings rates on AWS Bedrock?</candidate_question>
+</sample_input>
+<ideal_output>hybrid</ideal_output>
+The concept of prompt caching can be explained from general knowledge, but current savings rates require retrieval.
+
+Now classify the actual question below:
+
+<candidate_question>
+${query}
+</candidate_question>
 
 Respond with ONLY one of these three words: retrieve, parametric, or hybrid`;
 
@@ -329,7 +354,9 @@ Respond with ONLY one of these three words: retrieve, parametric, or hybrid`;
   private async generateParametric(query: string): Promise<string> {
     const prompt = `Answer the following question using your knowledge. Be concise and helpful.
 
-Question: ${query}
+<user_question>
+${query}
+</user_question>
 
 Answer:`;
 
@@ -348,10 +375,32 @@ Answer:`;
   ): Promise<string> {
     const prompt = `Answer the following question based on the provided context.
 
-Context:
-${context}
+Here is an example input with an ideal response:
 
-Question: ${query}
+<sample_input>
+<retrieved_context>
+Amazon Bedrock charges per 1,000 input tokens. Nova Pro costs $0.0008 per 1K input tokens. Claude Sonnet costs $0.003 per 1K input tokens.
+</retrieved_context>
+<user_question>
+Which is cheaper on Bedrock — Nova Pro or Claude Sonnet for input?
+</user_question>
+</sample_input>
+
+<ideal_output>
+Nova Pro is significantly cheaper for input tokens on Bedrock at $0.0008 per 1K tokens, versus Claude Sonnet at $0.003 per 1K — that's nearly 4x cheaper.
+</ideal_output>
+
+This example is ideal because it uses only the provided context, states exact figures, and gives a concrete comparison ratio.
+
+Now answer the actual question:
+
+<retrieved_context>
+${context}
+</retrieved_context>
+
+<user_question>
+${query}
+</user_question>
 
 Answer:`;
 
@@ -371,12 +420,39 @@ Answer:`;
   ): Promise<string> {
     const prompt = `You have both your general knowledge and external context. Combine them to give the best answer.
 
-Initial answer from knowledge: ${parametricAnswer}
+Here is an example input with an ideal response:
 
-Additional context from documents:
+<sample_input>
+<parametric_answer>
+Prompt caching reduces costs by storing and reusing previously processed prompt prefixes instead of reprocessing them on every call.
+</parametric_answer>
+<retrieved_context>
+AWS Bedrock prompt caching offers up to 90% cost reduction on cached input tokens. Cache entries expire after 5 minutes of inactivity.
+</retrieved_context>
+<user_question>
+How does prompt caching help reduce costs and what are the current limits?
+</user_question>
+</sample_input>
+
+<ideal_output>
+Prompt caching reduces costs by storing processed prompt prefixes so they don't need to be re-tokenized on every request. On AWS Bedrock specifically, this can reduce costs on cached input tokens by up to 90%. Cache entries stay active for 5 minutes — after that they expire and must be rebuilt.
+</ideal_output>
+
+This example is ideal because it weaves the conceptual explanation from general knowledge with the specific numbers from the retrieved context, producing a complete and grounded answer.
+
+Now answer the actual question:
+
+<parametric_answer>
+${parametricAnswer}
+</parametric_answer>
+
+<retrieved_context>
 ${context}
+</retrieved_context>
 
-Question: ${query}
+<user_question>
+${query}
+</user_question>
 
 Final integrated answer:`;
 

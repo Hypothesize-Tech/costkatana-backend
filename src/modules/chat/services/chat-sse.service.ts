@@ -3,9 +3,14 @@ import { Response } from 'express';
 import { ChatService } from './chat.service';
 import { ChatEventsService } from './chat-events.service';
 import { BedrockService } from '../../bedrock/bedrock.service';
+import { ContextOptimizer } from '../utils/context-optimizer';
 import { SendMessageDto } from '../dto/send-message.dto';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
+import {
+  ChatMessage,
+  ChatMessageDocument,
+} from '../../../schemas/chat/chat-message.schema';
 import {
   ChatTaskLink,
   ChatTaskLinkDocument,
@@ -14,6 +19,9 @@ import {
   GovernedTask,
   GovernedTaskDocument,
 } from '../../../schemas/agent/governed-task.schema';
+import { getThinkingCapability } from '../../bedrock/thinking-capability';
+import { ToolRegistryService } from '../tools/tool-registry.service';
+import type { IMessageCitation } from '../../../schemas/chat/chat-message.schema';
 
 export interface SSEConnectionOptions {
   maxDuration?: number; // milliseconds
@@ -33,11 +41,35 @@ export class ChatSSEService {
     private readonly chatService: ChatService,
     private readonly chatEventsService: ChatEventsService,
     private readonly bedrockService: BedrockService,
+    private readonly contextOptimizer: ContextOptimizer,
+    private readonly toolRegistry: ToolRegistryService,
+    @InjectModel(ChatMessage.name)
+    private readonly chatMessageModel: Model<ChatMessageDocument>,
     @InjectModel(ChatTaskLink.name)
     private readonly chatTaskLinkModel: Model<ChatTaskLinkDocument>,
     @InjectModel(GovernedTask.name)
     private readonly governedTaskModel: Model<GovernedTaskDocument>,
   ) {}
+
+  /**
+   * Writes a single citation event onto an open SSE response. Callers that
+   * drive Claude streaming (handlers sitting between Bedrock and this service)
+   * invoke this as each citation is finalized so the frontend can paint
+   * inline markers alongside incoming text without waiting for the final
+   * `done` frame.
+   */
+  public static emitCitation(
+    response: Response,
+    citation: IMessageCitation,
+  ): void {
+    if (response.writableEnded) return;
+    response.write(
+      `event: citation\ndata: ${JSON.stringify({
+        ...citation,
+        timestamp: new Date().toISOString(),
+      })}\n\n`,
+    );
+  }
 
   /**
    * Sets up SSE headers for the response
@@ -61,6 +93,25 @@ export class ChatSSEService {
     response: Response,
   ): Promise<void> {
     let accumulatedContent = '';
+    let accumulatedReasoning = '';
+    const accumulatedToolCalls: Array<{
+      id: string;
+      name: string;
+      input: unknown;
+      output?: {
+        content: string;
+        sources?: Array<{ title: string; url: string; description?: string }>;
+      };
+      status?: 'success' | 'error';
+      startedAt?: Date;
+      finishedAt?: Date;
+      durationMs?: number;
+    }> = [];
+    const accumulatedSources = new Map<
+      string,
+      { title: string; url: string; description?: string }
+    >();
+    const accumulatedCitations: IMessageCitation[] = [];
     let hasStartedStreaming = false;
 
     try {
@@ -87,11 +138,43 @@ export class ChatSSEService {
           await import('../handlers/fallback.handler');
 
         // Create handler instance with Bedrock service
-        const handler = new FallbackHandler(this.bedrockService);
+        const handler = new FallbackHandler(
+          this.bedrockService,
+          this.toolRegistry,
+        );
 
-        // Build minimal context for streaming
+        let recentMessages: Array<{ role: string; content: string }> = [];
+        if (dto.conversationId) {
+          try {
+            const raw = await this.contextOptimizer.fetchOptimalContext(
+              dto.conversationId,
+              (dto.message || '').length,
+            );
+            recentMessages = raw.map(
+              (m: { role?: string; content?: string }) => ({
+                role:
+                  m.role === 'assistant'
+                    ? 'assistant'
+                    : m.role === 'user'
+                      ? 'user'
+                      : 'user',
+                content: typeof m.content === 'string' ? m.content : '',
+              }),
+            );
+          } catch (ctxErr) {
+            this.logger.warn(
+              'Could not load conversation history for token streaming',
+              {
+                conversationId: dto.conversationId,
+                error:
+                  ctxErr instanceof Error ? ctxErr.message : String(ctxErr),
+              },
+            );
+          }
+        }
+
         const context = {
-          recentMessages: [], // Could be enhanced to include conversation history
+          recentMessages,
           conversationId: dto.conversationId,
           userId,
         };
@@ -104,7 +187,10 @@ export class ChatSSEService {
             modelId: dto.modelId,
             maxTokens: dto.maxTokens,
             temperature: dto.temperature,
+            system: dto.system,
+            useSystemPrompt: dto.useSystemPrompt,
             conversationId: dto.conversationId,
+            thinking: dto.thinking,
           },
           context,
           // Streaming callback - receives actual tokens from model
@@ -135,7 +221,122 @@ export class ChatSSEService {
               );
             }
           },
+          // Reasoning callback — streams extended-thinking deltas when enabled
+          async (reasoningChunk: string, done: boolean) => {
+            if (done) {
+              response.write(
+                `event: reasoning_done\ndata: ${JSON.stringify({
+                  timestamp: new Date().toISOString(),
+                })}\n\n`,
+              );
+            } else if (reasoningChunk) {
+              accumulatedReasoning += reasoningChunk;
+              response.write(
+                `event: reasoning\ndata: ${JSON.stringify({
+                  content: reasoningChunk,
+                  timestamp: new Date().toISOString(),
+                })}\n\n`,
+              );
+            }
+          },
+          // Tool callbacks — emit tool_call / tool_result SSE frames
+          {
+            onToolCall: async (call) => {
+              accumulatedToolCalls.push({
+                id: call.id,
+                name: call.name,
+                input: call.input,
+                status: undefined,
+                startedAt: call.startedAt,
+              });
+              response.write(
+                `event: tool_call\ndata: ${JSON.stringify({
+                  id: call.id,
+                  name: call.name,
+                  input: call.input,
+                  startedAt: call.startedAt.toISOString(),
+                })}\n\n`,
+              );
+            },
+            onToolResult: async (r) => {
+              const existing = accumulatedToolCalls.find((t) => t.id === r.id);
+              if (existing) {
+                existing.output = {
+                  content: r.output.content,
+                  sources: r.sources,
+                };
+                existing.status = r.status;
+                existing.finishedAt = new Date();
+                existing.durationMs = r.durationMs;
+              }
+              for (const s of r.sources ?? []) {
+                if (s?.url && !accumulatedSources.has(s.url)) {
+                  accumulatedSources.set(s.url, s);
+                }
+              }
+              response.write(
+                `event: tool_result\ndata: ${JSON.stringify({
+                  id: r.id,
+                  name: r.name,
+                  output: {
+                    content: r.output.content.slice(0, 2000),
+                  },
+                  sources: r.sources,
+                  status: r.status,
+                  durationMs: r.durationMs,
+                })}\n\n`,
+              );
+            },
+          },
         );
+
+        // Persist the assistant message with thinking + tool calls when a
+        // conversationId is set. The fast-streaming path bypasses
+        // chat.service.sendMessage, so we save here.
+        if (dto.conversationId && accumulatedContent) {
+          try {
+            const thinkingDoc = accumulatedReasoning
+              ? {
+                  content: accumulatedReasoning,
+                  mode:
+                    getThinkingCapability(dto.modelId) === 'none'
+                      ? undefined
+                      : getThinkingCapability(dto.modelId),
+                  effort: dto.thinking?.effort,
+                  budgetTokens: dto.thinking?.budgetTokens,
+                }
+              : undefined;
+            await this.chatMessageModel.create({
+              conversationId: new Types.ObjectId(dto.conversationId),
+              userId,
+              role: 'assistant',
+              content: accumulatedContent,
+              modelId: dto.modelId,
+              messageType: 'assistant',
+              metadata: {
+                temperature: dto.temperature,
+                maxTokens: dto.maxTokens,
+              },
+              thinking: thinkingDoc,
+              ...(accumulatedToolCalls.length > 0
+                ? { toolCalls: accumulatedToolCalls }
+                : {}),
+              ...(accumulatedSources.size > 0
+                ? { sources: Array.from(accumulatedSources.values()) }
+                : {}),
+              ...(accumulatedCitations.length > 0
+                ? { citations: accumulatedCitations }
+                : {}),
+            });
+          } catch (saveErr) {
+            this.logger.warn('Failed to persist streamed assistant message', {
+              error:
+                saveErr instanceof Error ? saveErr.message : String(saveErr),
+              userId,
+              conversationId: dto.conversationId,
+            });
+          }
+        }
       } else {
         // Legacy streaming: use full sendMessage pipeline with chunked callback
         // This ensures all routing logic (integrations, RAG, web search, multi-agent, etc.) is applied
@@ -175,11 +376,18 @@ export class ChatSSEService {
         );
       }
 
+      const completionLen =
+        typeof result?.content === 'string'
+          ? result.content.length
+          : typeof result?.response === 'string'
+            ? result.response.length
+            : accumulatedContent.length;
+
       this.logger.log('Streaming completed successfully', {
         userId,
-        conversationId: result.conversationId,
-        messageId: result.id,
-        totalContentLength: result.content.length,
+        conversationId: result?.conversationId ?? dto.conversationId,
+        messageId: result?.id,
+        totalContentLength: completionLen,
       });
     } catch (error) {
       this.logger.error('Streaming error', {

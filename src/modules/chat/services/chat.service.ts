@@ -122,8 +122,56 @@ export interface ChatMessageResponse {
   optimizationsApplied?: string[];
   cacheHit?: boolean;
   riskLevel?: string;
-  // Express API compatibility fields
-  thinking?: string;
+  // Express API compatibility fields. Either a legacy agent-thinking string
+  // or the structured Claude extended-thinking payload from Bedrock.
+  thinking?:
+    | string
+    | {
+        content: string;
+        mode?: 'adaptive' | 'enabled';
+        effort?: 'low' | 'medium' | 'high' | 'max';
+        budgetTokens?: number;
+        durationMs?: number;
+      };
+  toolCalls?: Array<{
+    id: string;
+    name: string;
+    input?: unknown;
+    output?: {
+      content: string;
+      sources?: Array<{ title: string; url: string; description?: string }>;
+    };
+    status?: 'success' | 'error';
+    startedAt?: Date | string;
+    finishedAt?: Date | string;
+    durationMs?: number;
+  }>;
+  sources?: Array<{ title: string; url: string; description?: string }>;
+  /**
+   * Claude-native citations (Messages API `citations` feature). When present,
+   * the frontend renders inline markers inside the assistant content and a
+   * grouped-by-source panel below. Absent on responses that did not pass
+   * through a citations-enabled request.
+   */
+  citations?: Array<{
+    id: string;
+    textBlockIndex: number;
+    startOffset: number;
+    endOffset: number;
+    citedText: string;
+    document: {
+      index: number;
+      documentId?: string;
+      title: string;
+      url?: string;
+      sourceType: 'attachment' | 'upload' | 'rag';
+    };
+    location: {
+      type: 'page' | 'char' | 'chunk';
+      start: number;
+      end: number;
+    };
+  }>;
   templateUsed?: any;
   webSearchUsed?: boolean;
   aiWebSearchDecision?: string;
@@ -1457,7 +1505,9 @@ export class ChatService {
           { model: modelId },
         ).tokens;
         const outputTokens = this.tokenCounterService.countTokens(
-          typeof cortexResult === 'string' ? cortexResult : String(cortexResult),
+          typeof cortexResult === 'string'
+            ? cortexResult
+            : String(cortexResult),
           { model: modelId },
         ).tokens;
         const tokenCount = promptTokens + outputTokens;
@@ -1525,8 +1575,16 @@ export class ChatService {
         };
       }
 
+      // Document grounding takes priority over multi-agent. When the user
+      // attaches documents (documentIds), the multi-agent StateGraph's
+      // response_synthesis node does not read them — it would hallucinate
+      // or ask "which document?". Route to the knowledge-base handler
+      // instead so the RAG pipeline retrieves and cites the uploaded file.
+      const hasDocumentContext =
+        Array.isArray(dto.documentIds) && dto.documentIds.length > 0;
+
       // Check if multi-agent processing is requested
-      if (dto.useMultiAgent) {
+      if (dto.useMultiAgent && !hasDocumentContext) {
         let multiAgentResult;
         try {
           // Use LangchainOrchestratorService StateGraph (like Express processWithLangchainMultiAgent)
@@ -1846,7 +1904,7 @@ export class ChatService {
               };
 
               await this.usageModel.create([
-                {
+                this.buildUsagePayload({
                   userId,
                   type: 'chat_message',
                   modelId: dto.modelId,
@@ -1881,7 +1939,7 @@ export class ChatService {
                     executionTime: multiAgentResult.executionTime,
                     costSavings: multiAgentResult.costSavings,
                   },
-                },
+                }),
               ]);
             } catch (usageError) {
               this.logger.warn(
@@ -1953,6 +2011,8 @@ export class ChatService {
           modelId: dto.modelId,
           temperature: dto.temperature,
           maxTokens: dto.maxTokens,
+          system: dto.system,
+          useSystemPrompt: dto.useSystemPrompt,
         },
         startTime,
         {
@@ -1970,6 +2030,8 @@ export class ChatService {
           userPreferences,
           selectionResponse: dto.selectionResponse,
           parsedMentions,
+          system: dto.system,
+          useSystemPrompt: dto.useSystemPrompt,
         },
       );
 
@@ -2014,7 +2076,7 @@ export class ChatService {
         if (this.usageModel) {
           await this.usageModel.create(
             [
-              {
+              this.buildUsagePayload({
                 userId,
                 type: 'chat_message',
                 modelId: dto.modelId,
@@ -2026,7 +2088,7 @@ export class ChatService {
                   optimizationsApplied: response.optimizationsApplied,
                   conversationId: conversation._id.toString(),
                 },
-              },
+              }),
             ],
             { session: assistantSession },
           );
@@ -2048,7 +2110,7 @@ export class ChatService {
 
             await this.usageModel.create(
               [
-                {
+                this.buildUsagePayload({
                   userId,
                   type: 'chat_message',
                   modelId: dto.modelId,
@@ -2080,7 +2142,7 @@ export class ChatService {
                     agentPath: response.agentPath,
                     optimizationsApplied: response.optimizationsApplied,
                   },
-                },
+                }),
               ],
               { session: assistantSession },
             );
@@ -2238,6 +2300,8 @@ export class ChatService {
       modelId: string;
       temperature?: number;
       maxTokens?: number;
+      system?: string;
+      useSystemPrompt?: boolean;
     },
     startTime: number,
     context: {
@@ -2255,6 +2319,8 @@ export class ChatService {
       userPreferences?: any;
       selectionResponse?: any;
       parsedMentions?: ParsedMention[];
+      system?: string;
+      useSystemPrompt?: boolean;
     },
   ): Promise<{
     content: string;
@@ -2368,6 +2434,8 @@ export class ChatService {
         modelId: request.modelId,
         temperature: request.temperature,
         maxTokens: request.maxTokens,
+        system: request.system,
+        useSystemPrompt: request.useSystemPrompt,
       },
       processingContext,
       async (): Promise<HandlerResult> => {
@@ -2390,6 +2458,8 @@ export class ChatService {
           previousMessages: context.recentMessages,
           selectionResponse: context.selectionResponse,
           parsedMentions: context.parsedMentions,
+          system: context.system,
+          useSystemPrompt: context.useSystemPrompt,
         });
         return {
           response: r.content,
@@ -2543,6 +2613,8 @@ export class ChatService {
       previousMessages?: Array<{ role: string; content: string }>;
       selectionResponse?: any;
       parsedMentions?: ParsedMention[];
+      system?: string;
+      useSystemPrompt?: boolean;
     },
   ): Promise<{
     content: string;
@@ -2839,6 +2911,8 @@ export class ChatService {
       selectionResponse?: any;
       parsedMentions?: ParsedMention[];
       contextPreamble?: string;
+      system?: string;
+      useSystemPrompt?: boolean;
     },
     startTime: number,
   ): Promise<{
@@ -2879,7 +2953,10 @@ export class ChatService {
       );
       const result = await BedrockService.invokeModel(prompt, model, {
         recentMessages: previousMessages,
-        useSystemPrompt: true,
+        useSystemPrompt: params.useSystemPrompt ?? true,
+        system: params.system,
+        temperature: params.temperature,
+        maxTokens: params.maxTokens,
       });
       const responseText = typeof result === 'string' ? result : '';
       return responseText?.trim() || null;
@@ -3345,25 +3422,50 @@ export class ChatService {
       fileType?: string;
     }>
   > {
-    const documents = await this.documentModel
-      .find({
-        _id: { $in: documentIds },
-        $or: [
-          { 'metadata.userId': userId },
-          { 'metadata.source': { $in: ['knowledge-base', 'user-upload'] } },
-        ],
-        status: 'active',
-      })
-      .select('metadata.fileName metadata.fileType totalChunks _id')
-      .lean()
-      .exec();
+    // IMPORTANT: `documentIds` here are application-level ids like
+    // `doc_950e95d5-…` that the ingestion controller stamps onto
+    // `metadata.documentId`. They are NOT MongoDB `_id` values. Querying by
+    // `_id: {$in: documentIds}` used to throw a CastError
+    // ("Cast to ObjectId failed for value 'doc_…'"), which silently emptied
+    // the `attachedDocuments` array and made every uploaded file look
+    // missing to the chat pipeline, the preview endpoint, and the Files
+    // Library. Query by `metadata.documentId` instead and aggregate chunks
+    // per document so `chunksCount` reflects reality.
+    const userIdStr = String(userId);
+    const rows = await this.documentModel.aggregate([
+      {
+        $match: {
+          'metadata.documentId': { $in: documentIds },
+          status: 'active',
+          $or: [
+            { 'metadata.userId': userIdStr },
+            { 'metadata.source': 'knowledge-base' },
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: '$metadata.documentId',
+          fileName: { $first: '$metadata.fileName' },
+          fileType: { $first: '$metadata.fileType' },
+          chunksCount: { $sum: 1 },
+        },
+      },
+    ]);
 
-    return documents.map((doc: any) => ({
-      documentId: doc._id.toString(),
-      fileName: doc.metadata?.fileName || 'Unknown Document',
-      chunksCount: doc.totalChunks || 0,
-      fileType: doc.metadata?.fileType,
-    }));
+    return rows.map(
+      (row: {
+        _id: string;
+        fileName?: string;
+        fileType?: string;
+        chunksCount?: number;
+      }) => ({
+        documentId: row._id,
+        fileName: row.fileName ?? 'Unknown Document',
+        chunksCount: row.chunksCount ?? 0,
+        fileType: row.fileType,
+      }),
+    );
   }
 
   /**
@@ -3595,6 +3697,12 @@ export class ChatService {
         attachments: m.attachments,
         timestamp: m.createdAt,
         metadata: m.metadata,
+        thinking: (m as { thinking?: unknown }).thinking,
+        toolCalls: (m as { toolCalls?: unknown }).toolCalls,
+        sources: (m as { sources?: unknown }).sources,
+        // Restore Claude-native citations so inline markers reappear after a
+        // refresh / conversation switch.
+        citations: (m as { citations?: unknown }).citations,
         agentPath: m.agentPath,
         optimizationsApplied: m.optimizationsApplied,
         cacheHit: m.cacheHit,
@@ -4676,31 +4784,53 @@ export class ChatService {
     previousMessages: Array<{ role: string; content: string }>,
     userStats?: string,
   ): string {
-    const systemBlock = [
+    const roleDirectives = [
       'You are Cost Katana, an AI-powered cost optimization assistant.',
       'Your mission is to help users monitor, analyze, and reduce their AI API spending across all providers.',
-      "You have access to this user's actual Cost Katana account data shown below.",
-      'Always answer questions about their usage, costs, and models using this data',
+      "You have access to this user's actual Cost Katana account data in <costkatana_user_account_data> below.",
+      'Always answer questions about their usage, costs, and models using that data',
       '— never say you lack access to their records.',
-      '',
-      '=== USER ACCOUNT DATA ===',
-      userStats ?? 'No usage data available yet.',
-      '=== END USER ACCOUNT DATA ===',
     ].join('\n');
 
+    const accountData = userStats ?? 'No usage data available yet.';
+
     const recent = (previousMessages ?? []).slice(-6);
-    const historyLines = recent.map(
-      (m) =>
-        `${m.role === 'user' ? 'Human' : 'Assistant'}: ${(m.content || '').trim()}`,
+    const historyInner = recent
+      .map(
+        (m) =>
+          `${m.role === 'user' ? 'Human' : 'Assistant'}: ${(m.content || '').trim()}`,
+      )
+      .join('\n\n');
+
+    const parts: string[] = [
+      '<costkatana_assistant_directives>',
+      roleDirectives,
+      '</costkatana_assistant_directives>',
+      '',
+      '<costkatana_user_account_data>',
+      accountData,
+      '</costkatana_user_account_data>',
+    ];
+
+    if (historyInner.trim().length > 0) {
+      parts.push(
+        '',
+        '<costkatana_prior_turns>',
+        historyInner,
+        '</costkatana_prior_turns>',
+      );
+    }
+
+    parts.push(
+      '',
+      '<costkatana_current_user_message>',
+      query.trim(),
+      '</costkatana_current_user_message>',
+      '',
+      'Assistant:',
     );
 
-    return [
-      `System: ${systemBlock}`,
-      '',
-      ...historyLines,
-      `Human: ${query}`,
-      'Assistant:',
-    ].join('\n\n');
+    return parts.join('\n');
   }
 
   /**
@@ -5150,6 +5280,75 @@ export class ChatService {
   }
 
   /**
+   * Infer the Usage `service` enum from a model id. Required because Usage's
+   * schema enforces a strict service enum and rejects inserts without it.
+   */
+  private inferServiceFromModelId(modelId?: string): string {
+    const m = (modelId ?? '').toLowerCase();
+    if (
+      m.startsWith('anthropic.') ||
+      m.startsWith('us.anthropic.') ||
+      m.startsWith('eu.anthropic.') ||
+      m.startsWith('global.anthropic.') ||
+      m.startsWith('us.global.anthropic.') ||
+      m.startsWith('amazon.') ||
+      m.startsWith('us.amazon.') ||
+      m.startsWith('meta.') ||
+      m.startsWith('us.meta.') ||
+      m.startsWith('cohere.') ||
+      m.startsWith('ai21.') ||
+      m.startsWith('mistral.')
+    ) {
+      return 'aws-bedrock';
+    }
+    if (m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3') || m.startsWith('o4')) {
+      return 'openai';
+    }
+    if (m.startsWith('gemini-') || m.startsWith('models/gemini')) return 'google-ai';
+    if (m.startsWith('claude-')) return 'anthropic';
+    return 'other';
+  }
+
+  /**
+   * Normalize an arbitrary usage payload to the shape required by the Usage
+   * schema (service / model / promptTokens / completionTokens / totalTokens
+   * are all required). Accepts the legacy `inputTokens` / `outputTokens` /
+   * `modelId` field names used by callers and fills in the required ones.
+   */
+  private buildUsagePayload(
+    partial: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const modelId =
+      (partial.model as string | undefined) ??
+      (partial.modelId as string | undefined) ??
+      'unknown';
+    const promptTokens =
+      (partial.promptTokens as number | undefined) ??
+      (partial.inputTokens as number | undefined) ??
+      0;
+    const completionTokens =
+      (partial.completionTokens as number | undefined) ??
+      (partial.outputTokens as number | undefined) ??
+      0;
+    const totalTokens =
+      (partial.totalTokens as number | undefined) ??
+      promptTokens + completionTokens;
+    const service =
+      (partial.service as string | undefined) ??
+      this.inferServiceFromModelId(modelId);
+
+    return {
+      ...partial,
+      model: modelId,
+      modelId,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      service,
+    };
+  }
+
+  /**
    * Track usage analytics for chat messages
    */
   private async trackUsage(params: {
@@ -5181,7 +5380,7 @@ export class ChatService {
       const truncatedPrompt = params.prompt;
       const truncatedCompletion = params.completion;
 
-      const usageData = {
+      const usageData = this.buildUsagePayload({
         userId: params.userId,
         type: 'chat_message',
         modelId: params.modelId,
@@ -5196,7 +5395,7 @@ export class ChatService {
         completion: truncatedCompletion,
         promptCaching: params.promptCaching,
         metadata: params.metadata || {},
-      };
+      });
 
       await this.usageModel.create(usageData);
 
@@ -5274,7 +5473,12 @@ export class ChatService {
   async streamModelResponse(
     messages: Array<{ role: string; content: string }>,
     modelId: string,
-    options: { maxTokens?: number; temperature?: number },
+    options: {
+      maxTokens?: number;
+      temperature?: number;
+      useSystemPrompt?: boolean;
+      system?: string;
+    },
     onChunk: (chunk: string, done: boolean) => void | Promise<void>,
   ): Promise<{
     fullResponse: string;
