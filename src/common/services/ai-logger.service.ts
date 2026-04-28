@@ -25,6 +25,14 @@ export interface AILogEntry {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  /** Anthropic prompt-cache hits (billed at ~0.1x input rate). Subset of inputTokens. */
+  cacheReadInputTokens?: number;
+  /** Anthropic prompt-cache writes (billed at ~1.25x input rate). Counted in inputTokens. */
+  cacheCreationInputTokens?: number;
+  /** OpenAI o1/o3 reasoning tokens — already counted within outputTokens. */
+  reasoningTokens?: number;
+  /** Marks the token counts as estimated (no usage field on the response). */
+  tokensEstimated?: boolean;
   prompt?: string;
   parameters?: Record<string, any>;
   success?: boolean;

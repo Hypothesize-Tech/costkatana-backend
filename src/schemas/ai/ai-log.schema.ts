@@ -85,6 +85,22 @@ export class AILog implements IAILogMethods {
   @Prop({ required: true, min: 0, default: 0 })
   totalTokens: number;
 
+  // Anthropic prompt-caching: subset of inputTokens, billed at different rates.
+  @Prop({ min: 0, default: 0 })
+  cacheReadInputTokens?: number;
+
+  @Prop({ min: 0, default: 0 })
+  cacheCreationInputTokens?: number;
+
+  // OpenAI o1/o3 reasoning tokens (subset of outputTokens).
+  @Prop({ min: 0, default: 0 })
+  reasoningTokens?: number;
+
+  // True when the token counts came from a local estimator instead of the
+  // provider's usage field — downstream cost reports should mark as approximate.
+  @Prop({ default: false })
+  tokensEstimated?: boolean;
+
   @Prop({ maxlength: 1000 }) // Truncated for privacy (first 1000 chars)
   prompt?: string;
 

@@ -29,6 +29,12 @@ export interface TracedAIResponse {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+    /** Anthropic prompt-cache hits (billed at ~0.1x input rate). */
+    cacheReadInputTokens?: number;
+    /** Anthropic prompt-cache writes (billed at ~1.25x input rate). */
+    cacheCreationInputTokens?: number;
+    /** OpenAI o1/o3 reasoning tokens (subset of completionTokens). */
+    reasoningTokens?: number;
   };
   cost?: number;
   error?: string;
@@ -44,6 +50,9 @@ export interface AIModelResponse {
     total_tokens?: number;
     input_tokens?: number;
     output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+    completion_tokens_details?: { reasoning_tokens?: number };
   };
   finish_reason?: string;
 }
@@ -450,7 +459,9 @@ export class TracedAIService {
   }
 
   /**
-   * Extract token usage from response (OpenAI and Anthropic shapes)
+   * Extract token usage from response (OpenAI and Anthropic shapes).
+   * Captures Anthropic prompt-cache fields and OpenAI reasoning tokens so
+   * downstream cost calculation can apply the right per-token rates.
    */
   private extractTokenUsage(
     response: AIModelResponse | null,
@@ -462,11 +473,23 @@ export class TracedAIService {
     const completionTokens = u.completion_tokens ?? u.output_tokens ?? 0;
     const totalTokens = u.total_tokens ?? promptTokens + completionTokens;
 
-    return {
+    const out: NonNullable<TracedAIResponse['tokenUsage']> = {
       promptTokens,
       completionTokens,
       totalTokens,
     };
+
+    if (typeof u.cache_read_input_tokens === 'number') {
+      out.cacheReadInputTokens = u.cache_read_input_tokens;
+    }
+    if (typeof u.cache_creation_input_tokens === 'number') {
+      out.cacheCreationInputTokens = u.cache_creation_input_tokens;
+    }
+    if (typeof u.completion_tokens_details?.reasoning_tokens === 'number') {
+      out.reasoningTokens = u.completion_tokens_details.reasoning_tokens;
+    }
+
+    return out;
   }
 
   /**

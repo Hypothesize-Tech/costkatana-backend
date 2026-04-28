@@ -1,50 +1,31 @@
 /**
- * Token counting utilities using tiktoken for accurate counts.
- * Uses cl100k_base (OpenAI GPT-3.5/GPT-4) as default encoding.
- * Falls back to 4-char heuristic when tiktoken is unavailable.
+ * Token counting utilities — delegates to the canonical token-counting module.
+ *
+ * Historically used for OpenAI tiktoken counts. Now provider-aware: pass
+ * `provider`/`model` to get the right tokenizer for any supported provider.
  */
+import { countTokens } from './token-counting';
 
 const FALLBACK_CHARS_PER_TOKEN = 4;
 
-let encoder: { encode: (text: string) => number[] } | null = null;
-
-function getEncoder(): { encode: (text: string) => number[] } | null {
-  if (encoder) return encoder;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getEncoding } = require('js-tiktoken');
-    encoder = getEncoding('cl100k_base');
-    return encoder;
-  } catch {
-    return null;
-  }
-}
-
 /**
- * Estimate token count for text using tiktoken when available.
- * Falls back to 4 characters per token heuristic for non-OpenAI models or when tiktoken fails.
- *
- * @param text - Text to count tokens for
- * @param encoding - Optional encoding name; defaults to cl100k_base (OpenAI)
- * @returns Estimated token count
+ * Estimate token count for text. Defaults to OpenAI tokenization when no
+ * provider/model is specified (the historical behaviour of this helper).
  */
-export function estimateTokenCount(text: string): number {
+export function estimateTokenCount(
+  text: string,
+  options?: { provider?: string; model?: string },
+): number {
   if (!text || typeof text !== 'string') return 0;
-  const enc = getEncoder();
-  if (enc) {
-    try {
-      const tokens = enc.encode(text);
-      return tokens.length;
-    } catch {
-      // Fallback to heuristic
-    }
-  }
-  return Math.ceil(text.length / FALLBACK_CHARS_PER_TOKEN);
+  return countTokens(text, {
+    provider: options?.provider || 'openai',
+    model: options?.model,
+  }).tokens;
 }
 
 /**
- * Fallback heuristic: ~4 characters per token for English text.
- * Use when provider-specific token count from API is not available.
+ * Pure-heuristic fallback (~4 chars/token). Use only when you explicitly want
+ * to bypass real tokenizers — most callers should use `estimateTokenCount`.
  */
 export function estimateTokenCountHeuristic(text: string): number {
   if (!text || typeof text !== 'string') return 0;

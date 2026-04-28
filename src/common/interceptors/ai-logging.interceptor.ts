@@ -83,10 +83,14 @@ export class AILoggingInterceptor implements NestInterceptor {
       const model = this.extractModel(request);
 
       // Extract tokens
-      const { inputTokens, outputTokens } = this.extractTokens(
-        request,
-        responseData,
-      );
+      const {
+        inputTokens,
+        outputTokens,
+        cacheReadInputTokens,
+        cacheCreationInputTokens,
+        reasoningTokens,
+      } = this.extractTokens(request, responseData);
+      const tokensEstimated = !responseData?.usage;
 
       // Extract cost
       const cost = responseData?.cost || responseData?.metadata?.cost || 0;
@@ -118,6 +122,10 @@ export class AILoggingInterceptor implements NestInterceptor {
         responseTime,
         inputTokens,
         outputTokens,
+        cacheReadInputTokens,
+        cacheCreationInputTokens,
+        reasoningTokens,
+        tokensEstimated,
         cost,
         prompt: request.body?.prompt || request.body?.messages?.[0]?.content,
         parameters: {
@@ -196,24 +204,50 @@ export class AILoggingInterceptor implements NestInterceptor {
   private extractTokens(
     request: Request,
     responseData: any,
-  ): { inputTokens: number; outputTokens: number } {
+  ): {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+    reasoningTokens?: number;
+  } {
     let inputTokens = 0;
     let outputTokens = 0;
+    let cacheReadInputTokens: number | undefined;
+    let cacheCreationInputTokens: number | undefined;
+    let reasoningTokens: number | undefined;
 
     if (responseData) {
+      const u = responseData.usage;
       inputTokens =
-        responseData.usage?.prompt_tokens ||
-        responseData.usage?.input_tokens ||
+        u?.prompt_tokens ||
+        u?.input_tokens ||
         responseData.inputTokens ||
         0;
       outputTokens =
-        responseData.usage?.completion_tokens ||
-        responseData.usage?.output_tokens ||
+        u?.completion_tokens ||
+        u?.output_tokens ||
         responseData.outputTokens ||
         0;
+
+      if (typeof u?.cache_read_input_tokens === 'number') {
+        cacheReadInputTokens = u.cache_read_input_tokens;
+      }
+      if (typeof u?.cache_creation_input_tokens === 'number') {
+        cacheCreationInputTokens = u.cache_creation_input_tokens;
+      }
+      if (typeof u?.completion_tokens_details?.reasoning_tokens === 'number') {
+        reasoningTokens = u.completion_tokens_details.reasoning_tokens;
+      }
     }
 
-    return { inputTokens, outputTokens };
+    return {
+      inputTokens,
+      outputTokens,
+      cacheReadInputTokens,
+      cacheCreationInputTokens,
+      reasoningTokens,
+    };
   }
 
   private extractServiceFromPath(path: string): string {
