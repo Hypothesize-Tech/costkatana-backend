@@ -3,7 +3,7 @@
  * Last verified: 2026-03. Update periodically against provider docs.
  * When fallback is used, a warning should be logged and pricing may be stale.
  */
-export const PRICING_FALLBACK_LAST_UPDATED = '2026-03';
+export const PRICING_FALLBACK_LAST_UPDATED = '2026-04';
 
 export interface FallbackPriceEntry {
   inputCostPer1K: number;
@@ -23,7 +23,47 @@ const PRICING_RULES: Array<{
   inputCostPer1K: number;
   outputCostPer1K: number;
 }> = [
-  // OpenAI
+  // OpenAI — GPT-5.5 / 5.4 (check most-specific ids first)
+  {
+    match: (p, m) =>
+      p === 'openai' && m.includes('gpt-5.5') && m.includes('pro'),
+    inputCostPer1K: 0.03,
+    outputCostPer1K: 0.18,
+  },
+  {
+    match: (p, m) => p === 'openai' && m.includes('gpt-5.5'),
+    inputCostPer1K: 0.005,
+    outputCostPer1K: 0.03,
+  },
+  {
+    match: (p, m) => p === 'openai' && m.includes('gpt-5.4-mini'),
+    inputCostPer1K: 0.00075,
+    outputCostPer1K: 0.0045,
+  },
+  {
+    match: (p, m) => p === 'openai' && m.includes('gpt-5.4'),
+    inputCostPer1K: 0.0025,
+    outputCostPer1K: 0.015,
+  },
+  {
+    match: (p, m) => p === 'openai' && m.includes('gpt-5-nano'),
+    inputCostPer1K: 0.0002,
+    outputCostPer1K: 0.0008,
+  },
+  {
+    match: (p, m) => p === 'openai' && m.includes('gpt-5-mini'),
+    inputCostPer1K: 0.00075,
+    outputCostPer1K: 0.0045,
+  },
+  {
+    match: (p, m) =>
+      p === 'openai' &&
+      m.startsWith('gpt-5') &&
+      !m.includes('gpt-5.4') &&
+      !m.includes('gpt-5.5'),
+    inputCostPer1K: 0.005,
+    outputCostPer1K: 0.03,
+  },
   {
     match: (p, m) => p === 'openai' && m.includes('o4-mini'),
     inputCostPer1K: 0.0011,
@@ -86,6 +126,12 @@ const PRICING_RULES: Array<{
   // Anthropic
   {
     match: (p, m) =>
+      p === 'anthropic' && (m.includes('opus-4-7') || m.includes('opus-4-6')),
+    inputCostPer1K: 0.005,
+    outputCostPer1K: 0.025,
+  },
+  {
+    match: (p, m) =>
       p === 'anthropic' &&
       (m.includes('claude-4-sonnet') || m.includes('claude-sonnet-4')),
     inputCostPer1K: 0.003,
@@ -135,6 +181,30 @@ const PRICING_RULES: Array<{
     outputCostPer1K: 0.015,
   },
   // Google
+  {
+    match: (p, m) =>
+      p === 'google' && m.includes('gemini-3') && m.includes('flash'),
+    inputCostPer1K: 0.00035,
+    outputCostPer1K: 0.0028,
+  },
+  {
+    match: (p, m) => p === 'google' && m.includes('gemini-3'),
+    inputCostPer1K: 0.002,
+    outputCostPer1K: 0.012,
+  },
+  {
+    match: (p, m) =>
+      p === 'google' &&
+      (m.includes('gemini-2.5-flash-lite') || m.includes('2.5-flash-lite')),
+    inputCostPer1K: 0.0001,
+    outputCostPer1K: 0.0004,
+  },
+  {
+    match: (p, m) =>
+      p === 'google' && m.includes('gemini-2.5-flash') && !m.includes('lite'),
+    inputCostPer1K: 0.0003,
+    outputCostPer1K: 0.0025,
+  },
   {
     match: (p, m) => p === 'google' && m.includes('gemini-2.5-pro'),
     inputCostPer1K: 0.00125,
@@ -186,6 +256,13 @@ const PRICING_RULES: Array<{
     match: (p, m) => (p === 'bedrock' || p === 'amazon') && m.includes('llama'),
     inputCostPer1K: 0.001,
     outputCostPer1K: 0.0015,
+  },
+  {
+    match: (p, m) =>
+      (p === 'bedrock' || p === 'amazon') &&
+      (m.includes('opus-4-7') || m.includes('opus-4-6')),
+    inputCostPer1K: 0.005,
+    outputCostPer1K: 0.025,
   },
   {
     match: (p, m) =>

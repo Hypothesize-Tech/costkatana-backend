@@ -145,7 +145,16 @@ export class ProviderAdapterInitializerService implements OnModuleInit {
         name: 'OpenAI',
         type: 'openai',
         apiKey: this.configService.get<string>('OPENAI_API_KEY'),
-        models: ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+        models: [
+          'gpt-5.5',
+          'gpt-5.4',
+          'gpt-5.4-mini',
+          'gpt-5',
+          'gpt-4o',
+          'gpt-4o-mini',
+          'gpt-4-turbo',
+          'gpt-3.5-turbo',
+        ],
         rateLimits: { requestsPerMinute: 60, tokensPerMinute: 100000 },
       });
     }
@@ -157,7 +166,14 @@ export class ProviderAdapterInitializerService implements OnModuleInit {
         name: 'Anthropic',
         type: 'anthropic',
         apiKey: this.configService.get<string>('ANTHROPIC_API_KEY'),
-        models: ['claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku'],
+        models: [
+          'claude-opus-4-7',
+          'claude-opus-4-6',
+          'claude-sonnet-4-6',
+          'claude-sonnet-4-5-20250929',
+          'claude-3-5-sonnet-20241022',
+          'claude-3-haiku-20240307',
+        ],
         rateLimits: { requestsPerMinute: 50, tokensPerMinute: 80000 },
       });
     }
@@ -169,7 +185,14 @@ export class ProviderAdapterInitializerService implements OnModuleInit {
         name: 'Google AI',
         type: 'google',
         apiKey: this.configService.get<string>('GOOGLE_AI_API_KEY'),
-        models: ['gemini-pro', 'gemini-pro-vision'],
+        models: [
+          'gemini-3-pro-preview',
+          'gemini-2.5-pro',
+          'gemini-2.5-flash',
+          'gemini-2.0-flash',
+          'gemini-1.5-pro',
+          'gemini-1.5-flash',
+        ],
         rateLimits: { requestsPerMinute: 60, tokensPerMinute: 32000 },
       });
     }

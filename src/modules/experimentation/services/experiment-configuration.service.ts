@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { MODEL_PRICING } from '../../../utils/pricing';
+import { PricingUnit } from '../../../utils/pricing/types';
 
 export interface ModelComparisonRequest {
   prompt: string;
@@ -36,19 +38,6 @@ export class ExperimentConfigurationService {
   private readonly MAX_ITERATIONS = 50;
   private readonly MAX_PROMPT_LENGTH = 50000;
   private readonly MIN_PROMPT_LENGTH = 10;
-
-  // Supported model configurations
-  private readonly SUPPORTED_BEDROCK_MODELS = [
-    'amazon.nova-micro-v1:0',
-    'amazon.nova-lite-v1:0',
-    'amazon.nova-pro-v1:0',
-    'anthropic.claude-3-haiku-20240307-v1:0',
-    'anthropic.claude-3-sonnet-20240229-v1:0',
-    'meta.llama3-8b-instruct-v1:0',
-    'meta.llama3-70b-instruct-v1:0',
-    'cohere.command-r-v1:0',
-    'cohere.command-r-plus-v1:0',
-  ];
 
   // Simple in-memory cache for model configurations
   private modelPricingIndex = new Map<string, any>();
@@ -202,75 +191,33 @@ export class ExperimentConfigurationService {
     }
 
     try {
-      // Get models from pricing data
       const models: BedrockModelInfo[] = [];
 
-      // OpenAI models
-      if (!provider || provider === 'openai') {
-        models.push(
-          {
-            modelId: 'gpt-3.5-turbo',
-            modelName: 'GPT-3.5 Turbo',
-            provider: 'openai',
-            inputPricing: 0.0015,
-            outputPricing: 0.002,
-            maxTokens: 4096,
-            supportedRegions: ['global'],
-            capabilities: ['chat', 'completion'],
-          },
-          {
-            modelId: 'gpt-4',
-            modelName: 'GPT-4',
-            provider: 'openai',
-            inputPricing: 0.03,
-            outputPricing: 0.06,
-            maxTokens: 8192,
-            supportedRegions: ['global'],
-            capabilities: ['chat', 'completion', 'vision'],
-          },
-        );
-      }
-
-      // Anthropic models
-      if (!provider || provider === 'anthropic') {
-        models.push(
-          {
-            modelId: 'claude-3-haiku',
-            modelName: 'Claude 3 Haiku',
-            provider: 'anthropic',
-            inputPricing: 0.00025,
-            outputPricing: 0.00125,
-            maxTokens: 4096,
-            supportedRegions: ['us-east-1', 'us-west-2', 'eu-west-1'],
-            capabilities: ['chat', 'completion', 'vision'],
-          },
-          {
-            modelId: 'claude-3-sonnet',
-            modelName: 'Claude 3 Sonnet',
-            provider: 'anthropic',
-            inputPricing: 0.003,
-            outputPricing: 0.015,
-            maxTokens: 4096,
-            supportedRegions: ['us-east-1', 'us-west-2', 'eu-west-1'],
-            capabilities: ['chat', 'completion', 'vision'],
-          },
-        );
-      }
-
-      // AWS Bedrock models
-      if (!provider || provider === 'bedrock') {
-        this.SUPPORTED_BEDROCK_MODELS.forEach((modelId) => {
-          const pricing = this.getModelPricing('bedrock', modelId);
-          models.push({
-            modelId,
-            modelName: this.formatModelName(modelId),
-            provider: 'bedrock',
-            inputPricing: pricing?.input || 0,
-            outputPricing: pricing?.output || 0,
-            maxTokens: pricing?.maxTokens || 4096,
-            supportedRegions: ['us-east-1', 'us-west-2', 'eu-west-1'],
-            capabilities: ['chat', 'completion'],
-          });
+      for (const row of MODEL_PRICING) {
+        const pk = this.canonicalProviderKey(row.provider);
+        if (provider && pk !== provider) continue;
+        const inputPer1k =
+          row.unit === PricingUnit.PER_1M_TOKENS
+            ? row.inputPrice / 1000
+            : row.inputPrice;
+        const outputPer1k =
+          row.unit === PricingUnit.PER_1M_TOKENS
+            ? row.outputPrice / 1000
+            : row.outputPrice;
+        models.push({
+          modelId: row.modelId,
+          modelName: row.modelName,
+          provider: pk,
+          inputPricing: inputPer1k,
+          outputPricing: outputPer1k,
+          maxTokens: row.contextWindow ?? 8192,
+          supportedRegions:
+            pk === 'bedrock'
+              ? ['us-east-1', 'us-west-2', 'eu-west-1']
+              : ['global'],
+          capabilities: row.capabilities?.length
+            ? row.capabilities
+            : ['chat', 'completion'],
         });
       }
 
@@ -435,75 +382,40 @@ export class ExperimentConfigurationService {
   }
 
   /**
-   * Initialize model pricing index
+   * Initialize model pricing index from merged MODEL_PRICING (per-1k USD).
    */
   private initializeModelPricing(): void {
-    // OpenAI pricing
-    this.modelPricingIndex.set('openai:gpt-3.5-turbo', {
-      input: 0.0015,
-      output: 0.002,
-      maxTokens: 4096,
-    });
-    this.modelPricingIndex.set('openai:gpt-4', {
-      input: 0.03,
-      output: 0.06,
-      maxTokens: 8192,
-    });
+    for (const row of MODEL_PRICING) {
+      const pk = this.canonicalProviderKey(row.provider);
+      const inputPer1k =
+        row.unit === PricingUnit.PER_1M_TOKENS
+          ? row.inputPrice / 1000
+          : row.inputPrice;
+      const outputPer1k =
+        row.unit === PricingUnit.PER_1M_TOKENS
+          ? row.outputPrice / 1000
+          : row.outputPrice;
+      this.modelPricingIndex.set(`${pk}:${row.modelId}`, {
+        input: inputPer1k,
+        output: outputPer1k,
+        maxTokens: row.contextWindow ?? 8192,
+      });
+    }
+  }
 
-    // Anthropic pricing
-    this.modelPricingIndex.set('anthropic:claude-3-haiku', {
-      input: 0.00025,
-      output: 0.00125,
-      maxTokens: 4096,
-    });
-    this.modelPricingIndex.set('anthropic:claude-3-sonnet', {
-      input: 0.003,
-      output: 0.015,
-      maxTokens: 4096,
-    });
-
-    // AWS Bedrock pricing (simplified)
-    this.SUPPORTED_BEDROCK_MODELS.forEach((modelId) => {
-      if (modelId.includes('nova-micro')) {
-        this.modelPricingIndex.set(`bedrock:${modelId}`, {
-          input: 0.000035,
-          output: 0.00014,
-          maxTokens: 128000,
-        });
-      } else if (modelId.includes('nova-lite')) {
-        this.modelPricingIndex.set(`bedrock:${modelId}`, {
-          input: 0.00006,
-          output: 0.00024,
-          maxTokens: 128000,
-        });
-      } else if (modelId.includes('nova-pro')) {
-        this.modelPricingIndex.set(`bedrock:${modelId}`, {
-          input: 0.0008,
-          output: 0.0032,
-          maxTokens: 128000,
-        });
-      } else if (modelId.includes('claude-3-haiku')) {
-        this.modelPricingIndex.set(`bedrock:${modelId}`, {
-          input: 0.00025,
-          output: 0.00125,
-          maxTokens: 4096,
-        });
-      } else if (modelId.includes('claude-3-sonnet')) {
-        this.modelPricingIndex.set(`bedrock:${modelId}`, {
-          input: 0.003,
-          output: 0.015,
-          maxTokens: 4096,
-        });
-      }
-      // Add other models with default pricing
-      else {
-        this.modelPricingIndex.set(`bedrock:${modelId}`, {
-          input: 0.001,
-          output: 0.002,
-          maxTokens: 4096,
-        });
-      }
-    });
+  /** Map MODEL_PRICING provider labels to experiment/API provider keys */
+  private canonicalProviderKey(provider: string): string {
+    const p = provider.toLowerCase().trim();
+    if (p.includes('bedrock') || p === 'aws bedrock') return 'bedrock';
+    if (p.includes('openai')) return 'openai';
+    if (p.includes('anthropic')) return 'anthropic';
+    if (p.includes('google')) return 'google';
+    if (p.includes('cohere')) return 'cohere';
+    if (p.includes('mistral')) return 'mistral';
+    if (p.includes('grok')) return 'grok';
+    if (p.includes('meta')) return 'meta';
+    if (p.includes('deepseek')) return 'deepseek';
+    return p.replace(/\s+/g, '-');
   }
 
   /**

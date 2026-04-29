@@ -11,7 +11,13 @@ function getDisplayName(modelId: string, modelName?: string): string {
   }
 
   const nameMap: Record<string, string> = {
-    // === OpenAI GPT-5 Models (Latest) ===
+    // === OpenAI GPT-5.5 / GPT-5.4 ===
+    'gpt-5.5': 'GPT-5.5',
+    'gpt-5.5-2026-04-23': 'GPT-5.5 (snapshot)',
+    'gpt-5.5-pro': 'GPT-5.5 Pro',
+    'gpt-5.4': 'GPT-5.4',
+    'gpt-5.4-mini': 'GPT-5.4 Mini',
+    // === OpenAI GPT-5 Models ===
     'gpt-5': 'GPT-5',
     'gpt-5-mini': 'GPT-5 Mini',
     'gpt-5-nano': 'GPT-5 Nano',
@@ -68,6 +74,9 @@ function getDisplayName(modelId: string, modelName?: string): string {
     'ai21.j2-mid-v1': 'Jurassic-2 Mid',
 
     // Google Gemini Models
+    'gemini-3-pro-preview': 'Gemini 3 Pro (preview)',
+    'gemini-3-flash-preview': 'Gemini 3 Flash (preview)',
+    'gemini-3.1-pro': 'Gemini 3.1 Pro',
     'gemini-2.5-pro': 'Gemini 2.5 Pro',
     'gemini-2.5-flash': 'Gemini 2.5 Flash',
     'gemini-2.5-flash-lite': 'Gemini 2.5 Flash Lite',
@@ -216,7 +225,15 @@ export class ModelRegistry {
     }
 
     const descriptionMap: Record<string, string> = {
-      // === OpenAI GPT-5 Models (Latest) ===
+      // === OpenAI GPT-5.5 / GPT-5.4 ===
+      'gpt-5.5':
+        'OpenAI GPT-5.5 — frontier multimodal model; large context; strong tool use',
+      'gpt-5.5-2026-04-23': 'GPT-5.5 dated snapshot for stable production behavior',
+      'gpt-5.5-pro':
+        'Premium GPT-5.5 tier for highest quality and precision workloads',
+      'gpt-5.4': 'OpenAI GPT-5.4 — high-capability model below 5.5 flagship tier',
+      'gpt-5.4-mini': 'Faster, lower-cost GPT-5.4 variant',
+      // === OpenAI GPT-5 Models ===
       'gpt-5':
         'OpenAI GPT-5 - Latest flagship model with advanced intelligence and reasoning capabilities',
       'gpt-5-mini':
@@ -245,6 +262,10 @@ export class ModelRegistry {
         'Best for coding and complex agents',
       'anthropic.claude-opus-4-6-v1':
         'Next-gen flagship for agents, coding, and enterprise workflows',
+      'anthropic.claude-opus-4-7-v1:0':
+        'Claude Opus 4.7 — improved coding, vision, and instruction following',
+      'claude-opus-4-7':
+        'Claude Opus 4.7 — improved coding, vision, and instruction following',
       'anthropic.claude-sonnet-4-6-v1:0':
         'Latest Sonnet: coding, computer use, long-context reasoning, agents',
       'anthropic.claude-opus-4-1-20250805-v1:0':
@@ -297,6 +318,12 @@ export class ModelRegistry {
       'ai21.j2-mid-v1': 'Mid-size model for balanced performance',
 
       // Google Gemini Models
+      'gemini-3-pro-preview':
+        'Gemini 3-class Pro preview — advanced reasoning and multimodal understanding',
+      'gemini-3-flash-preview':
+        'Gemini 3-class Flash preview — fast balanced multimodal',
+      'gemini-3.1-pro':
+        'Gemini 3.1 Pro — complex problem solving and reasoning',
       'gemini-2.5-pro':
         'Our most advanced reasoning Gemini model, made to solve complex problems. Best for multimodal understanding, coding, and complex prompts',
       'gemini-2.5-flash':
