@@ -112,6 +112,9 @@ import { SharedPreferencesModule } from './modules/shared-preferences/shared-pre
 import { AgentModule } from './modules/agent/agent.module';
 import { RagModule } from './modules/rag/rag.module';
 
+// Agent Builder platform (visual canvas, templates, deployments)
+import { AgentPlatformModule } from './modules/agent-platform/agent-platform.module';
+
 // Data Network Effects module
 import { DataNetworkEffectsModule } from './modules/data-network-effects/data-network-effects.module';
 
@@ -274,6 +277,9 @@ import { ComprehensiveTrackingMiddleware } from './modules/usage/middleware/comp
     // AI Agent and RAG modules
     AgentModule,
     RagModule,
+
+    // Agent Builder platform (visual canvas, templates, deployments)
+    AgentPlatformModule,
 
     // Data Network Effects module
     DataNetworkEffectsModule,
