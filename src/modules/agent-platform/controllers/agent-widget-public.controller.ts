@@ -126,6 +126,7 @@ export class AgentWidgetPublicController {
   }
 
   @Get('runs/:runId/stream')
+  @WidgetSessionPublic()
   @Sse()
   streamRun(@Param('runId') runId: string): Observable<MessageEvent> {
     return new Observable<MessageEvent>((subscriber) => {
