@@ -29,7 +29,7 @@ import type {
   CompiledPlan,
   DagNode,
 } from '../interfaces/dag.interface';
-import type { RunContext } from '../node-executors/base-node-executor';
+import type { NodeExecutor, RunContext } from '../node-executors/base-node-executor';
 import { NodeExecutorRegistry } from '../node-executors/node-executor.registry';
 import { AgentCompilerService } from './agent-compiler.service';
 
@@ -53,17 +53,27 @@ const RUN_EVENT_PREFIX = 'agent-platform.run';
 const eventName = (runId: string, suffix: string) =>
   `${RUN_EVENT_PREFIX}.${runId}.${suffix}`;
 
-/** Wrap a Mongoose save() with a timeout so a slow MongoDB doesn't stall the run loop. */
-const saveWithTimeout = <T extends { save(): Promise<unknown> }>(
-  doc: T,
+/**
+ * Best-effort, non-blocking Mongoose save. Resolves immediately (fire-and-forget).
+ * Failures are logged but never propagate — the run loop and SSE events must
+ * not be gated on DB writes so the chat widget stays responsive even when
+ * MongoDB is under load.
+ */
+const bgSave = (
+  doc: { save(): Promise<unknown> },
+  label: string,
+  logger: { warn(msg: string): void },
   ms = 8_000,
-): Promise<void> =>
-  Promise.race([
-    doc.save().then(() => undefined),
+): void => {
+  void Promise.race([
+    doc.save(),
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`MongoDB save timed out after ${ms}ms`)), ms),
+      setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms),
     ),
-  ]);
+  ]).catch((err) =>
+    logger.warn(`bgSave(${label}) failed: ${err instanceof Error ? err.message : String(err)}`),
+  );
+};
 
 export const AGENT_RUN_EVENT_PREFIX = RUN_EVENT_PREFIX;
 export { eventName as agentRunEventName };
@@ -183,13 +193,13 @@ export class AgentRunnerService {
         step.output = checkpointResponse;
         step.status = 'succeeded';
         step.endedAt = new Date();
-        await saveWithTimeout(step);
+        bgSave(step, 'resume.step', this.logger);
       }
     }
 
     run.status = 'running';
     run.pausedAt = undefined;
-    await saveWithTimeout(run);
+    bgSave(run, 'resume.run', this.logger);
 
     void this.executePlan(String(run._id), plan, run.input, {
       resumeFromNodeId: run.currentNodeId ?? undefined,
@@ -269,19 +279,39 @@ export class AgentRunnerService {
         const node = plan.nodeIndex[nodeId];
         if (!node) continue;
 
+        // Track progress in DB (best-effort — never block the run loop on this).
         run.currentNodeId = nodeId;
-        await saveWithTimeout(run);
+        bgSave(run, 'currentNodeId', this.logger);
 
         const stepInput = this.assembleNodeInput(node, plan, ctx);
-        const step = await this.stepModel.create({
-          agentRunId: run._id,
-          nodeId,
-          nodeType: node.type,
-          status: 'running',
-          input: stepInput,
-          startedAt: new Date(),
-        });
 
+        // Create the step record so late-connecting SSE clients can replay it.
+        // If the create itself times out (MongoDB down), we skip the record but
+        // continue executing so the widget still gets a response.
+        let step: AgentRunStepDocument | null = null;
+        try {
+          step = await Promise.race([
+            this.stepModel.create({
+              agentRunId: run._id,
+              nodeId,
+              nodeType: node.type,
+              status: 'running',
+              input: stepInput,
+              startedAt: new Date(),
+            }),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('step create timed out')), 5_000),
+            ),
+          ]);
+        } catch (e) {
+          this.logger.warn(
+            `Step create failed for ${nodeId} (continuing without DB record): ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          );
+        }
+
+        // Emit step.start regardless of whether the DB record was created.
         this.events.emit(eventName(runId, 'step.start'), {
           runId,
           nodeId,
@@ -290,128 +320,153 @@ export class AgentRunnerService {
         });
 
         const startedAt = Date.now();
+        let result: Awaited<ReturnType<NodeExecutor['execute']>>;
         try {
           const executor = this.registry.get(node.type);
-          const result = await executor.execute(
+          result = await executor.execute(
             ctx,
             (node.data?.config ?? {}) as Record<string, unknown>,
             stepInput,
           );
+        } catch (err) {
+          // Executor threw — emit run.error immediately so SSE gets a terminal
+          // event. Persist the failure to DB in the background.
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const errStack = err instanceof Error ? err.stack : undefined;
 
+          if (step) {
+            step.error = { message: errMsg, stack: errStack };
+            step.status = 'failed';
+            step.endedAt = new Date();
+            step.latencyMs = Date.now() - startedAt;
+            bgSave(step, 'step.failed', this.logger);
+          }
+
+          run.status = 'failed';
+          run.error = { message: errMsg, nodeId };
+          run.endedAt = new Date();
+          bgSave(run, 'run.failed', this.logger);
+
+          // Emit BEFORE returning so SSE always receives a terminal event.
+          this.events.emit(eventName(runId, 'run.error'), {
+            runId,
+            nodeId,
+            error: { message: errMsg, stack: errStack },
+          });
+          return;
+        }
+
+        const latencyMs = Date.now() - startedAt;
+
+        if (result.pause) {
+          // Checkpoint — the run must pause here so the user can approve.
+          // We DO need the pause state persisted before emitting so that a
+          // resume call can find it, but we still emit if the save fails.
+          if (step) {
+            step.status = 'paused';
+            step.output = result.output;
+            step.latencyMs = latencyMs;
+            step.endedAt = new Date();
+            step.traceMeta = {
+              ...(result.traceMeta ?? {}),
+              pauseReason: result.pause.reason,
+              pausePayload: result.pause.payload,
+            };
+            bgSave(step, 'step.paused', this.logger);
+          }
+          run.status = 'paused_checkpoint';
+          run.pausedAt = new Date();
+          run.currentNodeId = nodeId;
+          bgSave(run, 'run.paused', this.logger);
+
+          this.events.emit(eventName(runId, 'paused'), {
+            runId,
+            nodeId,
+            reason: result.pause.reason,
+            payload: result.pause.payload,
+          });
+          return;
+        }
+
+        // --- Normal step success ---
+
+        // Update in-memory context immediately so the next node can run.
+        ctx.outputs[nodeId] = result.output;
+        lastOutput = result.output;
+        visited.add(nodeId);
+        run.tokens = {
+          in: (run.tokens?.in ?? 0) + (result.tokens?.in ?? 0),
+          out: (run.tokens?.out ?? 0) + (result.tokens?.out ?? 0),
+        };
+        run.costUsd = (run.costUsd ?? 0) + (result.cost ?? 0);
+
+        // Emit step.end immediately — don't wait for DB writes.
+        this.events.emit(eventName(runId, 'step.end'), {
+          runId,
+          nodeId,
+          nodeType: node.type,
+          output: result.output,
+          tokens: result.tokens ?? { in: 0, out: 0 },
+          costUsd: result.cost ?? 0,
+          latencyMs,
+        });
+
+        // Persist to DB in background.
+        if (step) {
           step.output = result.output;
           step.status = 'succeeded';
           step.tokens = result.tokens ?? { in: 0, out: 0 };
           step.costUsd = result.cost ?? 0;
-          step.latencyMs = Date.now() - startedAt;
+          step.latencyMs = latencyMs;
           step.traceMeta = result.traceMeta ?? {};
           step.endedAt = new Date();
+          bgSave(step, 'step.succeeded', this.logger);
+        }
+        bgSave(run, 'run.progress', this.logger);
 
-          if (result.pause) {
-            // Checkpoint — mark step paused, set run paused, stop walking.
-            step.status = 'paused';
-            // Store pause metadata so SSE replay can reconstruct the event.
-            step.traceMeta = {
-              ...(step.traceMeta ?? {}),
-              pauseReason: result.pause.reason,
-              pausePayload: result.pause.payload,
-            };
-            await saveWithTimeout(step);
-            run.status = 'paused_checkpoint';
-            run.pausedAt = new Date();
-            run.currentNodeId = nodeId;
-            await saveWithTimeout(run);
-            this.events.emit(eventName(runId, 'paused'), {
-              runId,
-              nodeId,
-              reason: result.pause.reason,
-              payload: result.pause.payload,
-            });
-            return;
-          }
-
-          await saveWithTimeout(step);
-          ctx.outputs[nodeId] = result.output;
-          lastOutput = result.output;
-          visited.add(nodeId);
-          run.tokens = {
-            in: (run.tokens?.in ?? 0) + (result.tokens?.in ?? 0),
-            out: (run.tokens?.out ?? 0) + (result.tokens?.out ?? 0),
-          };
-          run.costUsd = (run.costUsd ?? 0) + (result.cost ?? 0);
-          await saveWithTimeout(run);
-
-          this.events.emit(eventName(runId, 'step.end'), {
-            runId,
-            nodeId,
-            nodeType: node.type,
-            output: result.output,
-            tokens: step.tokens,
-            costUsd: step.costUsd,
-            latencyMs: step.latencyMs,
-          });
-
-          // Decide which outgoing edges to follow.
-          const outgoing = plan.outgoingEdges[nodeId] ?? [];
-          if (result.preferredBranchLabel !== undefined) {
-            for (const edge of outgoing) {
-              if (edge.label === result.preferredBranchLabel) {
-                enqueueIfReady(edge.target);
-              } else {
-                this.markBranchSkipped(edge.target, plan, skipped, visited);
-              }
-            }
-          } else {
-            for (const edge of outgoing) {
+        // Decide which outgoing edges to follow.
+        const outgoing = plan.outgoingEdges[nodeId] ?? [];
+        if (result.preferredBranchLabel !== undefined) {
+          for (const edge of outgoing) {
+            if (edge.label === result.preferredBranchLabel) {
               enqueueIfReady(edge.target);
+            } else {
+              this.markBranchSkipped(edge.target, plan, skipped, visited);
             }
           }
-        } catch (err) {
-          step.error = {
-            message: err instanceof Error ? err.message : String(err),
-            stack: err instanceof Error ? err.stack : undefined,
-          };
-          step.status = 'failed';
-          step.endedAt = new Date();
-          step.latencyMs = Date.now() - startedAt;
-          await saveWithTimeout(step);
-          run.status = 'failed';
-          run.error = {
-            message: step.error.message,
-            nodeId,
-          };
-          run.endedAt = new Date();
-          await saveWithTimeout(run);
-          this.events.emit(eventName(runId, 'run.error'), {
-            runId,
-            nodeId,
-            error: step.error,
-          });
-          return;
+        } else {
+          for (const edge of outgoing) {
+            enqueueIfReady(edge.target);
+          }
         }
       }
 
+      // All nodes finished — emit run.end immediately, persist in background.
       run.status = 'succeeded';
       run.output = lastOutput;
       run.endedAt = new Date();
-      await saveWithTimeout(run);
+
       this.events.emit(eventName(runId, 'run.end'), {
         runId,
         output: run.output,
         tokens: run.tokens,
         costUsd: run.costUsd,
       });
+
+      bgSave(run, 'run.succeeded', this.logger);
     } catch (err) {
+      // Unexpected crash in the run loop itself (not an executor error).
       this.logger.error('Run loop crashed', err);
       run.status = 'failed';
-      run.error = {
-        message: err instanceof Error ? err.message : String(err),
-      };
+      run.error = { message: err instanceof Error ? err.message : String(err) };
       run.endedAt = new Date();
-      await saveWithTimeout(run);
+
       this.events.emit(eventName(runId, 'run.error'), {
         runId,
         error: run.error,
       });
+
+      bgSave(run, 'run.crashed', this.logger);
     }
   }
 
