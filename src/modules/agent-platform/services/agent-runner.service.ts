@@ -121,6 +121,17 @@ export class AgentRunnerService {
     return { runId: String(run._id), status: 'running' };
   }
 
+  /** Return current DB state for SSE replay on late-connecting clients. */
+  async getRunSnapshot(runId: string) {
+    const run = await this.runModel.findById(runId).lean();
+    if (!run) return null;
+    const steps = await this.stepModel
+      .find({ agentRunId: run._id })
+      .sort({ startedAt: 1 })
+      .lean();
+    return { run, steps };
+  }
+
   /** Resume a paused run (e.g., after a checkpoint approval). */
   async resume(runId: string, checkpointResponse: unknown): Promise<void> {
     const run = await this.runModel.findById(runId);
@@ -272,6 +283,12 @@ export class AgentRunnerService {
           if (result.pause) {
             // Checkpoint — mark step paused, set run paused, stop walking.
             step.status = 'paused';
+            // Store pause metadata so SSE replay can reconstruct the event.
+            step.traceMeta = {
+              ...(step.traceMeta ?? {}),
+              pauseReason: result.pause.reason,
+              pausePayload: result.pause.payload,
+            };
             await step.save();
             run.status = 'paused_checkpoint';
             run.pausedAt = new Date();

@@ -12,16 +12,21 @@ import {
   Put,
   Query,
   Sse,
+  UploadedFiles,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Observable } from 'rxjs';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
+import { Public } from '../../../common/decorators/public.decorator';
 import { AgentDefinitionService } from '../services/agent-definition.service';
 import { AgentTemplateService } from '../services/agent-template.service';
 import { AgentDeploymentService } from '../services/agent-deployment.service';
 import { TextToAgentService } from '../services/text-to-agent.service';
+import { KbIngestionService } from '../services/kb-ingestion.service';
 import {
   AgentRunnerService,
   AGENT_RUN_EVENT_PREFIX,
@@ -53,6 +58,7 @@ export class AgentPlatformController {
     private readonly agentTemplateService: AgentTemplateService,
     private readonly deploymentService: AgentDeploymentService,
     private readonly textToAgentService: TextToAgentService,
+    private readonly kbIngestionService: KbIngestionService,
     private readonly runner: AgentRunnerService,
     private readonly events: EventEmitter2,
   ) {}
@@ -216,6 +222,7 @@ export class AgentPlatformController {
     };
   }
 
+  @Public()
   @Get('runs/:runId/stream')
   @Sse()
   streamRun(@Param('runId') runId: string): Observable<MessageEvent> {
@@ -224,22 +231,74 @@ export class AgentPlatformController {
         [];
       let closed = false;
 
-      for (const suffix of RUN_EVENT_SUFFIXES) {
-        const event = `${AGENT_RUN_EVENT_PREFIX}.${runId}.${suffix}`;
-        const fn = (payload: unknown) => {
-          if (closed) return;
-          subscriber.next({
-            type: suffix,
-            data: payload as Record<string, unknown>,
-          } as MessageEvent);
-          if (suffix === 'run.end' || suffix === 'run.error') {
-            closed = true;
-            subscriber.complete();
+      const emit = (type: string, data: unknown) => {
+        if (closed) return;
+        subscriber.next({ type, data } as MessageEvent);
+        if (type === 'run.end' || type === 'run.error') {
+          closed = true;
+          subscriber.complete();
+        }
+      };
+
+      // Replay already-stored steps so late-connecting clients don't miss
+      // events that fired before the SSE connection was established.
+      this.runner.getRunSnapshot(runId).then((snapshot) => {
+        if (closed || !snapshot) return;
+        const { run, steps } = snapshot;
+
+        for (const step of steps) {
+          emit('step.start', {
+            runId,
+            nodeId: step.nodeId,
+            nodeType: step.nodeType,
+            input: step.input,
+          });
+          if (step.status === 'succeeded') {
+            emit('step.end', {
+              runId,
+              nodeId: step.nodeId,
+              nodeType: step.nodeType,
+              output: step.output,
+              tokens: step.tokens,
+              costUsd: step.costUsd,
+              latencyMs: step.latencyMs,
+            });
+          } else if (step.status === 'failed') {
+            emit('step.end', {
+              runId,
+              nodeId: step.nodeId,
+              nodeType: step.nodeType,
+              output: step.output,
+            });
+          } else if (step.status === 'paused') {
+            const meta = (step.traceMeta ?? {}) as Record<string, unknown>;
+            emit('paused', {
+              runId,
+              nodeId: step.nodeId,
+              reason: meta.pauseReason,
+              payload: meta.pausePayload,
+            });
           }
-        };
-        this.events.on(event, fn);
-        handlers.push({ event, fn });
-      }
+        }
+
+        if (run.status === 'succeeded') {
+          emit('run.end', { runId, output: run.output, tokens: run.tokens, costUsd: run.costUsd });
+          return;
+        }
+        if (run.status === 'failed') {
+          emit('run.error', { runId, nodeId: run.error?.nodeId, error: run.error });
+          return;
+        }
+
+        // Run is still in progress (including paused_checkpoint waiting for resume)
+        // — subscribe to live events so the client gets run.end / run.error after resume.
+        for (const suffix of RUN_EVENT_SUFFIXES) {
+          const event = `${AGENT_RUN_EVENT_PREFIX}.${runId}.${suffix}`;
+          const fn = (payload: unknown) => emit(suffix, payload);
+          this.events.on(event, fn);
+          handlers.push({ event, fn });
+        }
+      });
 
       return () => {
         closed = true;
@@ -323,5 +382,71 @@ export class AgentPlatformController {
       body,
     );
     return { deployment: deployment.toObject() };
+  }
+
+  /**
+   * Knowledge-base document upload (multipart/form-data, field "files").
+   * Stores originals in `costkatana-media` (AWS_S3_BUCKET) at prefix
+   * `agent-platform/kb/{orgId}/{kbId}/...`, then extracts text, chunks,
+   * embeds with Bedrock Titan v2, and persists chunks to Mongo for
+   * FAISS-backed retrieval.
+   */
+  @Post('kb/upload')
+  @UseInterceptors(FilesInterceptor('files', 10, { limits: { fileSize: 25 * 1024 * 1024 } }))
+  async kbUpload(
+    @CurrentUser() user: { id: string },
+    @UploadedFiles() files: Array<Express.Multer.File>,
+  ) {
+    return this.kbIngestionService.uploadDocuments(
+      user.id,
+      (files ?? []).map((f) => ({
+        originalname: f.originalname,
+        mimetype: f.mimetype,
+        size: f.size,
+        buffer: f.buffer,
+      })),
+    );
+  }
+
+  @Get('kb/status')
+  async kbStatus(@CurrentUser() user: { id: string }) {
+    const result = await this.kbIngestionService.getStatus(user.id);
+    if (!result.kb) {
+      return { kb: null, chunkCount: 0, documents: [] };
+    }
+    const kb = result.kb;
+    return {
+      kb: {
+        _id: kb._id,
+        status: kb.status,
+        documentCount: kb.documentCount,
+        s3Bucket: kb.s3Bucket,
+        s3PrefixRoot: kb.s3PrefixRoot,
+        embeddingModel: kb.embeddingModel,
+        lastError: kb.lastError,
+        createdAt: (kb as any).createdAt,
+        updatedAt: (kb as any).updatedAt,
+      },
+      chunkCount: result.chunkCount,
+      documents: result.documents,
+    };
+  }
+
+  @Get('kb/documents/:docId/chunks')
+  async kbDocumentChunks(
+    @CurrentUser() user: { id: string },
+    @Param('docId') docId: string,
+  ) {
+    const chunks = await this.kbIngestionService.getDocumentChunks(user.id, docId);
+    return { chunks };
+  }
+
+  @Delete('kb/documents/:docId')
+  @HttpCode(HttpStatus.OK)
+  async kbDeleteDocument(
+    @CurrentUser() user: { id: string },
+    @Param('docId') docId: string,
+  ) {
+    return this.kbIngestionService.deleteDocument(user.id, docId);
   }
 }

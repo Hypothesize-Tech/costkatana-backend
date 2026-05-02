@@ -52,13 +52,14 @@ export class AgentDeployment {
   organizationId: Types.ObjectId;
 
   @Prop({
+    type: String,
     enum: ['embed-widget', 'api', 'webhook', 'slack', 'discord', 'whatsapp', 'voice'],
     required: true,
     index: true,
   })
   channel: AgentDeploymentChannel;
 
-  @Prop({ enum: ['active', 'paused'], default: 'active' })
+  @Prop({ type: String, enum: ['active', 'paused'], default: 'active' })
   status: 'active' | 'paused';
 
   /** URL-safe public id used in widget script tags + embed routes. */

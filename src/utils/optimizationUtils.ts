@@ -921,25 +921,36 @@ function suggestAlternativeModel(
 
   // Dynamic model alternatives by provider - prioritize newer, more efficient models
   const alternatives: Record<AIProvider, string[]> = {
-    [AIProvider.OpenAI]: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'],
+    [AIProvider.OpenAI]: [
+      'gpt-5.4-mini',
+      'gpt-4o-mini',
+      'gpt-4o',
+      'gpt-4-turbo',
+    ],
     [AIProvider.AWSBedrock]: [
       'global.anthropic.claude-haiku-4-5-20251001-v1:0',
-      'anthropic.claude-3-5-sonnet-20240620-v1:0',
+      'anthropic.claude-sonnet-4-6',
       'anthropic.claude-sonnet-4-5-20250929-v1:0',
       'amazon.nova-lite-v1:0',
     ],
     [AIProvider.Anthropic]: [
-      'claude-3-5-haiku-20241022',
-      'claude-3-5-sonnet-20241022',
+      'claude-3-haiku-20240307',
+      'claude-sonnet-4-6',
+      'claude-sonnet-4-5-20250929',
     ],
-    [AIProvider.Google]: ['gemini-1.5-flash', 'gemini-1.5-pro'],
+    [AIProvider.Google]: [
+      'gemini-2.5-flash',
+      'gemini-2.5-pro',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro',
+    ],
     [AIProvider.Cohere]: ['command-r', 'command-r-plus'],
     [AIProvider.DeepSeek]: ['deepseek-chat', 'deepseek-coder'],
     [AIProvider.Grok]: ['llama-3.1-8b-instant', 'llama-3.1-70b-versatile'],
     [AIProvider.HuggingFace]: [],
     [AIProvider.Ollama]: [],
     [AIProvider.Replicate]: [],
-    [AIProvider.Azure]: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'],
+    [AIProvider.Azure]: ['gpt-5.4-mini', 'gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'],
   };
 
   const modelAlternatives = alternatives[provider] || [];

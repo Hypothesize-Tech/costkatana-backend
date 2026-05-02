@@ -73,6 +73,18 @@ export class TokenCounterService {
     'openai.gpt-4o-2024-08-06': 128000,
     'openai.gpt-4o-mini-2024-07-18': 128000,
     'openai.gpt-4-turbo-2024-04-09': 128000,
+    'gpt-5.5': 1_050_000,
+    'gpt-5': 1_050_000,
+    'gpt-5-mini': 256_000,
+    'gpt-5-nano': 128_000,
+    'o1': 200_000,
+    'o3': 200_000,
+    'o3-mini': 200_000,
+    'claude-opus-4-7': 200_000,
+    'claude-opus-4-6': 200_000,
+    'gemini-2.5-pro': 2_000_000,
+    'gemini-2.5-flash': 1_000_000,
+    'gemini-3-pro-preview': 2_000_000,
     'google.gemini-pro-1.5': 2097152, // 2M tokens
     'google.gemini-flash-1.5': 1048576, // 1M tokens
     'meta.llama3-70b-instruct-v1:0': 8192,

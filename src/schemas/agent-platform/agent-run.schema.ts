@@ -45,6 +45,7 @@ export class AgentRun {
   organizationId: Types.ObjectId;
 
   @Prop({
+    type: String,
     enum: [
       'queued',
       'running',
@@ -58,7 +59,7 @@ export class AgentRun {
   })
   status: AgentRunStatus;
 
-  @Prop({ enum: ['test', 'live'], required: true, default: 'test' })
+  @Prop({ type: String, enum: ['test', 'live'], required: true, default: 'test' })
   mode: 'test' | 'live';
 
   @Prop({ type: MongooseSchema.Types.Mixed })

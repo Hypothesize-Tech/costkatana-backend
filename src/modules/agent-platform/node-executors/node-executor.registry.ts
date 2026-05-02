@@ -1,22 +1,22 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { NodeType } from '../interfaces/dag.interface';
-import { NODE_EXECUTOR, NodeExecutor } from './base-node-executor';
+import type { NodeExecutor } from './base-node-executor';
 
 /**
  * Maps NodeType -> NodeExecutor. The runner asks this registry for the
  * executor at the given node and invokes it.
  *
- * Wiring: every executor is registered in the module's `providers` array
- * with `{ provide: NODE_EXECUTOR, useExisting: SomeExecutor, multi: true }`,
- * Nest gathers them all, and the registry indexes by `type`.
+ * Wiring: `AgentPlatformModule` registers this via `useFactory` with an
+ * explicit `inject` list of every executor class. Nest's `multi: true` token
+ * aggregation is unreliable across versions when using `useExisting`.
  */
 @Injectable()
 export class NodeExecutorRegistry {
   private readonly index: Map<NodeType, NodeExecutor>;
 
-  constructor(@Inject(NODE_EXECUTOR) executors: NodeExecutor[]) {
+  constructor(executors: NodeExecutor[]) {
     this.index = new Map();
-    for (const executor of executors ?? []) {
+    for (const executor of executors) {
       if (this.index.has(executor.type)) {
         throw new Error(
           `Duplicate node executor registered for type: ${executor.type}`,

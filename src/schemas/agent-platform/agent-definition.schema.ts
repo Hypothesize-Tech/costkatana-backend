@@ -39,6 +39,7 @@ export class AgentDefinition {
   currentVersionId?: Types.ObjectId;
 
   @Prop({
+    type: String,
     enum: ['draft', 'published', 'archived'],
     default: 'draft',
     index: true,

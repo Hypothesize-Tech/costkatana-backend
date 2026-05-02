@@ -30,6 +30,10 @@ import {
   AgentKnowledgeBaseSchema,
 } from '../../schemas/agent-platform/agent-knowledge-base.schema';
 import {
+  AgentKbChunk,
+  AgentKbChunkSchema,
+} from '../../schemas/agent-platform/agent-kb-chunk.schema';
+import {
   AgentTemplate,
   AgentTemplateSchema,
 } from '../../schemas/agent-platform/agent-template.schema';
@@ -51,7 +55,6 @@ import { AgentWidgetPublicController } from './controllers/agent-widget-public.c
 import { BedrockModule } from '../bedrock/bedrock.module';
 import { UtilsModule } from '../utils/utils.module';
 
-import { NODE_EXECUTOR } from './node-executors/base-node-executor';
 import { NodeExecutorRegistry } from './node-executors/node-executor.registry';
 import { UserMessageInputExecutor } from './node-executors/user-message-input.executor';
 import { ResponseOutputExecutor } from './node-executors/response-output.executor';
@@ -61,6 +64,8 @@ import { CheckpointExecutor } from './node-executors/checkpoint.executor';
 import { WebSearchExecutor } from './node-executors/web-search.executor';
 import { VectorStoreBedrockKbExecutor } from './node-executors/vector-store-bedrock-kb.executor';
 import { TextToAgentService } from './services/text-to-agent.service';
+import { KbIngestionService } from './services/kb-ingestion.service';
+import { KbIndexService } from './services/kb-index.service';
 
 @Module({
   imports: [
@@ -79,6 +84,7 @@ import { TextToAgentService } from './services/text-to-agent.service';
       { name: AgentRunStep.name, schema: AgentRunStepSchema },
       { name: AgentDeployment.name, schema: AgentDeploymentSchema },
       { name: AgentKnowledgeBase.name, schema: AgentKnowledgeBaseSchema },
+      { name: AgentKbChunk.name, schema: AgentKbChunkSchema },
       { name: AgentTemplate.name, schema: AgentTemplateSchema },
       { name: Organization.name, schema: OrganizationSchema },
     ]),
@@ -93,10 +99,9 @@ import { TextToAgentService } from './services/text-to-agent.service';
     WidgetSessionService,
     WidgetSessionGuard,
     TextToAgentService,
-    NodeExecutorRegistry,
+    KbIngestionService,
+    KbIndexService,
 
-    // Node executors are individual providers; the multi-token registration
-    // below collects them into the NodeExecutorRegistry's constructor.
     UserMessageInputExecutor,
     ResponseOutputExecutor,
     LlmCallExecutor,
@@ -106,39 +111,34 @@ import { TextToAgentService } from './services/text-to-agent.service';
     VectorStoreBedrockKbExecutor,
 
     {
-      provide: NODE_EXECUTOR,
-      useExisting: UserMessageInputExecutor,
-      multi: true,
-    },
-    {
-      provide: NODE_EXECUTOR,
-      useExisting: ResponseOutputExecutor,
-      multi: true,
-    },
-    {
-      provide: NODE_EXECUTOR,
-      useExisting: LlmCallExecutor,
-      multi: true,
-    },
-    {
-      provide: NODE_EXECUTOR,
-      useExisting: IfElseExecutor,
-      multi: true,
-    },
-    {
-      provide: NODE_EXECUTOR,
-      useExisting: CheckpointExecutor,
-      multi: true,
-    },
-    {
-      provide: NODE_EXECUTOR,
-      useExisting: WebSearchExecutor,
-      multi: true,
-    },
-    {
-      provide: NODE_EXECUTOR,
-      useExisting: VectorStoreBedrockKbExecutor,
-      multi: true,
+      provide: NodeExecutorRegistry,
+      useFactory: (
+        userMessageInput: UserMessageInputExecutor,
+        responseOutput: ResponseOutputExecutor,
+        llmCall: LlmCallExecutor,
+        ifElse: IfElseExecutor,
+        checkpoint: CheckpointExecutor,
+        webSearch: WebSearchExecutor,
+        vectorStoreBedrockKb: VectorStoreBedrockKbExecutor,
+      ) =>
+        new NodeExecutorRegistry([
+          userMessageInput,
+          responseOutput,
+          llmCall,
+          ifElse,
+          checkpoint,
+          webSearch,
+          vectorStoreBedrockKb,
+        ]),
+      inject: [
+        UserMessageInputExecutor,
+        ResponseOutputExecutor,
+        LlmCallExecutor,
+        IfElseExecutor,
+        CheckpointExecutor,
+        WebSearchExecutor,
+        VectorStoreBedrockKbExecutor,
+      ],
     },
   ],
   exports: [
@@ -149,6 +149,8 @@ import { TextToAgentService } from './services/text-to-agent.service';
     AgentDeploymentService,
     WidgetSessionService,
     TextToAgentService,
+    KbIngestionService,
+    KbIndexService,
     NodeExecutorRegistry,
   ],
 })

@@ -152,6 +152,12 @@ export function getModelNameVariations(model: string): string[] {
   if (normalized.includes('claude-sonnet-4-6')) {
     variations.push('claude-sonnet-4-6', 'anthropic.claude-sonnet-4-6');
   }
+  if (normalized.includes('claude-opus-4-7')) {
+    variations.push('claude-opus-4-7', 'anthropic.claude-opus-4-7-v1:0');
+  }
+  if (normalized.includes('claude-opus-4-6')) {
+    variations.push('claude-opus-4-6', 'anthropic.claude-opus-4-6-v1');
+  }
   if (normalized.includes('claude-3-opus')) {
     variations.push(
       'claude-3-opus',
@@ -184,6 +190,32 @@ export function getModelNameVariations(model: string): string[] {
   }
   if (normalized.includes('command-r')) {
     variations.push('command-r', 'command-r-08-2024', 'command-r-03-2024');
+  }
+  if (normalized.includes('gemini-3') || normalized.includes('gemini-3.')) {
+    variations.push(
+      'gemini-3-pro-preview',
+      'gemini-3-flash-preview',
+      'gemini-3.1-pro',
+    );
+  }
+  if (normalized.includes('gpt-5.5')) {
+    variations.push('gpt-5.5', 'gpt-5.5-2026-04-23', 'gpt-5.5-pro');
+  }
+  if (normalized.includes('gpt-5.4')) {
+    variations.push('gpt-5.4', 'gpt-5.4-mini');
+  }
+  if (
+    normalized.startsWith('gpt-5') &&
+    !normalized.includes('gpt-5.4') &&
+    !normalized.includes('gpt-5.5')
+  ) {
+    variations.push(
+      'gpt-5',
+      'gpt-5-mini',
+      'gpt-5-nano',
+      'gpt-5-chat',
+      'gpt-5-chat-latest',
+    );
   }
   if (normalized.includes('gemini-2.5-pro')) {
     variations.push('gemini-2.5-pro', 'gemini-2.5-pro-2025');

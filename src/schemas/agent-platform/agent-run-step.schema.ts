@@ -39,6 +39,7 @@ export class AgentRunStep {
   attempt: number;
 
   @Prop({
+    type: String,
     enum: ['pending', 'running', 'succeeded', 'failed', 'skipped', 'paused'],
     default: 'pending',
     index: true,
