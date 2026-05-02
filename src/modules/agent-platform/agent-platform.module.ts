@@ -30,6 +30,10 @@ import {
   AgentKnowledgeBaseSchema,
 } from '../../schemas/agent-platform/agent-knowledge-base.schema';
 import {
+  AgentKbChunk,
+  AgentKbChunkSchema,
+} from '../../schemas/agent-platform/agent-kb-chunk.schema';
+import {
   AgentTemplate,
   AgentTemplateSchema,
 } from '../../schemas/agent-platform/agent-template.schema';
@@ -61,6 +65,8 @@ import { CheckpointExecutor } from './node-executors/checkpoint.executor';
 import { WebSearchExecutor } from './node-executors/web-search.executor';
 import { VectorStoreBedrockKbExecutor } from './node-executors/vector-store-bedrock-kb.executor';
 import { TextToAgentService } from './services/text-to-agent.service';
+import { KbIngestionService } from './services/kb-ingestion.service';
+import { KbIndexService } from './services/kb-index.service';
 
 @Module({
   imports: [
@@ -79,6 +85,7 @@ import { TextToAgentService } from './services/text-to-agent.service';
       { name: AgentRunStep.name, schema: AgentRunStepSchema },
       { name: AgentDeployment.name, schema: AgentDeploymentSchema },
       { name: AgentKnowledgeBase.name, schema: AgentKnowledgeBaseSchema },
+      { name: AgentKbChunk.name, schema: AgentKbChunkSchema },
       { name: AgentTemplate.name, schema: AgentTemplateSchema },
       { name: Organization.name, schema: OrganizationSchema },
     ]),
@@ -93,6 +100,8 @@ import { TextToAgentService } from './services/text-to-agent.service';
     WidgetSessionService,
     WidgetSessionGuard,
     TextToAgentService,
+    KbIngestionService,
+    KbIndexService,
     NodeExecutorRegistry,
 
     // Node executors are individual providers; the multi-token registration
@@ -149,6 +158,8 @@ import { TextToAgentService } from './services/text-to-agent.service';
     AgentDeploymentService,
     WidgetSessionService,
     TextToAgentService,
+    KbIngestionService,
+    KbIndexService,
     NodeExecutorRegistry,
   ],
 })

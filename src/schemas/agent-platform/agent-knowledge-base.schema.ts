@@ -3,12 +3,17 @@ import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type AgentKnowledgeBaseDocument = HydratedDocument<AgentKnowledgeBase>;
 
-export type AgentKnowledgeBaseStatus =
-  | 'pending'
-  | 'creating'
-  | 'ready'
-  | 'failed';
+export type AgentKnowledgeBaseStatus = 'pending' | 'ready' | 'failed';
 
+/**
+ * Per-organization knowledge base. The actual chunks live in
+ * `agent_kb_chunks`; this row is just the metadata wrapper.
+ *
+ * v1: vectors are embedded with Bedrock Titan v2 and stored in Mongo, then
+ * indexed in-memory by `KbIndexService` (FAISS, with a JS cosine fallback).
+ * No Bedrock Knowledge Base resource, no OpenSearch Serverless collection,
+ * no extra IAM provisioning beyond the existing AWS_S3_BUCKET access.
+ */
 @Schema({ timestamps: true, collection: 'agent_knowledge_bases' })
 export class AgentKnowledgeBase {
   @Prop({
@@ -18,18 +23,22 @@ export class AgentKnowledgeBase {
   })
   organizationId: Types.ObjectId;
 
-  /** Bedrock-side KnowledgeBase id (set after CreateKnowledgeBaseCommand). */
-  @Prop()
-  bedrockKbId?: string;
-
-  /** Bedrock-side DataSource id (set after CreateDataSourceCommand). */
-  @Prop()
-  dataSourceId?: string;
-
-  @Prop({ required: true })
+  /**
+   * S3 bucket holding original document blobs. Defaults to the
+   * platform-shared `costkatana-media` (`AWS_S3_BUCKET`); per-tenant
+   * isolation is enforced via `s3PrefixRoot`.
+   */
+  @Prop({
+    required: true,
+    default: () => process.env.AWS_S3_BUCKET || 'costkatana-media',
+  })
   s3Bucket: string;
 
-  /** S3 prefix root for this org's documents, e.g. `{orgId}/{kbId}/`. */
+  /**
+   * S3 prefix inside the shared bucket, e.g.
+   * `agent-platform/kb/{orgId}/{kbId}/`. Always namespaced under
+   * `agent-platform/kb/` so it doesn't collide with other modules' uploads.
+   */
   @Prop({ required: true })
   s3PrefixRoot: string;
 
@@ -37,7 +46,7 @@ export class AgentKnowledgeBase {
   embeddingModel: string;
 
   @Prop({
-    enum: ['pending', 'creating', 'ready', 'failed'],
+    enum: ['pending', 'ready', 'failed'],
     default: 'pending',
     index: true,
   })
@@ -45,9 +54,6 @@ export class AgentKnowledgeBase {
 
   @Prop({ default: 0 })
   documentCount: number;
-
-  @Prop()
-  lastIngestionJobId?: string;
 
   @Prop({ type: MongooseSchema.Types.Mixed })
   lastError?: { message: string; at: Date };
@@ -60,4 +66,3 @@ export const AgentKnowledgeBaseSchema =
   SchemaFactory.createForClass(AgentKnowledgeBase);
 
 AgentKnowledgeBaseSchema.index({ organizationId: 1 }, { unique: true });
-AgentKnowledgeBaseSchema.index({ bedrockKbId: 1 }, { sparse: true });
