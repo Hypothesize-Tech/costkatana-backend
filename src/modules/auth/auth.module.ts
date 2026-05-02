@@ -19,6 +19,10 @@ import {
   TeamMember,
   TeamMemberSchema,
 } from '../../schemas/team-project/team-member.schema';
+import {
+  Organization,
+  OrganizationSchema,
+} from '../../schemas/team-project/organization.schema';
 import { EmailModule } from '../email/email.module';
 import { UserSessionModule } from '../user-session/user-session.module';
 import { SubscriptionModule } from '../subscription/subscription.module';
@@ -39,6 +43,7 @@ import { AccountClosureModule } from '../account-closure/account-closure.module'
       { name: User.name, schema: UserSchema },
       { name: UserSession.name, schema: UserSessionSchema },
       { name: TeamMember.name, schema: TeamMemberSchema },
+      { name: Organization.name, schema: OrganizationSchema },
     ]),
     JwtModule.registerAsync({
       imports: [ConfigModule],

@@ -7,12 +7,16 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { User } from '../../schemas/user/user.schema';
 import { UserSession } from '../../schemas/user/user-session.schema';
 import { TeamMember } from '../../schemas/team-project/team-member.schema';
+import {
+  Organization,
+  OrganizationDocument,
+} from '../../schemas/team-project/organization.schema';
 import { v4 as uuidv4 } from 'uuid';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { WorkspaceService } from '../team/services/workspace.service';
@@ -85,6 +89,8 @@ export class AuthService {
     @InjectModel(User.name) private userModel: Model<User>,
     @InjectModel(UserSession.name) private userSessionModel: Model<UserSession>,
     @InjectModel(TeamMember.name) private teamMemberModel: Model<TeamMember>,
+    @InjectModel(Organization.name)
+    private organizationModel: Model<OrganizationDocument>,
     private subscriptionService: SubscriptionService,
     private workspaceService: WorkspaceService,
     private activityService: ActivityService,
@@ -315,6 +321,29 @@ export class AuthService {
         },
       ];
       await user.save();
+
+      // Create default organization for the user
+      const baseSlug = data.email
+        .split('@')[0]
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40);
+      let orgSlug = baseSlug;
+      const slugExists = await this.organizationModel
+        .findOne({ slug: orgSlug, isActive: true })
+        .select('_id')
+        .lean();
+      if (slugExists) {
+        orgSlug = `${baseSlug}-${crypto.randomBytes(3).toString('hex')}`;
+      }
+      await this.organizationModel.create({
+        name: `${user.name}'s Organization`,
+        slug: orgSlug,
+        ownerId: new Types.ObjectId((user as any)._id.toString()),
+        securitySettings: {},
+        isActive: true,
+      });
 
       // Create owner team member record
       await this.teamMemberModel.create({
