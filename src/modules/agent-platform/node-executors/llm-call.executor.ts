@@ -81,12 +81,20 @@ export class LlmCallExecutor
       : [];
 
     const message = this.buildUserMessage(cfg, input, chatHistory);
-    const { response, inputTokens, outputTokens } =
-      await BedrockService.invokeConverseText(cfg.model, message, {
+    const LLM_TIMEOUT_MS = 30_000;
+    const { response, inputTokens, outputTokens } = await Promise.race([
+      BedrockService.invokeConverseText(cfg.model, message, {
         system: cfg.system,
         temperature: cfg.temperature,
         maxTokens: cfg.maxTokens ?? 1024,
-      });
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`LLM call timed out after ${LLM_TIMEOUT_MS / 1000}s`)),
+          LLM_TIMEOUT_MS,
+        ),
+      ),
+    ]);
 
     const pricing = PRICING_USD_PER_M[cfg.model] ?? PRICING_USD_PER_M.default;
     const cost =
