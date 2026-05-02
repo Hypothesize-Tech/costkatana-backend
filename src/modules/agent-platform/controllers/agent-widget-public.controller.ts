@@ -149,9 +149,13 @@ export class AgentWidgetPublicController {
       const handlers: Array<{ event: string; fn: (...a: unknown[]) => void }> =
         [];
       let closed = false;
+      // Track which events we've already pushed to the client so the live
+      // EventEmitter and the DB poller don't double-emit.
+      const seen = new Set<string>();
 
-      const emit = (type: string, payload: unknown) => {
-        if (closed) return;
+      const safeEmit = (type: string, key: string, payload: unknown) => {
+        if (closed || seen.has(key)) return;
+        seen.add(key);
         subscriber.next({ type, data: redact(payload) } as MessageEvent);
         if (type === 'run.end' || type === 'run.error') {
           closed = true;
@@ -159,58 +163,98 @@ export class AgentWidgetPublicController {
         }
       };
 
+      // ECS runs N tasks behind ALB; POST /message and GET /stream often
+      // land on different containers. EventEmitter2 is in-process, so the
+      // /stream container won't see live events from the run container.
+      // The DB poller below covers that case — it reads the run/step state
+      // every second and emits any newly-observed transitions.
       const subscribeLive = () => {
         for (const suffix of RUN_EVENT_SUFFIXES) {
           const event = `${AGENT_RUN_EVENT_PREFIX}.${runId}.${suffix}`;
-          const fn = (payload: unknown) => emit(suffix, payload);
+          const fn = (payload: unknown) => {
+            const p = (payload ?? {}) as { nodeId?: string };
+            const key = p.nodeId
+              ? `${suffix}:${p.nodeId}`
+              : `${suffix}:run`;
+            safeEmit(suffix, key, payload);
+          };
           this.events.on(event, fn);
           handlers.push({ event, fn });
         }
       };
 
-      // Replay already-stored steps so late-connecting EventSource clients
-      // don't miss events that fired before the SSE connection opened.
-      void this.runner.getRunSnapshot(runId).then((snapshot) => {
-        if (closed || !snapshot) { subscribeLive(); return; }
+      const replayFromSnapshot = async () => {
+        if (closed) return;
+        const snapshot = await this.runner.getRunSnapshot(runId);
+        if (closed || !snapshot) return;
         const { run, steps } = snapshot;
 
         for (const step of steps) {
-          emit('step.start', {
-            runId, nodeId: step.nodeId, nodeType: step.nodeType, input: step.input,
-          });
+          safeEmit(
+            'step.start',
+            `step.start:${step.nodeId}`,
+            { runId, nodeId: step.nodeId, nodeType: step.nodeType, input: step.input },
+          );
           if (step.status === 'succeeded') {
-            emit('step.end', {
-              runId, nodeId: step.nodeId, nodeType: step.nodeType,
-              output: step.output, latencyMs: step.latencyMs,
-            });
+            safeEmit(
+              'step.end',
+              `step.end:${step.nodeId}`,
+              { runId, nodeId: step.nodeId, nodeType: step.nodeType, output: step.output, latencyMs: step.latencyMs },
+            );
           } else if (step.status === 'failed') {
-            emit('step.end', {
-              runId, nodeId: step.nodeId, nodeType: step.nodeType, output: step.output,
-            });
+            safeEmit(
+              'step.end',
+              `step.end:${step.nodeId}`,
+              { runId, nodeId: step.nodeId, nodeType: step.nodeType, output: step.output },
+            );
           } else if (step.status === 'paused') {
             const meta = (step.traceMeta ?? {}) as Record<string, unknown>;
-            emit('paused', {
-              runId, nodeId: step.nodeId,
-              reason: meta.pauseReason, payload: meta.pausePayload,
-            });
+            safeEmit(
+              'paused',
+              `paused:${step.nodeId}`,
+              { runId, nodeId: step.nodeId, reason: meta.pauseReason, payload: meta.pausePayload },
+            );
           }
         }
 
         if (run.status === 'succeeded') {
-          emit('run.end', { runId, output: run.output });
-          return;
+          safeEmit('run.end', 'run.end:run', { runId, output: run.output });
+        } else if (run.status === 'failed') {
+          safeEmit('run.error', 'run.error:run', { runId, error: run.error });
         }
-        if (run.status === 'failed') {
-          emit('run.error', { runId, error: run.error });
-          return;
-        }
+      };
 
-        // Run still in progress — subscribe to live events for the remainder.
-        subscribeLive();
-      });
+      // Subscribe to live events first so we don't miss anything that fires
+      // between the snapshot read and the live subscription on the same node.
+      subscribeLive();
+      void replayFromSnapshot();
+
+      // Poll the DB every second until the run reaches a terminal state.
+      // Necessary because the run may execute on a different container than
+      // the one serving this SSE stream — bgSave will eventually reflect
+      // step transitions in the DB even when local EventEmitter doesn't.
+      const pollHandle = setInterval(() => {
+        if (closed) {
+          clearInterval(pollHandle);
+          return;
+        }
+        void replayFromSnapshot();
+      }, 1_000);
+
+      // Belt-and-braces: hard timeout at 90s so a stuck run doesn't leak
+      // an open SSE forever. The widget will reconnect or surface the error.
+      const hardStop = setTimeout(() => {
+        if (closed) return;
+        safeEmit('run.error', 'run.error:run', {
+          runId,
+          error: { message: 'SSE stream timed out (90s)' },
+        });
+      }, 90_000);
 
       return () => {
         closed = true;
+        clearInterval(pollHandle);
+        clearTimeout(hardStop);
         for (const { event, fn } of handlers) this.events.off(event, fn);
       };
     });
