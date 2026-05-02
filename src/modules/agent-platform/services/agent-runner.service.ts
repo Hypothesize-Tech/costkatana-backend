@@ -251,6 +251,8 @@ export class AgentRunnerService {
       runInput,
       outputs: {},
       memory: {},
+      mode: run.mode,
+      widgetSessionId: run.widgetSessionId,
     };
 
     const visited = new Set<string>();
