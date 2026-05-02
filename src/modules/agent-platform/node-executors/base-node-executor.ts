@@ -19,6 +19,14 @@ export interface RunContext {
   outputs: Record<string, unknown>;
   /** Per-run scratchpad executors can write to (memory-write, etc.). */
   memory: Record<string, unknown>;
+  /** "test" runs are launched from the canvas; "live" runs come from production traffic. */
+  mode?: 'test' | 'live';
+  /**
+   * Set when the run was started by an embedded chat widget. Executors that
+   * normally require human interaction (e.g., `checkpoint`) should auto-skip
+   * when this is present, since a chat user has no way to approve checkpoints.
+   */
+  widgetSessionId?: string;
   /** Optional cancellation signal. */
   signal?: AbortSignal;
 }

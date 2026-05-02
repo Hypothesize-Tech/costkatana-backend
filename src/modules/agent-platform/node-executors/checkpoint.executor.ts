@@ -52,6 +52,28 @@ export class CheckpointExecutor
       );
     }
 
+    // Auto-skip the pause when running from an embedded chat widget — the
+    // end-user has no UI to approve a checkpoint, so pausing here would just
+    // make the chat appear stuck. We still log/queue the notification so
+    // operators see the event, but execution continues to the next node.
+    if (ctx.widgetSessionId) {
+      this.logger.log(
+        `Checkpoint auto-passed for widget session (run=${ctx.runId}, session=${ctx.widgetSessionId}) — no human-in-the-loop in chat mode.`,
+      );
+      return {
+        output: {
+          paused: false as unknown as true,
+          reason,
+          upstream: input,
+        },
+        traceMeta: {
+          notify: cfg?.notify ?? null,
+          timeoutSeconds: cfg?.timeoutSeconds ?? null,
+          autoSkipped: 'widget_session',
+        },
+      };
+    }
+
     return {
       output: {
         paused: true,
