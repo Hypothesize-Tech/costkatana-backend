@@ -32,7 +32,7 @@ export class UserMessageInputExecutor
     if (typeof raw === 'string') {
       output = { message: raw };
     } else if (raw && typeof raw === 'object' && 'message' in (raw as object)) {
-      const obj = raw as { message: unknown; metadata?: unknown };
+      const obj = raw as { message: unknown; metadata?: unknown; chatHistory?: unknown };
       output = {
         message: typeof obj.message === 'string' ? obj.message : String(obj.message),
         metadata:

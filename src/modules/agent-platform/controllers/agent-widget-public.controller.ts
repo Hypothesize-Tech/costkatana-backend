@@ -100,6 +100,22 @@ export class AgentWidgetPublicController {
       throw new BadRequestException('Deployment is paused');
     }
 
+    // Fetch last 3 completed turns so the LLM has conversation context.
+    const recentRuns = await this.runner.getRecentRunsForSession(session.sessionId, 3);
+    const chatHistory = recentRuns.flatMap((run) => {
+      const userMsg =
+        typeof run.input === 'string'
+          ? run.input
+          : ((run.input as Record<string, unknown>)?.message as string | undefined) ?? '';
+      const assistantMsg =
+        ((run.output as Record<string, unknown>)?.text as string | undefined) ?? '';
+      if (!userMsg && !assistantMsg) return [];
+      return [
+        { role: 'user', content: userMsg },
+        { role: 'assistant', content: assistantMsg },
+      ] as Array<{ role: string; content: string }>;
+    });
+
     const result = await this.runner.startRun({
       agentDefinitionId: String(dep.agentDefinitionId),
       agentVersionId: String(dep.agentVersionId),
@@ -107,7 +123,7 @@ export class AgentWidgetPublicController {
       deploymentId: String(dep._id),
       widgetSessionId: session.sessionId,
       mode: 'live',
-      input: body.message,
+      input: { message: body.message, chatHistory },
     });
 
     return {

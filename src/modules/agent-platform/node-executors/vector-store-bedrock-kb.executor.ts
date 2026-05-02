@@ -17,6 +17,7 @@ import {
 
 const REGION = process.env.AWS_REGION ?? 'us-east-1';
 const EMBEDDING_MODEL = 'amazon.titan-embed-text-v2:0';
+const EMBEDDING_TIMEOUT_MS = 10_000;
 
 interface VectorStoreConfig {
   topK?: number;
@@ -94,7 +95,15 @@ export class VectorStoreBedrockKbExecutor
 
     let queryVector: number[];
     try {
-      const raw = await this.embeddings.embedQuery(query);
+      const raw = await Promise.race([
+        this.embeddings.embedQuery(query),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`Bedrock embedding timed out after ${EMBEDDING_TIMEOUT_MS}ms`)),
+            EMBEDDING_TIMEOUT_MS,
+          ),
+        ),
+      ]);
       queryVector = l2Normalize(raw);
     } catch (err) {
       this.logger.warn(
