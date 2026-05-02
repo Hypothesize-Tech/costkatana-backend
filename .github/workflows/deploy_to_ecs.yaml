@@ -13,6 +13,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Cap at 60 min — Docker build (~6 min) + image push + manual stabilize poll (up to 30 min).
+    timeout-minutes: 60
 
     env:
       AWS_REGION: us-east-1
@@ -139,25 +141,71 @@ jobs:
           echo "$update_output" | jq '{serviceName: .service.serviceName, status: .service.status, taskDefinition: .service.taskDefinition, desiredCount: .service.desiredCount}'
 
       - name: Wait for Service to Stabilize
+        env:
+          TARGET_REVISION: ${{ steps.register-task.outputs.task-def-revision }}
         run: |
-          echo "⏳ Waiting for service deployment to stabilize (this may take 5-10 minutes)..."
-          
-          aws ecs wait services-stable \
-            --cluster "${ECS_CLUSTER}" \
-            --services "${ECS_SERVICE_NAME}" \
-            --region "${AWS_REGION}"
-          
-          if [ $? -eq 0 ]; then
-            echo "✅ Service deployment completed successfully!"
-            
-            # Get final service status
-            aws ecs describe-services \
+          # Manual poll — `aws ecs wait services-stable` is hardcoded to
+          # 40 × 15s = 10 min, which is too short for a 4-task rolling
+          # deployment with health-check grace period. Poll up to 30 min and
+          # log progress so we can see the rollout advance instead of just
+          # waiting in silence.
+          DEADLINE=$(( $(date +%s) + 30*60 ))
+          echo "⏳ Polling deployment status until rolloutState=COMPLETED (up to 30 min)..."
+          while true; do
+            STATE_RAW=$(aws ecs describe-services \
               --cluster "${ECS_CLUSTER}" \
               --services "${ECS_SERVICE_NAME}" \
               --region "${AWS_REGION}" \
-              --query 'services[0].{ServiceName:serviceName,Status:status,TaskDefinition:taskDefinition,RunningCount:runningCount,DesiredCount:desiredCount}' \
-              --output json | jq .
-          else
-            echo "❌ Service deployment failed or timed out"
-            exit 1
-          fi
+              --query 'services[0].deployments[?status==`PRIMARY`] | [0].[rolloutState,taskDefinition,desiredCount,runningCount,pendingCount]' \
+              --output text)
+            STATE=$(echo "$STATE_RAW" | awk '{print $1}')
+            TD=$(echo "$STATE_RAW" | awk '{print $2}')
+            DESIRED=$(echo "$STATE_RAW" | awk '{print $3}')
+            RUNNING=$(echo "$STATE_RAW" | awk '{print $4}')
+            PENDING=$(echo "$STATE_RAW" | awk '{print $5}')
+
+            echo "  [$(date -u +%T)] rolloutState=${STATE} td=${TD##*/} running=${RUNNING}/${DESIRED} pending=${PENDING}"
+
+            case "$STATE" in
+              COMPLETED)
+                # Sanity check: PRIMARY deployment should reference the task
+                # definition we just registered. If something else triggered a
+                # rollback, fail loudly.
+                if [[ "$TD" != *":${TARGET_REVISION}" ]]; then
+                  echo "❌ PRIMARY deployment is on ${TD} but we registered :${TARGET_REVISION} — rollback or out-of-band change?"
+                  exit 1
+                fi
+                echo "✅ Service deployment completed on ck-prod-td:${TARGET_REVISION}."
+                aws ecs describe-services \
+                  --cluster "${ECS_CLUSTER}" \
+                  --services "${ECS_SERVICE_NAME}" \
+                  --region "${AWS_REGION}" \
+                  --query 'services[0].{ServiceName:serviceName,Status:status,TaskDefinition:taskDefinition,RunningCount:runningCount,DesiredCount:desiredCount}' \
+                  --output json | jq .
+                exit 0
+                ;;
+              FAILED)
+                echo "❌ Deployment rolloutState=FAILED. Recent service events:"
+                aws ecs describe-services \
+                  --cluster "${ECS_CLUSTER}" \
+                  --services "${ECS_SERVICE_NAME}" \
+                  --region "${AWS_REGION}" \
+                  --query 'services[0].events[0:10].[createdAt,message]' \
+                  --output table || true
+                exit 1
+                ;;
+            esac
+
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "❌ Timed out after 30 min waiting for rolloutState=COMPLETED."
+              echo "Recent service events:"
+              aws ecs describe-services \
+                --cluster "${ECS_CLUSTER}" \
+                --services "${ECS_SERVICE_NAME}" \
+                --region "${AWS_REGION}" \
+                --query 'services[0].events[0:10].[createdAt,message]' \
+                --output table || true
+              exit 1
+            fi
+            sleep 20
+          done
