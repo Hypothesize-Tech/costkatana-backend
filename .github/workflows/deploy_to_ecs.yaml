@@ -123,12 +123,17 @@ jobs:
           echo "🚀 Updating ECS service: ${ECS_SERVICE_NAME}"
           echo "   Task Definition: ${ECS_TASK_DEFINITION}:${{ steps.register-task.outputs.task-def-revision }}"
           
-          # Update service with explicit task definition
+          # Update service with explicit task definition. The 180s grace
+          # period is critical: NestJS takes ~30s to load all modules and
+          # call app.listen() — without grace, ALB health checks fail
+          # immediately, the deployment circuit-breaker trips, and ECS
+          # rolls back to the previous TD (this happened on TD 129).
           update_output=$(aws ecs update-service \
             --cluster "${ECS_CLUSTER}" \
             --service "${ECS_SERVICE_NAME}" \
             --task-definition "${ECS_TASK_DEFINITION}:${{ steps.register-task.outputs.task-def-revision }}" \
             --desired-count 4 \
+            --health-check-grace-period-seconds 180 \
             --force-new-deployment \
             --region "${AWS_REGION}")
           
