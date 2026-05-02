@@ -54,25 +54,44 @@ const eventName = (runId: string, suffix: string) =>
   `${RUN_EVENT_PREFIX}.${runId}.${suffix}`;
 
 /**
+ * Per-doc save chain. Mongoose rejects parallel `.save()` calls on the same
+ * instance with "Can't save() the same doc multiple times in parallel" — so we
+ * serialize bgSave calls per document by chaining them on a WeakMap-tracked
+ * promise. Each save still completes in the background; subsequent saves just
+ * wait for the previous one to finish before starting.
+ */
+const docSaveChains = new WeakMap<object, Promise<unknown>>();
+
+/**
  * Best-effort, non-blocking Mongoose save. Resolves immediately (fire-and-forget).
  * Failures are logged but never propagate — the run loop and SSE events must
  * not be gated on DB writes so the chat widget stays responsive even when
- * MongoDB is under load.
+ * MongoDB is under load. Saves on the same doc instance are serialized to
+ * avoid Mongoose's parallel-save guard.
  */
 const bgSave = (
-  doc: { save(): Promise<unknown> },
+  doc: object & { save(): Promise<unknown> },
   label: string,
   logger: { warn(msg: string): void },
   ms = 8_000,
 ): void => {
-  void Promise.race([
-    doc.save(),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms),
-    ),
-  ]).catch((err) =>
-    logger.warn(`bgSave(${label}) failed: ${err instanceof Error ? err.message : String(err)}`),
-  );
+  const previous = docSaveChains.get(doc) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(() =>
+      Promise.race([
+        doc.save(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms),
+        ),
+      ]),
+    )
+    .catch((err) =>
+      logger.warn(
+        `bgSave(${label}) failed: ${err instanceof Error ? err.message : String(err)}`,
+      ),
+    );
+  docSaveChains.set(doc, next);
 };
 
 export const AGENT_RUN_EVENT_PREFIX = RUN_EVENT_PREFIX;
