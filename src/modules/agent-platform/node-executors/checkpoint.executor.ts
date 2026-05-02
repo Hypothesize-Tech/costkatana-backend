@@ -55,8 +55,10 @@ interface KbChunk {
 
 const DEFAULT_WIDGET_FALLBACK =
   "Sorry, I'm having trouble responding right now. Could you try again in a moment?";
-const DEFAULT_WIDGET_MODEL = 'anthropic.claude-3-5-haiku-20241022-v1:0';
-const WIDGET_LLM_TIMEOUT_MS = 20_000;
+// Sonnet 4 — better grounding/conversation than Haiku for ~3x cost. At chat-widget
+// volumes this is pennies/day. Override per-deployment via `widgetReplyModel`.
+const DEFAULT_WIDGET_MODEL = 'anthropic.claude-sonnet-4-20250514-v1:0';
+const WIDGET_LLM_TIMEOUT_MS = 25_000;
 const DEFAULT_WIDGET_SYSTEM_PROMPT =
   "You are a friendly, helpful customer support assistant. Reply naturally and concisely. " +
   'If knowledge-base context is provided below, prefer answering from that context and cite specifics. ' +
