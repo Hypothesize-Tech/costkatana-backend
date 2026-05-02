@@ -134,21 +134,64 @@ export class AgentWidgetPublicController {
         [];
       let closed = false;
 
-      for (const suffix of RUN_EVENT_SUFFIXES) {
-        const event = `${AGENT_RUN_EVENT_PREFIX}.${runId}.${suffix}`;
-        const fn = (payload: unknown) => {
-          if (closed) return;
-          // Public stream redacts cost/tokens.
-          const data = redact(payload);
-          subscriber.next({ type: suffix, data } as MessageEvent);
-          if (suffix === 'run.end' || suffix === 'run.error') {
-            closed = true;
-            subscriber.complete();
+      const emit = (type: string, payload: unknown) => {
+        if (closed) return;
+        subscriber.next({ type, data: redact(payload) } as MessageEvent);
+        if (type === 'run.end' || type === 'run.error') {
+          closed = true;
+          subscriber.complete();
+        }
+      };
+
+      const subscribeLive = () => {
+        for (const suffix of RUN_EVENT_SUFFIXES) {
+          const event = `${AGENT_RUN_EVENT_PREFIX}.${runId}.${suffix}`;
+          const fn = (payload: unknown) => emit(suffix, payload);
+          this.events.on(event, fn);
+          handlers.push({ event, fn });
+        }
+      };
+
+      // Replay already-stored steps so late-connecting EventSource clients
+      // don't miss events that fired before the SSE connection opened.
+      void this.runner.getRunSnapshot(runId).then((snapshot) => {
+        if (closed || !snapshot) { subscribeLive(); return; }
+        const { run, steps } = snapshot;
+
+        for (const step of steps) {
+          emit('step.start', {
+            runId, nodeId: step.nodeId, nodeType: step.nodeType, input: step.input,
+          });
+          if (step.status === 'succeeded') {
+            emit('step.end', {
+              runId, nodeId: step.nodeId, nodeType: step.nodeType,
+              output: step.output, latencyMs: step.latencyMs,
+            });
+          } else if (step.status === 'failed') {
+            emit('step.end', {
+              runId, nodeId: step.nodeId, nodeType: step.nodeType, output: step.output,
+            });
+          } else if (step.status === 'paused') {
+            const meta = (step.traceMeta ?? {}) as Record<string, unknown>;
+            emit('paused', {
+              runId, nodeId: step.nodeId,
+              reason: meta.pauseReason, payload: meta.pausePayload,
+            });
           }
-        };
-        this.events.on(event, fn);
-        handlers.push({ event, fn });
-      }
+        }
+
+        if (run.status === 'succeeded') {
+          emit('run.end', { runId, output: run.output });
+          return;
+        }
+        if (run.status === 'failed') {
+          emit('run.error', { runId, error: run.error });
+          return;
+        }
+
+        // Run still in progress — subscribe to live events for the remainder.
+        subscribeLive();
+      });
 
       return () => {
         closed = true;
