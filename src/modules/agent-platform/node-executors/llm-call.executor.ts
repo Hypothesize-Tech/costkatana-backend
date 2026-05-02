@@ -14,6 +14,11 @@ interface LlmCallConfig {
   maxTokens?: number;
 }
 
+interface ChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 interface LlmCallInput {
   message?: string;
   chunks?: Array<{ text?: string; content?: string; score?: number }>;
@@ -57,7 +62,7 @@ export class LlmCallExecutor
   readonly type = 'llm-call' as const;
 
   async execute(
-    _ctx: RunContext,
+    ctx: RunContext,
     config: Record<string, unknown>,
     input: LlmCallInput,
   ): Promise<NodeExecutorResult<LlmCallOutput>> {
@@ -65,7 +70,17 @@ export class LlmCallExecutor
     if (!cfg?.model) {
       throw new Error('llm-call node requires a `model` config value.');
     }
-    const message = this.buildUserMessage(cfg, input);
+
+    // Pull chat history injected by the widget controller (last N turns).
+    const runInputObj =
+      ctx.runInput && typeof ctx.runInput === 'object' && !Array.isArray(ctx.runInput)
+        ? (ctx.runInput as Record<string, unknown>)
+        : {};
+    const chatHistory = Array.isArray(runInputObj.chatHistory)
+      ? (runInputObj.chatHistory as ChatTurn[])
+      : [];
+
+    const message = this.buildUserMessage(cfg, input, chatHistory);
     const { response, inputTokens, outputTokens } =
       await BedrockService.invokeConverseText(cfg.model, message, {
         system: cfg.system,
@@ -97,13 +112,22 @@ export class LlmCallExecutor
   }
 
   /**
-   * Render the prompt sent to the model. If the node config has a
-   * `promptTemplate`, interpolate `{{message}}`, `{{chunks}}`,
-   * `{{citations}}`. Otherwise build a default support-style prompt that
-   * stitches the user message with retrieved context (works for the
-   * Support Triage template out of the box).
+   * Render the prompt sent to the model.
+   *
+   * - If `promptTemplate` is set, interpolates `{{message}}`, `{{chunks}}`,
+   *   `{{citations}}`, and `{{history}}`.
+   * - Otherwise builds a default prompt that:
+   *   1. Prepends any chat history (last N turns) so the LLM has conversation
+   *      context and can handle follow-ups naturally.
+   *   2. Includes retrieved KB chunks when available, but tells the LLM to
+   *      decide whether they are relevant — so greetings and chit-chat get a
+   *      natural response without forcing the model to cite documents.
    */
-  private buildUserMessage(cfg: LlmCallConfig, input: LlmCallInput): string {
+  private buildUserMessage(
+    cfg: LlmCallConfig,
+    input: LlmCallInput,
+    chatHistory: ChatTurn[],
+  ): string {
     const message = (input?.message ?? '').toString();
     const chunks = Array.isArray(input?.chunks) ? input.chunks : [];
     const formattedChunks = chunks
@@ -111,23 +135,35 @@ export class LlmCallExecutor
       .filter((s) => s.trim().length > 0)
       .join('\n');
 
+    const formattedHistory = chatHistory
+      .map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
+      .join('\n');
+
     if (cfg.promptTemplate) {
       return cfg.promptTemplate
         .replace(/\{\{\s*message\s*\}\}/g, message)
         .replace(/\{\{\s*chunks\s*\}\}/g, formattedChunks)
-        .replace(/\{\{\s*citations\s*\}\}/g, formattedChunks);
+        .replace(/\{\{\s*citations\s*\}\}/g, formattedChunks)
+        .replace(/\{\{\s*history\s*\}\}/g, formattedHistory);
     }
-    if (formattedChunks.length === 0) {
-      return message || 'Hello.';
+
+    const parts: string[] = [];
+
+    if (formattedHistory) {
+      parts.push('Conversation so far:', formattedHistory, '');
     }
-    return [
-      'Context retrieved from documents:',
-      formattedChunks,
-      '',
-      `Question: ${message}`,
-      '',
-      'Answer using the context above. If the answer is not in the context, say so.',
-    ].join('\n');
+
+    if (formattedChunks) {
+      parts.push(
+        'Relevant context from the knowledge base (use ONLY if it directly answers the question; for greetings or small talk, ignore and respond naturally):',
+        formattedChunks,
+        '',
+      );
+    }
+
+    parts.push(`User: ${message || 'Hello.'}`);
+
+    return parts.join('\n');
   }
 
   /**

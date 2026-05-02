@@ -53,6 +53,18 @@ const RUN_EVENT_PREFIX = 'agent-platform.run';
 const eventName = (runId: string, suffix: string) =>
   `${RUN_EVENT_PREFIX}.${runId}.${suffix}`;
 
+/** Wrap a Mongoose save() with a timeout so a slow MongoDB doesn't stall the run loop. */
+const saveWithTimeout = <T extends { save(): Promise<unknown> }>(
+  doc: T,
+  ms = 8_000,
+): Promise<void> =>
+  Promise.race([
+    doc.save().then(() => undefined),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`MongoDB save timed out after ${ms}ms`)), ms),
+    ),
+  ]);
+
 export const AGENT_RUN_EVENT_PREFIX = RUN_EVENT_PREFIX;
 export { eventName as agentRunEventName };
 
@@ -132,6 +144,20 @@ export class AgentRunnerService {
     return { run, steps };
   }
 
+  /** Fetch up to `limit` completed runs for a widget session, oldest first. */
+  async getRecentRunsForSession(
+    widgetSessionId: string,
+    limit = 3,
+  ): Promise<Array<{ input: unknown; output?: unknown }>> {
+    const runs = await this.runModel
+      .find({ widgetSessionId, status: 'succeeded' })
+      .sort({ startedAt: -1 })
+      .limit(limit)
+      .select('input output')
+      .lean();
+    return runs.reverse();
+  }
+
   /** Resume a paused run (e.g., after a checkpoint approval). */
   async resume(runId: string, checkpointResponse: unknown): Promise<void> {
     const run = await this.runModel.findById(runId);
@@ -157,13 +183,13 @@ export class AgentRunnerService {
         step.output = checkpointResponse;
         step.status = 'succeeded';
         step.endedAt = new Date();
-        await step.save();
+        await saveWithTimeout(step);
       }
     }
 
     run.status = 'running';
     run.pausedAt = undefined;
-    await run.save();
+    await saveWithTimeout(run);
 
     void this.executePlan(String(run._id), plan, run.input, {
       resumeFromNodeId: run.currentNodeId ?? undefined,
@@ -244,7 +270,7 @@ export class AgentRunnerService {
         if (!node) continue;
 
         run.currentNodeId = nodeId;
-        await run.save();
+        await saveWithTimeout(run);
 
         const stepInput = this.assembleNodeInput(node, plan, ctx);
         const step = await this.stepModel.create({
@@ -289,11 +315,11 @@ export class AgentRunnerService {
               pauseReason: result.pause.reason,
               pausePayload: result.pause.payload,
             };
-            await step.save();
+            await saveWithTimeout(step);
             run.status = 'paused_checkpoint';
             run.pausedAt = new Date();
             run.currentNodeId = nodeId;
-            await run.save();
+            await saveWithTimeout(run);
             this.events.emit(eventName(runId, 'paused'), {
               runId,
               nodeId,
@@ -303,7 +329,7 @@ export class AgentRunnerService {
             return;
           }
 
-          await step.save();
+          await saveWithTimeout(step);
           ctx.outputs[nodeId] = result.output;
           lastOutput = result.output;
           visited.add(nodeId);
@@ -312,7 +338,7 @@ export class AgentRunnerService {
             out: (run.tokens?.out ?? 0) + (result.tokens?.out ?? 0),
           };
           run.costUsd = (run.costUsd ?? 0) + (result.cost ?? 0);
-          await run.save();
+          await saveWithTimeout(run);
 
           this.events.emit(eventName(runId, 'step.end'), {
             runId,
@@ -347,14 +373,14 @@ export class AgentRunnerService {
           step.status = 'failed';
           step.endedAt = new Date();
           step.latencyMs = Date.now() - startedAt;
-          await step.save();
+          await saveWithTimeout(step);
           run.status = 'failed';
           run.error = {
             message: step.error.message,
             nodeId,
           };
           run.endedAt = new Date();
-          await run.save();
+          await saveWithTimeout(run);
           this.events.emit(eventName(runId, 'run.error'), {
             runId,
             nodeId,
@@ -367,7 +393,7 @@ export class AgentRunnerService {
       run.status = 'succeeded';
       run.output = lastOutput;
       run.endedAt = new Date();
-      await run.save();
+      await saveWithTimeout(run);
       this.events.emit(eventName(runId, 'run.end'), {
         runId,
         output: run.output,
@@ -381,7 +407,7 @@ export class AgentRunnerService {
         message: err instanceof Error ? err.message : String(err),
       };
       run.endedAt = new Date();
-      await run.save();
+      await saveWithTimeout(run);
       this.events.emit(eventName(runId, 'run.error'), {
         runId,
         error: run.error,
