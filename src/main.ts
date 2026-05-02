@@ -41,8 +41,22 @@ async function bootstrap() {
   const cors = configService.get('cors');
   const isProduction = configService.get<string>('NODE_ENV') === 'production';
 
-  // CORS first - before any other middleware so OPTIONS preflight is handled correctly
-  app.enableCors({
+  // CORS — path-aware so public widget routes allow all origins while the
+  // rest of the API stays restricted to the configured allowlist.
+  // The widget's own session token + origin-allowlist check (assertOriginAllowed)
+  // provides the real per-deployment security; CORS here is just the browser gate.
+  const { default: corsLib } = await import('cors');
+
+  const widgetCors = corsLib({
+    origin: '*',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: false,
+    optionsSuccessStatus: 204,
+    preflightContinue: false,
+  });
+
+  const appCors = corsLib({
     origin: cors.origin,
     credentials: cors.credentials,
     methods: cors.methods,
@@ -50,6 +64,13 @@ async function bootstrap() {
     exposedHeaders: cors.exposedHeaders,
     preflightContinue: cors.preflightContinue,
     optionsSuccessStatus: cors.optionsSuccessStatus,
+  });
+
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.path?.startsWith('/api/public/widget') || req.path?.startsWith('/api/public/')) {
+      return widgetCors(req as any, res as any, next);
+    }
+    return appCors(req as any, res as any, next);
   });
 
   // Configure EventEmitter for high-throughput scenarios
