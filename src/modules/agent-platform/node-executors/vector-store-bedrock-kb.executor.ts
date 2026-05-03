@@ -56,6 +56,19 @@ interface VectorStoreOutput {
   /** Max chunk score — drives the if-else confidence check. */
   confidence: number;
   citations: Array<{ source: string }>;
+  /**
+   * Diagnostic trail surfaced in the SSE step.end event so widget operators
+   * can see *why* a query produced 0 chunks (router skipped vs. no KB
+   * configured vs. embedding failed vs. genuinely no matching content).
+   */
+  _debug?: {
+    routerDecision?: 'trivial_chat' | 'router_no_kb' | 'router_yes' | 'router_error';
+    routerReason?: string;
+    kbStatus?: 'no_kb' | 'failed_kb' | 'searched';
+    chunksReturned?: number;
+    maxScore?: number;
+    embedError?: string;
+  };
 }
 
 /**
@@ -101,7 +114,13 @@ export class VectorStoreBedrockKbExecutor
     // Fast path: obvious greetings / one-word replies skip the router entirely.
     if (isTrivialChat(query)) {
       return {
-        output: { message: query, chunks: [], confidence: 0, citations: [] },
+        output: {
+          message: query,
+          chunks: [],
+          confidence: 0,
+          citations: [],
+          _debug: { routerDecision: 'trivial_chat' },
+        },
         traceMeta: { skipped: 'trivial_chat' },
       };
     }
@@ -113,7 +132,16 @@ export class VectorStoreBedrockKbExecutor
     const decision = await this.shouldUseKb(query, chatHistory);
     if (!decision.useKb) {
       return {
-        output: { message: query, chunks: [], confidence: 0, citations: [] },
+        output: {
+          message: query,
+          chunks: [],
+          confidence: 0,
+          citations: [],
+          _debug: {
+            routerDecision: decision.errored ? 'router_error' : 'router_no_kb',
+            routerReason: decision.reason,
+          },
+        },
         traceMeta: { skipped: 'router_no_kb', reason: decision.reason },
       };
     }
@@ -123,11 +151,21 @@ export class VectorStoreBedrockKbExecutor
       .maxTimeMS(4_000)
       .catch(() => null);
     if (!kbDoc || kbDoc.status === 'failed') {
-      this.logger.debug(
-        `No usable KB for org ${ctx.organizationId} — returning empty result.`,
+      this.logger.warn(
+        `KB lookup wanted for org ${ctx.organizationId} but no usable KB exists (status=${kbDoc?.status ?? 'missing'}).`,
       );
       return {
-        output: { message: query, chunks: [], confidence: 0, citations: [] },
+        output: {
+          message: query,
+          chunks: [],
+          confidence: 0,
+          citations: [],
+          _debug: {
+            routerDecision: 'router_yes',
+            routerReason: decision.reason,
+            kbStatus: kbDoc ? 'failed_kb' : 'no_kb',
+          },
+        },
         traceMeta: {
           skipped: 'no_kb_configured',
           orgId: ctx.organizationId,
@@ -148,14 +186,24 @@ export class VectorStoreBedrockKbExecutor
       ]);
       queryVector = l2Normalize(raw);
     } catch (err) {
-      this.logger.warn(
-        `Embedding query failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Embedding query failed: ${msg}`);
       return {
-        output: { message: query, chunks: [], confidence: 0, citations: [] },
+        output: {
+          message: query,
+          chunks: [],
+          confidence: 0,
+          citations: [],
+          _debug: {
+            routerDecision: 'router_yes',
+            routerReason: decision.reason,
+            kbStatus: 'searched',
+            embedError: msg,
+          },
+        },
         traceMeta: {
           provider: 'bedrock-titan',
-          error: err instanceof Error ? err.message : String(err),
+          error: msg,
         },
       };
     }
@@ -186,8 +234,26 @@ export class VectorStoreBedrockKbExecutor
       })
       .map((c) => ({ source: c.source! }));
 
+    if (chunks.length === 0) {
+      this.logger.warn(
+        `KB search returned 0 chunks for org ${ctx.organizationId} (kb=${String(kbDoc._id)}, query="${query.slice(0, 80)}") — KB may be empty or unindexed.`,
+      );
+    }
+
     return {
-      output: { message: query, chunks, confidence, citations },
+      output: {
+        message: query,
+        chunks,
+        confidence,
+        citations,
+        _debug: {
+          routerDecision: 'router_yes',
+          routerReason: decision.reason,
+          kbStatus: 'searched',
+          chunksReturned: chunks.length,
+          maxScore: confidence,
+        },
+      },
       traceMeta: {
         provider: 'kb-faiss',
         knowledgeBaseId: String(kbDoc._id),
@@ -223,38 +289,44 @@ export class VectorStoreBedrockKbExecutor
    * Ask Haiku whether this query needs a KB lookup. Same pattern as the chat
    * module's `AIRouter`: small focused prompt, JSON response, tight timeout.
    *
-   * Failure modes (timeout, parse error, Bedrock error) all default to
-   * `useKb: false` so the chat stays responsive — if the router is broken,
-   * we'd rather give the user a fast LLM-only reply than hang waiting on
-   * retrieval that's also likely broken.
+   * Fail-open: if the router times out, errors, or returns unparseable JSON,
+   * we default to `useKb: true`. An unnecessary embed costs ~400ms and a
+   * Mongo lookup; skipping a needed lookup costs the bot answering "I don't
+   * know" when grounded answers are actually available. The latter is much
+   * worse for user trust, so we err toward retrieving.
    */
   private async shouldUseKb(
     query: string,
     chatHistory: ChatTurn[],
-  ): Promise<{ useKb: boolean; reason: string }> {
+  ): Promise<{ useKb: boolean; reason: string; errored?: boolean }> {
     const historyBlock = chatHistory.length
       ? `\nRecent conversation:\n${chatHistory
           .map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
           .join('\n')}\n`
       : '';
 
-    const prompt = `You are a routing assistant for a customer support chat widget. Decide whether the user's latest message needs information from a knowledge base of company documents.
+    const prompt = `You are a routing assistant for a customer support chat widget that has access to a knowledge base of the company's own documents (FAQs, policies, product info, etc).
+
+Decide whether the user's latest message warrants a knowledge-base lookup. **When in doubt, choose true** — a wasted lookup is cheaper than the bot answering "I don't know" when the answer was sitting in the KB.
 ${historyBlock}
 Latest user message: "${query}"
 
 Respond with JSON only (no markdown, no other text):
 {"useKb": true | false, "reason": "<one-line reason>"}
 
-Set useKb=true when the user:
-- Asks about products, features, pricing, policies, or company-specific topics
-- Wants documentation, how-to guides, or specific factual answers
-- References something from earlier turns that needs a factual lookup
+Choose useKb=true (this is the default) when the user:
+- Mentions any noun, product, brand, or topic — even casually ("what do you know about X", "tell me about X", "do you have X")
+- Asks any factual or how-to question
+- Asks about the company itself, its services, pricing, hours, policies, contact info
+- References anything from prior turns that might need a factual answer
+- Uses ambiguous phrasing where the KB *might* have relevant info
 
-Set useKb=false when the user:
-- Greets, thanks, says goodbye, or makes small talk
-- Acknowledges briefly ("ok", "got it", "sure", "thanks")
-- Asks meta questions about the bot ("are you human", "what can you do")
-- Sends a one-word reply or filler`;
+Choose useKb=false ONLY when the message is unambiguously social/meta:
+- Pure greetings: "hi", "hello", "good morning", "hey there"
+- Pure thanks/goodbye: "thanks", "ty", "bye", "see you"
+- Acknowledgments: "ok", "got it", "sure", "alright"
+- Direct questions about the bot's nature: "are you a bot", "are you human", "who are you"
+- Empty filler with no nouns: "lol", "huh", "what"`;
 
     try {
       const result = await Promise.race([
@@ -272,23 +344,27 @@ Set useKb=false when the user:
 
       const match = result.response.match(/\{[\s\S]*?\}/);
       if (!match) {
-        return { useKb: false, reason: 'router_parse_failed' };
+        this.logger.warn(
+          `KB router returned unparseable response, failing open to useKb=true. raw="${result.response.slice(0, 120)}"`,
+        );
+        return { useKb: true, reason: 'router_parse_failed_fail_open', errored: true };
       }
       const parsed = JSON.parse(match[0]) as {
         useKb?: unknown;
         reason?: unknown;
       };
-      const useKb = parsed.useKb === true;
+      // Explicit `false` only — anything else (true, undefined, null) routes to KB.
+      const useKb = parsed.useKb !== false;
       const reason =
         typeof parsed.reason === 'string' ? parsed.reason : 'no_reason';
       return { useKb, reason };
     } catch (err) {
       this.logger.warn(
-        `KB router failed, defaulting to useKb=false: ${
+        `KB router failed, failing open to useKb=true: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
-      return { useKb: false, reason: 'router_error' };
+      return { useKb: true, reason: 'router_error_fail_open', errored: true };
     }
   }
 }
