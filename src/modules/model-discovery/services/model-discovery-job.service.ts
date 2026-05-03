@@ -1,6 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SchedulerRegistry } from '@nestjs/schedule';
-import { CronJob } from 'cron';
 import { ModelDiscoveryService } from './model-discovery.service';
 import { ModelDiscoveryFallbackService } from './model-discovery-fallback.service';
 
@@ -25,51 +23,7 @@ export class ModelDiscoveryJobService {
   constructor(
     private readonly modelDiscoveryService: ModelDiscoveryService,
     private readonly modelDiscoveryFallbackService: ModelDiscoveryFallbackService,
-    private readonly schedulerRegistry: SchedulerRegistry,
-  ) {
-    // Start the cron job automatically
-    this.startCronJob();
-  }
-
-  /**
-   * Start the cron job (always on, runs 1st of each month at 2 AM UTC)
-   */
-  private startCronJob(): void {
-    const schedule = '0 2 1 * *';
-
-    this.logger.log(
-      `Starting model discovery cron job with schedule: ${schedule}`,
-    );
-
-    const job = new CronJob(
-      schedule,
-      async () => {
-        await this.runDiscovery();
-      },
-      null,
-      true,
-      'UTC',
-    );
-
-    // Add to scheduler registry for management
-    this.schedulerRegistry.addCronJob('modelDiscoveryMonthly', job);
-
-    this.logger.log('Model discovery cron job started successfully');
-  }
-
-  /**
-   * Stop the cron job
-   */
-  stopCronJob(): void {
-    try {
-      this.schedulerRegistry.deleteCronJob('modelDiscoveryMonthly');
-      this.logger.log('Model discovery cron job stopped');
-    } catch (error) {
-      this.logger.error('Error stopping model discovery cron job', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
+  ) {}
 
   /**
    * Manually trigger discovery (for testing or immediate updates)
@@ -212,39 +166,15 @@ export class ModelDiscoveryJobService {
     isRunning: boolean;
     lastRun: Date | null;
     nextRun: Date | null;
-    schedule: string;
+    schedule: string | null;
     enabled: boolean;
   } {
-    const schedule = '0 2 1 * *';
-
-    // Calculate next run time (approximate)
-    let nextRun: Date | null = null;
-    try {
-      const jobs = this.schedulerRegistry.getCronJobs();
-      const job = jobs.get('modelDiscoveryMonthly');
-      if (job) {
-        // Next run: 1st of (this or next) month at 2 AM UTC
-        const now = new Date();
-        const next = new Date(
-          Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 2, 0, 0, 0),
-        );
-        if (next <= now) {
-          next.setUTCMonth(next.getUTCMonth() + 1);
-        }
-        nextRun = next;
-      }
-    } catch (error) {
-      this.logger.warn('Could not calculate next run time', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-
     return {
       isRunning: this.isRunning,
       lastRun: this.lastRun,
-      nextRun,
-      schedule,
-      enabled: true,
+      nextRun: null,
+      schedule: null,
+      enabled: false,
     };
   }
 
