@@ -14,8 +14,11 @@
  *   data-launcher-label - label inside the launcher button (default: Chat)
  *
  * Postmessage protocol from iframe:
- *   { type: "costkatana-widget:close",  deploymentId }
- *   { type: "costkatana-widget:resize", deploymentId, height: number }
+ *   { type: "costkatana-widget:close",    deploymentId }
+ *   { type: "costkatana-widget:resize",   deploymentId, height: number }
+ *   { type: "costkatana-widget:expand",   deploymentId } // fullscreen
+ *   { type: "costkatana-widget:minimize", deploymentId } // collapse to header bar
+ *   { type: "costkatana-widget:restore",  deploymentId } // back to normal size
  */
 (function () {
   'use strict';
@@ -52,25 +55,68 @@
   iframe.title = 'Chat assistant';
   iframe.allow = 'clipboard-write';
   iframe.src = appBase + '/embed/' + encodeURIComponent(deploymentId);
+
+  // 'normal' | 'expanded' | 'minimized' — drives iframe sizing. Kept here
+  // (not just inside the iframe) because the iframe can't resize itself; the
+  // host page owns its dimensions.
+  var sizeState = 'normal';
+
+  // Base styles common to all states. State-specific dimensions are applied
+  // via applySizeState() so transitions animate cleanly.
   Object.assign(iframe.style, {
     position: 'fixed',
-    bottom: '88px',
-    left: leftSide ? '20px' : 'auto',
-    right: leftSide ? 'auto' : '20px',
-    width: '380px',
-    maxWidth: 'calc(100vw - 24px)',
-    height: '560px',
-    maxHeight: 'calc(100vh - 120px)',
     border: '0',
     borderRadius: '16px',
     boxShadow: '0 24px 60px rgba(0,0,0,0.18)',
     background: '#ffffff',
     zIndex: '2147483646',
     display: 'none',
-    transition: 'transform 200ms ease, opacity 200ms ease',
+    transition: 'width 220ms ease, height 220ms ease, bottom 220ms ease, right 220ms ease, left 220ms ease, border-radius 220ms ease, transform 200ms ease, opacity 200ms ease',
     opacity: '0',
     transform: 'translateY(12px) scale(0.98)',
   });
+
+  function applySizeState() {
+    if (sizeState === 'expanded') {
+      // Fullscreen-ish: leave 16px gutter on all sides so the page chrome is
+      // still visible and the user can click outside to close (some users
+      // expect the launcher to remain reachable).
+      iframe.style.left = '16px';
+      iframe.style.right = '16px';
+      iframe.style.bottom = '16px';
+      iframe.style.top = '16px';
+      iframe.style.width = 'auto';
+      iframe.style.height = 'auto';
+      iframe.style.maxWidth = 'none';
+      iframe.style.maxHeight = 'none';
+      iframe.style.borderRadius = '12px';
+    } else if (sizeState === 'minimized') {
+      // Collapsed bar — only the chat's own header is visible. Header height
+      // is ~56px in the app; we allow a touch more so the bottom border
+      // doesn't get clipped.
+      iframe.style.left = leftSide ? '20px' : 'auto';
+      iframe.style.right = leftSide ? 'auto' : '20px';
+      iframe.style.bottom = '88px';
+      iframe.style.top = 'auto';
+      iframe.style.width = '320px';
+      iframe.style.height = '64px';
+      iframe.style.maxWidth = 'calc(100vw - 24px)';
+      iframe.style.maxHeight = 'none';
+      iframe.style.borderRadius = '12px';
+    } else {
+      // Normal default size.
+      iframe.style.left = leftSide ? '20px' : 'auto';
+      iframe.style.right = leftSide ? 'auto' : '20px';
+      iframe.style.bottom = '88px';
+      iframe.style.top = 'auto';
+      iframe.style.width = '380px';
+      iframe.style.height = '560px';
+      iframe.style.maxWidth = 'calc(100vw - 24px)';
+      iframe.style.maxHeight = 'calc(100vh - 120px)';
+      iframe.style.borderRadius = '16px';
+    }
+  }
+  applySizeState();
 
   // ── launcher button (built via DOM, not innerHTML) ──
   var launcher = document.createElement('button');
@@ -160,9 +206,31 @@
     if (origin !== appBase.replace(/\/$/, '')) return;
     var data = event.data;
     if (!data || data.deploymentId !== deploymentId) return;
-    if (data.type === 'costkatana-widget:close') setOpen(false);
+    if (data.type === 'costkatana-widget:close') {
+      // Reset to normal size on close so the next open isn't stuck in a
+      // weird expanded/minimized state.
+      sizeState = 'normal';
+      applySizeState();
+      setOpen(false);
+    }
+    if (data.type === 'costkatana-widget:expand') {
+      sizeState = 'expanded';
+      applySizeState();
+    }
+    if (data.type === 'costkatana-widget:minimize') {
+      sizeState = 'minimized';
+      applySizeState();
+    }
+    if (data.type === 'costkatana-widget:restore') {
+      sizeState = 'normal';
+      applySizeState();
+    }
     if (data.type === 'costkatana-widget:resize' && typeof data.height === 'number') {
-      iframe.style.height = Math.max(360, Math.min(800, data.height)) + 'px';
+      // Legacy auto-resize — only honored in normal mode; expand/minimize
+      // own the height in their respective states.
+      if (sizeState === 'normal') {
+        iframe.style.height = Math.max(360, Math.min(800, data.height)) + 'px';
+      }
     }
   });
 
