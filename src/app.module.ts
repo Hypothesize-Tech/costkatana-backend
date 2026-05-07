@@ -16,6 +16,7 @@ import { EmailTrackingModule } from './modules/email-tracking/email-tracking.mod
 import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { ActivityModule } from './modules/activity/activity.module';
 import { AccountClosureModule } from './modules/account-closure/account-closure.module';
+import { UserDataModule } from './modules/user-data/user-data.module';
 import { UserModule } from './modules/user/user.module';
 import { KeyVaultModule } from './modules/key-vault/key-vault.module';
 import { PaymentGatewayModule } from './modules/payment-gateway/payment-gateway.module';
@@ -42,6 +43,7 @@ import { SimulationTrackingModule } from './modules/simulation-tracking/simulati
 import { SessionReplayModule } from './modules/session-replay/session-replay.module';
 import { SecurityModule } from './modules/security/security.module';
 import { RequestFeedbackModule } from './modules/request-feedback/request-feedback.module';
+import { EvalsModule } from './modules/evals/evals.module';
 import { TeamModule } from './modules/team/team.module';
 import { ReferenceImageModule } from './modules/reference-image/reference-image.module';
 import { RagEvalModule } from './modules/rag-eval/rag-eval.module';
@@ -186,6 +188,7 @@ import { ComprehensiveTrackingMiddleware } from './modules/usage/middleware/comp
     SubscriptionModule,
     ActivityModule,
     AccountClosureModule,
+    UserDataModule,
     UserModule,
     KeyVaultModule,
     PaymentGatewayModule,
@@ -212,6 +215,7 @@ import { ComprehensiveTrackingMiddleware } from './modules/usage/middleware/comp
     SessionReplayModule,
     SecurityModule,
     RequestFeedbackModule,
+    EvalsModule,
     TeamModule,
     ReferenceImageModule,
     RagEvalModule,

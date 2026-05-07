@@ -6,6 +6,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { CacheModule } from '@nestjs/cache-manager';
 import { LoggerService } from './logger/logger.service';
 import { EncryptionService } from './encryption/encryption.service';
+import { EncryptionEnvelopeService } from './encryption/encryption-envelope.service';
 import { CacheService } from './cache/cache.service';
 import { BusinessEventLoggingService } from './services/business-event-logging.service';
 import { MixpanelService } from './services/mixpanel.service';
@@ -89,6 +90,7 @@ import { AuthModule } from '../modules/auth/auth.module';
   providers: [
     LoggerService,
     EncryptionService,
+    EncryptionEnvelopeService,
     CacheService,
     BusinessEventLoggingService,
     MixpanelService,
@@ -143,6 +145,7 @@ import { AuthModule } from '../modules/auth/auth.module';
   exports: [
     LoggerService,
     EncryptionService,
+    EncryptionEnvelopeService,
     CacheService,
     BusinessEventLoggingService,
     MixpanelService,

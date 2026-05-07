@@ -43,6 +43,10 @@ export class RouteDecider {
       return 'knowledge_base';
     }
 
+    // No regex / keyword shortcuts. The AI router below is the single
+    // decider for every non-document-bound request — its model is pinned
+    // to a strong-enough Claude variant for reliable routing.
+
     try {
       // Try AI-powered routing first
       const route = await this.aiRouter.route(
@@ -109,3 +113,4 @@ export class RouteDecider {
     return this.legacyRouter.getRecommendedModel(route);
   }
 }
+

@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios, { AxiosError } from 'axios';
 import * as cheerio from 'cheerio';
+import {
+  assertPublicHttpsUrl,
+  UrlSecurityError,
+} from '../../../common/security/url-validator';
 import { CacheService } from '../../../common/cache/cache.service';
 import { LoggerService } from '../../../common/logger/logger.service';
 
@@ -32,12 +36,20 @@ export interface SearchOptions {
   domains?: string[];
   maxResults?: number;
   deepContent?: boolean;
+  /**
+   * Owner of the request. Threaded through into the cache key so a poisoned
+   * cache entry from user A is never served to user B. When omitted, the
+   * cache scope falls back to a coarse `__anon__` bucket.
+   */
+  userId?: string;
 }
 
 export interface WebSearchRequest {
   operation: 'search' | 'scrape' | 'extract';
   url?: string;
   query?: string;
+  /** Per-request user scoping for cache + auditing. */
+  userId?: string;
   options?: {
     deepContent?: boolean;
     maxResults?: number;
@@ -356,6 +368,7 @@ export class WebSearchService {
       maxResults: request.options?.maxResults || this.maxResults,
       deepContent: request.options?.deepContent,
       domains,
+      userId: request.userId,
     };
 
     const results = await this.search(request.query, searchOptions);
@@ -477,10 +490,16 @@ export class WebSearchService {
    */
   private async scrapeUrl(url: string): Promise<ContentResult> {
     try {
+      // SSRF guard — reject private/internal URLs, including AWS metadata.
+      await assertPublicHttpsUrl(url);
+
       this.loggingService.info('Scraping URL content', { url });
 
       const response = await axios.get(url, {
         timeout: 10000,
+        maxContentLength: 5 * 1024 * 1024, // 5 MB cap; prevents memory exhaustion
+        maxRedirects: 5,
+        responseType: 'text',
         headers: {
           'User-Agent': 'CostKatana-WebScraper/1.0',
         },
@@ -526,6 +545,14 @@ export class WebSearchService {
         },
       };
     } catch (error) {
+      // Surface SSRF blocks distinctly so callers + ops can see denied URLs.
+      if (error instanceof UrlSecurityError) {
+        this.loggingService.warn('Refused to scrape blocked URL', {
+          url: error.url,
+          reason: error.message,
+        });
+        throw error;
+      }
       this.loggingService.error('Failed to scrape URL', {
         error: error instanceof Error ? error.message : String(error),
         url,
@@ -538,20 +565,26 @@ export class WebSearchService {
    * Get deep content from multiple URLs
    */
   private async getDeepContent(urls: string[]): Promise<ContentResult[]> {
+    // Scrape URLs in parallel — serial fetching with a 10s per-URL timeout
+    // could stack to 30s+ for 3 URLs. Promise.allSettled keeps a single
+    // failed URL from killing the batch.
+    const settled = await Promise.allSettled(
+      urls.map((url) => this.scrapeUrl(url)),
+    );
     const results: ContentResult[] = [];
-
-    for (const url of urls) {
-      try {
-        const content = await this.scrapeUrl(url);
-        results.push(content);
-      } catch (error) {
+    settled.forEach((outcome, idx) => {
+      if (outcome.status === 'fulfilled') {
+        results.push(outcome.value);
+      } else {
         this.loggingService.warn('Failed to get deep content for URL', {
-          url,
-          error: error instanceof Error ? error.message : String(error),
+          url: urls[idx],
+          error:
+            outcome.reason instanceof Error
+              ? outcome.reason.message
+              : String(outcome.reason),
         });
       }
-    }
-
+    });
     return results;
   }
 
@@ -600,13 +633,23 @@ export class WebSearchService {
   }
 
   /**
-   * Get cache key for search query
+   * Per-user cache key for search query. Always include the requester's
+   * userId so a poisoned cache entry from user A cannot be served to
+   * user B. Anonymous callers fall into the `__anon__` bucket.
    */
   private getCacheKey(query: string, options?: SearchOptions): string {
-    const optionsStr = options ? JSON.stringify(options) : '';
-    return `google_search:${Buffer.from(query + optionsStr)
+    // Strip userId from the hashed payload so identical queries from the same
+    // user collide cleanly, but bucket explicitly by userId in the key prefix.
+    const { userId: _userId, ...cacheableOptions } =
+      (options ?? {}) as SearchOptions;
+    const userBucket = (options?.userId ?? '__anon__').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const optionsStr = Object.keys(cacheableOptions).length
+      ? JSON.stringify(cacheableOptions)
+      : '';
+    const hash = Buffer.from(query + optionsStr)
       .toString('base64')
-      .substring(0, 32)}`;
+      .substring(0, 32);
+    return `google_search:${userBucket}:${hash}`;
   }
 
   /**

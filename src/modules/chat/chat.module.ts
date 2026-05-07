@@ -8,6 +8,48 @@ import {
 import { MongooseModule } from '@nestjs/mongoose';
 import { HttpModule } from '@nestjs/axios';
 
+// Phase-2 chat pipeline.
+import { ChatPipeline } from './pipeline/chat-pipeline.service';
+import { SecurityStage } from './pipeline/stages/security.stage';
+import { ConversationStage } from './pipeline/stages/conversation.stage';
+import { ContextBuildStage } from './pipeline/stages/context-build.stage';
+import { AttachmentStage } from './pipeline/stages/attachment.stage';
+import { IntegrationStage } from './pipeline/stages/integration.stage';
+import { RoutingStage } from './pipeline/stages/routing.stage';
+import { PlanClassificationStage } from './pipeline/stages/plan-classification.stage';
+import { ExecutionStage } from './pipeline/stages/execution.stage';
+import { PersistenceStage } from './pipeline/stages/persistence.stage';
+import { AttachmentResolver } from './pipeline/helpers/attachment-resolver.service';
+import { ConversationLoader } from './pipeline/helpers/conversation-loader.service';
+import {
+  RouteDispatcher,
+  MULTI_AGENT_FLOW_EXECUTOR,
+} from './pipeline/helpers/route-dispatcher.service';
+import {
+  ConversationalFlowExecutor,
+  AGENT_ROUTING_EXECUTOR,
+} from './pipeline/helpers/conversational-flow-executor.service';
+import {
+  MessagePersister,
+  CHAT_MESSAGE_EMITTER,
+} from './pipeline/helpers/message-persister.service';
+import { AssistantMessagePersister } from './pipeline/helpers/assistant-message-persister.service';
+import { UserMessagePersistenceStage } from './pipeline/stages/user-message-persistence.stage';
+import { IntegrationAvailabilityService } from './services/integration-availability.service';
+import { Document as DocumentSchemaClass, DocumentSchema } from '../../schemas/document/document.schema';
+import {
+  GitHubConnection,
+  GitHubConnectionSchema,
+} from '../../schemas/integration/github-connection.schema';
+import {
+  VercelConnection,
+  VercelConnectionSchema,
+} from '../../schemas/integration/vercel-connection.schema';
+import {
+  GoogleConnection,
+  GoogleConnectionSchema,
+} from '../../schemas/integration/google-connection.schema';
+
 // Core modules
 import { CommonModule } from '../../common/common.module';
 import { SchemasModule } from '../../schemas/schemas.module';
@@ -162,6 +204,11 @@ import { LangchainOrchestratorService } from './langchain/langchain-orchestrator
       { name: ChatTaskLink.name, schema: ChatTaskLinkSchema },
       { name: Usage.name, schema: UsageSchema },
       { name: GovernedTask.name, schema: GovernedTaskSchema },
+      // Pipeline stage dependencies (Phase 2)
+      { name: DocumentSchemaClass.name, schema: DocumentSchema },
+      { name: GitHubConnection.name, schema: GitHubConnectionSchema },
+      { name: VercelConnection.name, schema: VercelConnectionSchema },
+      { name: GoogleConnection.name, schema: GoogleConnectionSchema },
     ]),
   ],
   controllers: [
@@ -232,6 +279,46 @@ import { LangchainOrchestratorService } from './langchain/langchain-orchestrator
     ConnectionChecker,
     TrendingDetectorService,
     LangchainOrchestratorService,
+
+    // Phase 2 — chat pipeline (DI-registered; sendMessage delegates to it)
+    ChatPipeline,
+    SecurityStage,
+    ConversationStage,
+    ContextBuildStage,
+    AttachmentStage,
+    IntegrationStage,
+    RoutingStage,
+    PlanClassificationStage,
+    ExecutionStage,
+    PersistenceStage,
+    AttachmentResolver,
+    ConversationLoader,
+    RouteDispatcher,
+    ConversationalFlowExecutor,
+    MessagePersister,
+    AssistantMessagePersister,
+    UserMessagePersistenceStage,
+    {
+      // Bind structural ChatMessageEmitter to the factory's current service
+      // — same indirection trick used elsewhere to keep helpers test-isolated.
+      provide: CHAT_MESSAGE_EMITTER,
+      useFactory: (factory: ChatEventsFactoryService) => factory.getService(),
+      inject: [ChatEventsFactoryService],
+    },
+    {
+      // Bind the structural MultiAgentFlowExecutor token to the concrete
+      // service. Indirection lets RouteDispatcher stay testable in isolation
+      // (its tests don't need to load the heavy multi-agent transitive deps).
+      provide: MULTI_AGENT_FLOW_EXECUTOR,
+      useExisting: MultiAgentFlowService,
+    },
+    {
+      // Same indirection for AgentService — keeps ConversationalFlowExecutor
+      // tests free from the agent-service transitive import chain.
+      provide: AGENT_ROUTING_EXECUTOR,
+      useExisting: AgentService,
+    },
+    IntegrationAvailabilityService,
   ],
   exports: [
     ChatService,

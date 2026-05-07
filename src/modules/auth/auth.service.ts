@@ -26,6 +26,7 @@ import { AccountClosureService } from '../account-closure/account-closure.servic
 import { EncryptionService } from '../../common/encryption/encryption.service';
 import { MfaService } from './mfa.service';
 import { UserSessionService } from '../user-session/user-session.service';
+import { redisService } from '../../services/redis.service';
 
 interface TokenPayload {
   id?: string; // User ID (aligned with Express)
@@ -34,6 +35,10 @@ interface TokenPayload {
   role: string;
   jti?: string; // JWT ID for session identification (aligned with Express)
   sessionId?: string; // User session ID for refresh/revocation
+  // Per-issuance refresh-token id. Each refresh exchange burns the old
+  // rjti and issues a new one — a refresh token presented twice is a
+  // replay attempt and gets rejected.
+  rjti?: string;
 }
 
 interface AuthTokens {
@@ -116,18 +121,29 @@ export class AuthService {
       AuthService.userIdCache.set(userIdKey, id);
     }
 
-    const payload: TokenPayload = {
+    const accessPayload: TokenPayload = {
       id,
       email: user.email,
       role: user.role || 'user',
       ...(userSessionId && { jti: userSessionId, sessionId: userSessionId }),
     };
 
-    const accessToken = this.jwtService.sign(payload, {
-      expiresIn: this.configService.get('JWT_EXPIRES_IN', '1h'),
+    // Refresh tokens carry a unique `rjti` per-issuance so they can be
+    // marked single-use in Redis. The access token does NOT carry it
+    // (no need — the access token is short-lived; a stolen access
+    // token is bounded by its own TTL).
+    const rjti = crypto.randomBytes(16).toString('hex');
+    const refreshPayload: TokenPayload = { ...accessPayload, rjti };
+
+    const accessToken = this.jwtService.sign(accessPayload, {
+      // Default tightened to 15m. Per the JWT-rotation plan, the
+      // access token's lifetime is the maximum window an attacker
+      // can replay a leaked credential before the refresh-token gate
+      // kicks in. 1h was too generous; 15m is the industry baseline.
+      expiresIn: this.configService.get('JWT_EXPIRES_IN', '15m'),
     });
 
-    const refreshToken = this.jwtService.sign(payload, {
+    const refreshToken = this.jwtService.sign(refreshPayload, {
       expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '7d'),
       secret: this.configService.get('JWT_REFRESH_SECRET'),
     });
@@ -645,7 +661,55 @@ export class AuthService {
   }
 
   async refreshTokens(refreshToken: string): Promise<AuthTokens> {
-    const payload = this.verifyRefreshToken(refreshToken);
+    const payload = this.verifyRefreshToken(refreshToken) as TokenPayload;
+
+    // Single-use enforcement: each refresh token carries a unique
+    // `rjti` claim. The first time we see it we mark it consumed in
+    // Redis with a TTL slightly longer than the refresh-token lifetime
+    // — every subsequent presentation of the same token is a replay
+    // (either the user clicked twice, or an attacker stole the cookie)
+    // and we reject. Tokens issued before this change have no `rjti`
+    // and skip the check (graceful migration; they expire within 7d).
+    if (payload.rjti) {
+      const consumedKey = `auth:refresh:consumed:${payload.rjti}`;
+      const alreadyConsumed = await redisService.exists(consumedKey);
+      if (alreadyConsumed) {
+        // Defense in depth: a replay implies the token leaked. Burn
+        // the entire user session so a stolen access token issued in
+        // the same family also stops working.
+        if (payload.sessionId ?? payload.jti) {
+          try {
+            await this.userSessionService.revokeUserSession(
+              String(payload.id ?? payload.sub),
+              String(payload.sessionId ?? payload.jti),
+            );
+          } catch (err) {
+            this.logger.warn(
+              'Could not revoke session on refresh-token replay',
+              { error: err instanceof Error ? err.message : String(err) },
+            );
+          }
+        }
+        this.logger.warn('Refresh-token replay detected; rejecting', {
+          rjti: payload.rjti,
+          userId: payload.id ?? payload.sub,
+        });
+        throw new UnauthorizedException('Refresh token already used');
+      }
+      // Mark consumed for slightly longer than the refresh-token TTL
+      // so we don't lose the record before the token would have
+      // expired anyway. The default in `generateTokens` is 7d, so
+      // 8 days is a safe margin.
+      const consumedTtlSeconds = 8 * 24 * 60 * 60;
+      try {
+        await redisService.set(consumedKey, '1', consumedTtlSeconds);
+      } catch (err) {
+        this.logger.warn(
+          'Failed to record consumed refresh-token; continuing',
+          { error: err instanceof Error ? err.message : String(err) },
+        );
+      }
+    }
 
     // Standard tokens use 'id'; support 'sub' for JWT spec compatibility
     const userId =

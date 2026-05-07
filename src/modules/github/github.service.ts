@@ -24,6 +24,11 @@ import {
   GitHubConfigurationError,
   fromGitHubError,
 } from './utils/github-errors';
+import { GithubRefresher } from '../../common/integrations/refreshers/github.refresher';
+import {
+  OAuthConnection,
+  OAuthTokenRefreshError,
+} from '../../common/integrations/oauth-token-manager';
 
 @Injectable()
 export class GitHubService {
@@ -144,57 +149,70 @@ export class GitHubService {
   async refreshAccessToken(
     connection: GitHubConnectionDocument,
   ): Promise<string | null> {
-    const clientId = this.configService.get<string>('GITHUB_CLIENT_ID');
-    const clientSecret = this.configService.get<string>('GITHUB_CLIENT_SECRET');
-
-    if (!clientId || !clientSecret || !connection.refreshToken) {
+    if (!connection.refreshToken) {
       return null;
     }
+    let refreshTokenPlain: string | undefined;
+    try {
+      refreshTokenPlain = connection.decryptRefreshToken();
+    } catch (err) {
+      this.logger.warn('Failed to decrypt GitHub refresh token', {
+        userId: connection.userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+    if (!refreshTokenPlain) return null;
+
+    // Delegate to the centralised GithubRefresher / OAuthTokenManager.
+    // The refresher reads GITHUB_CLIENT_ID/SECRET from process.env (the
+    // same values the legacy ConfigService path resolves), throws with
+    // `requiresReconnection: true` on a dead refresh token, and rotates
+    // the refresh token cleanly when the GitHub App opts in to that.
+    const refresher = new GithubRefresher();
+    const oauthConn: OAuthConnection = {
+      provider: 'github',
+      connectionId: String((connection as { _id?: unknown })._id ?? connection.userId),
+      accessToken: connection.decryptToken(),
+      refreshToken: refreshTokenPlain,
+      expiresAt: connection.expiresAt,
+      grantedScopes: connection.scope ? connection.scope.split(/[\s,]+/).filter(Boolean) : [],
+    };
 
     try {
-      const refreshToken = connection.decryptRefreshToken();
-      if (!refreshToken) {
-        return null;
+      const tokens = await refresher.refresh(oauthConn);
+      connection.accessToken = connection.encryptToken(tokens.accessToken);
+      if (tokens.refreshToken) {
+        connection.refreshToken = connection.encryptToken(tokens.refreshToken);
       }
-
-      const response = await fetch(
-        'https://github.com/login/oauth/access_token',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            Accept: 'application/json',
-          },
-          body: new URLSearchParams({
-            client_id: clientId,
-            client_secret: clientSecret,
-            grant_type: 'refresh_token',
-            refresh_token: refreshToken,
-          }),
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(`Token refresh failed: ${response.status}`);
+      if (tokens.expiresAt) {
+        connection.expiresAt = tokens.expiresAt;
       }
-
-      const data: OAuthTokenResponse = await response.json();
-
-      // Update connection with new tokens
-      connection.accessToken = connection.encryptToken(data.access_token);
-      if (data.refresh_token) {
-        connection.refreshToken = connection.encryptToken(data.refresh_token);
+      if (tokens.grantedScopes?.length) {
+        connection.scope = tokens.grantedScopes.join(' ');
       }
-      if (data.expires_in) {
-        connection.expiresAt = new Date(Date.now() + data.expires_in * 1000);
-      }
-
       await connection.save();
       this.logger.log(`Refreshed OAuth token for user ${connection.userId}`);
-
-      return data.access_token;
+      return tokens.accessToken;
     } catch (error) {
-      this.logger.error('Failed to refresh access token', error);
+      const requiresReconnection =
+        error instanceof OAuthTokenRefreshError
+          ? error.requiresReconnection
+          : Boolean(
+              (error as { requiresReconnection?: boolean })
+                ?.requiresReconnection,
+            );
+      if (requiresReconnection) {
+        // Mark the connection inactive so the next request prompts
+        // reconnection rather than hammering a dead refresh token.
+        connection.isActive = false;
+        await connection.save().catch(() => {/* best-effort */});
+      }
+      this.logger.error('Failed to refresh access token', {
+        userId: connection.userId,
+        requiresReconnection,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }

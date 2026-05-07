@@ -231,6 +231,24 @@ export class PromptTemplate implements IPromptTemplateMethods {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'PromptTemplate' })
   parentId?: MongooseSchema.Types.ObjectId;
 
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'PromptVersion' })
+  currentVersionId?: MongooseSchema.Types.ObjectId;
+
+  @Prop({
+    type: [
+      {
+        agentId: { type: String, required: true },
+        nodeId: { type: String },
+      },
+    ],
+    _id: false,
+    default: [],
+  })
+  agentBindings?: Array<{ agentId: string; nodeId?: string }>;
+
+  @Prop({ type: Boolean, default: false })
+  isGlobalAgentPrompt?: boolean;
+
   @Prop({
     type: [
       {
@@ -503,6 +521,8 @@ PromptTemplateSchema.index({ category: 1 });
 PromptTemplateSchema.index({ isVisualCompliance: 1 });
 PromptTemplateSchema.index({ 'visualComplianceConfig.industry': 1 });
 PromptTemplateSchema.index({ 'referenceImage.extractedFeatures.status': 1 });
+PromptTemplateSchema.index({ 'agentBindings.agentId': 1 });
+PromptTemplateSchema.index({ isGlobalAgentPrompt: 1 });
 
 // Instance methods
 PromptTemplateSchema.methods.canAccess = function (

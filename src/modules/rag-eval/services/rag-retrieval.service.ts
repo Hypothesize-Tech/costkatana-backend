@@ -268,16 +268,35 @@ export class RagRetrievalService implements OnModuleInit {
     options: RetrievalOptions,
     startTime: number = Date.now(),
   ): Promise<RetrievalResult> {
+    // Defense-in-depth: refuse to run a documentIds fetch without a
+    // userId scope. The calling layer (RetrieveModule) is supposed to
+    // always thread `context.userId` through, but if a future change
+    // ever forgets, we MUST NOT return chunks across tenants. An
+    // attacker who passes only `documentIds` (no userId) would
+    // otherwise get any chunk in the collection whose documentId
+    // matched their guess.
+    const userIdStr = options.userId ? String(options.userId) : '';
+    if (!userIdStr) {
+      this.logger.warn(
+        'retrieveByDocumentIds called without userId — refusing to query',
+        { documentIds: documentIds.slice(0, 5), totalIds: documentIds.length },
+      );
+      return {
+        documents: [],
+        sources: [],
+        totalResults: 0,
+        cacheHit: false,
+        retrievalTime: Date.now() - startTime,
+      };
+    }
+
     const filter: Record<string, unknown> = {
       'metadata.documentId': { $in: documentIds },
       status: 'active',
+      // Coerce to string so we match chunks regardless of whether the
+      // write side stored the userId as an ObjectId or a string.
+      'metadata.userId': userIdStr,
     };
-    // Coerce to string so we match chunks regardless of whether the write
-    // side stored the userId as an ObjectId or a string.
-    const userIdStr = options.userId ? String(options.userId) : '';
-    if (userIdStr) {
-      filter['metadata.userId'] = userIdStr;
-    }
 
     const limit = Math.max(options.limit ?? 5, documentIds.length * 20);
     let rows = await this.documentModel
@@ -291,7 +310,7 @@ export class RagRetrievalService implements OnModuleInit {
     // exist with a differently-typed userId, still surface them when the
     // coerced-string comparison matches. Avoids "I don't have enough
     // information" on documents the user legitimately owns.
-    if (rows.length === 0 && userIdStr) {
+    if (rows.length === 0) {
       const loose = await this.documentModel
         .find({
           'metadata.documentId': { $in: documentIds },

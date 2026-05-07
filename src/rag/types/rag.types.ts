@@ -375,6 +375,13 @@ export interface OrchestratorInput {
   context: RAGContext;
   preferredPattern?: RAGPatternType;
   config?: Partial<RAGConfig>;
+  /** Identifier used to join eval scores with Usage and RequestFeedback. */
+  requestId?: string;
+  /** Optional prompt-version provenance for eval persistence. */
+  promptTemplateId?: string;
+  promptVersionId?: string;
+  modelName?: string;
+  provider?: string;
 }
 
 // ============================================================================

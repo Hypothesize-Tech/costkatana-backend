@@ -5,6 +5,7 @@ import { Resource } from '@opentelemetry/resources';
 import { loggingService } from '../common/services/logging.service';
 import { redisService } from '../services/redis.service';
 import { getOtelEnricherService } from '../common/services/otel-enricher.service';
+import { filterSensitiveSpanAttrs } from '../common/observability/sensitive-attrs';
 
 interface BufferedSpan {
   span: ReadableSpan;
@@ -816,6 +817,11 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       spanId: span.spanContext().spanId,
     });
 
+    // Strip sensitive attributes (Authorization headers, raw API keys,
+    // session ids) BEFORE the span is serialized to Redis or exported.
+    // This is the last point we control before the data leaves the
+    // process — relying on downstream processors (collector, vendor) to
+    // redact would be too permissive.
     const serialized = {
       traceId: span.spanContext().traceId,
       spanId: span.spanContext().spanId,
@@ -825,7 +831,9 @@ export class SelfHealingSpanProcessor implements SpanProcessor {
       startTime: span.startTime,
       endTime: span.endTime,
       status: span.status,
-      attributes: span.attributes,
+      attributes: filterSensitiveSpanAttrs(
+        span.attributes as Record<string, unknown>,
+      ),
       events: span.events,
       links: span.links,
       resource: span.resource.attributes,
