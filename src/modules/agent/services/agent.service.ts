@@ -59,6 +59,8 @@ import { VercelService } from '../../vercel/vercel.service';
 
 // Schema for production user history / tool usage / performance from Usage
 import { Usage } from '../../../schemas/core/usage.schema';
+import { PromptTemplate } from '../../../schemas/prompt/prompt-template.schema';
+import { PromptVersion } from '../../../schemas/prompt/prompt-version.schema';
 
 @Injectable()
 export class AgentService implements OnModuleInit {
@@ -148,6 +150,10 @@ export class AgentService implements OnModuleInit {
     private readonly genericHttpTool: GenericHTTPTool,
     @InjectModel(Usage.name)
     private readonly usageModel: Model<Usage>,
+    @InjectModel(PromptTemplate.name)
+    private readonly promptTemplateModel: Model<PromptTemplate>,
+    @InjectModel(PromptVersion.name)
+    private readonly promptVersionModel: Model<PromptVersion>,
   ) {
     // Initialize AWS Bedrock model
     const defaultModel =
@@ -196,8 +202,12 @@ export class AgentService implements OnModuleInit {
       // Initialize vector store
       await this.vectorStore.initialize();
 
-      // Build system prompt
-      const systemPrompt = this.promptConfig.getCompressedPrompt();
+      // Build system prompt — prefer pinned global PromptTemplate version when present.
+      const pinned = await this.resolveGlobalPinnedPrompt();
+      const systemPrompt = pinned ?? this.promptConfig.getCompressedPrompt();
+      if (pinned) {
+        this.logger.log('Using pinned global agent prompt from PromptTemplate');
+      }
 
       // Create prompt template
       const prompt = ChatPromptTemplate.fromMessages([
@@ -804,6 +814,33 @@ export class AgentService implements OnModuleInit {
       timestamp: Date.now(),
       hits: 0,
     });
+  }
+
+  private async resolveGlobalPinnedPrompt(): Promise<string | null> {
+    try {
+      const template = await this.promptTemplateModel
+        .findOne({
+          isGlobalAgentPrompt: true,
+          isActive: true,
+          isDeleted: false,
+        })
+        .lean();
+      if (!template) return null;
+      if (template.currentVersionId) {
+        const version = await this.promptVersionModel
+          .findById(template.currentVersionId)
+          .lean();
+        if (version?.content) return version.content;
+      }
+      return template.content ?? null;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to resolve pinned global prompt: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
   }
 
   private startCacheCleanup(): void {

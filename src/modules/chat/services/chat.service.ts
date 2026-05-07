@@ -4,7 +4,19 @@ import {
   forwardRef,
   Optional,
   ForbiddenException,
+  OnModuleInit,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { ChatPipeline } from '../pipeline/chat-pipeline.service';
+import { SecurityStage } from '../pipeline/stages/security.stage';
+import { ConversationStage } from '../pipeline/stages/conversation.stage';
+import { ContextBuildStage } from '../pipeline/stages/context-build.stage';
+import { AttachmentStage } from '../pipeline/stages/attachment.stage';
+import { UserMessagePersistenceStage } from '../pipeline/stages/user-message-persistence.stage';
+import { RoutingStage } from '../pipeline/stages/routing.stage';
+import { ExecutionStage } from '../pipeline/stages/execution.stage';
+import { RouteDispatcher } from '../pipeline/helpers/route-dispatcher.service';
+import type { StageContext } from '../pipeline/types/stage-context';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Request } from 'express';
@@ -237,7 +249,7 @@ export interface ConversationResponse {
 }
 
 @Injectable()
-export class ChatService {
+export class ChatService implements OnModuleInit {
   constructor(
     @InjectModel(ChatMessage.name)
     private chatMessageModel: Model<ChatMessageDocument>,
@@ -304,8 +316,121 @@ export class ChatService {
     private readonly aiCostTrackingService?: AICostTrackingService | null,
     @Optional()
     private readonly promptTemplateService?: PromptTemplateService | null,
+    // Phase-2 chat pipeline. Injected as Optional to keep test harnesses that
+    // construct ChatService manually green; production wiring is non-optional
+    // because chat.module.ts registers all three.
+    @Optional()
+    private readonly chatPipeline?: ChatPipeline,
+    @Optional()
+    private readonly securityStage?: SecurityStage,
+    @Optional()
+    private readonly conversationStage?: ConversationStage,
+    @Optional()
+    private readonly contextBuildStage?: ContextBuildStage,
+    @Optional()
+    private readonly attachmentStage?: AttachmentStage,
+    @Optional()
+    private readonly userMessagePersistenceStage?: UserMessagePersistenceStage,
+    @Optional()
+    private readonly routingStage?: RoutingStage,
+    @Optional()
+    private readonly executionStage?: ExecutionStage,
+    @Optional()
+    private readonly routeDispatcher?: RouteDispatcher,
   ) {
     // Session cleanup handled by Redis TTL (30 minutes)
+  }
+
+  /**
+   * Wire the pipeline's `ExecutionStage` so it dispatches back into this
+   * service. The pipeline is the entry-point architecture; concrete legacy
+   * dispatch logic still lives in `processChatRequest`.
+   */
+  onModuleInit(): void {
+    if (!this.executionStage) return;
+    this.executionStage.setAdapter({
+      runRoute: async (_route, ctx) => {
+        // The pipeline has already pre-computed conversation + recent
+        // messages + integration contexts + (some) attachment metadata onto
+        // `ctx`. processChatRequest reads them when present and skips the
+        // duplicate work — see the "Pipeline-prepared shortcuts" block.
+        const response = await this.processChatRequest(
+          ctx.userId,
+          ctx.dto,
+          ctx.parsedMentions,
+          ctx.req,
+          ctx.onChunk,
+          ctx,
+        );
+        return { response };
+      },
+    });
+  }
+
+  /**
+   * Public entry point for processing a chat message.
+   *
+   * Thin wrapper around `ChatPipeline.execute()` — the pipeline runs:
+   *   SecurityStage → ExecutionStage
+   *
+   * `ExecutionStage` calls back into `processChatRequest` (the legacy body)
+   * via the adapter wired in `onModuleInit`. As Phase 2.5b/c progress, more
+   * stages will be slotted in and `processChatRequest` will shrink.
+   *
+   * If the pipeline isn't wired (e.g. unit-test harness that builds
+   * ChatService manually with positional args), we fall back to calling the
+   * legacy implementation directly so existing callers don't break.
+   */
+  async sendMessage(
+    userId: string,
+    dto: SendMessageDto,
+    parsedMentions?: ParsedMention[],
+    req?: Request,
+    onChunk?: (chunk: string, done: boolean) => Promise<void> | void,
+  ): Promise<ChatMessageResponse> {
+    if (!this.chatPipeline || !this.securityStage || !this.executionStage) {
+      // Pipeline not wired — call legacy implementation directly.
+      return this.processChatRequest(userId, dto, parsedMentions, req, onChunk);
+    }
+
+    const ctx: StageContext = {
+      requestId: randomUUID(),
+      startTime: Date.now(),
+      userId,
+      dto,
+      parsedMentions,
+      req,
+      onChunk,
+      errors: [],
+      rollbacks: [],
+    };
+
+    // Order: Security → Conversation → ContextBuild → Attachment →
+    //        UserMessagePersistence → Routing → Execution.
+    //
+    // UserMessagePersistenceStage runs AFTER Attachment (so processed
+    // attachments are persisted with the message) and BEFORE Routing —
+    // matching the legacy ordering where the user message was created
+    // before route dispatch. It registers a rollback that hard-deletes the
+    // message if any later stage fails, closing the half-write hole the
+    // legacy method has today.
+    const stages = [
+      this.securityStage,
+      ...(this.conversationStage ? [this.conversationStage] : []),
+      ...(this.contextBuildStage ? [this.contextBuildStage] : []),
+      ...(this.attachmentStage ? [this.attachmentStage] : []),
+      ...(this.userMessagePersistenceStage
+        ? [this.userMessagePersistenceStage]
+        : []),
+      ...(this.routingStage ? [this.routingStage] : []),
+      this.executionStage,
+    ];
+    await this.chatPipeline.execute(stages, ctx);
+
+    if (!ctx.response) {
+      throw new Error('Chat pipeline produced no response');
+    }
+    return ctx.response;
   }
 
   // Get chat events service from factory
@@ -472,12 +597,27 @@ export class ChatService {
   /**
    * Send a message and get AI response
    */
-  async sendMessage(
+  /**
+   * Internal implementation of the chat-message processing flow. This is the
+   * legacy 1,800-line method the architecture audit called the "god method".
+   *
+   * Phase 2 of the audit-driven refactor introduces a stage pipeline
+   * (`ChatPipeline`) that wraps this implementation: every public chat
+   * request goes through `sendMessage()` (the thin entrypoint above), which
+   * runs `ChatPipeline.execute()` over a fixed list of stages. The
+   * `ExecutionStage` ultimately delegates back here via an `ExecutionAdapter`.
+   *
+   * Phase 2.5b/c work will progressively gut this body into individual
+   * stages (SecurityStage, AttachmentStage, IntegrationStage, RoutingStage,
+   * PlanClassificationStage, PersistenceStage) until this method withers.
+   */
+  private async processChatRequest(
     userId: string,
     dto: SendMessageDto,
     parsedMentions?: ParsedMention[],
     req?: Request,
     onChunk?: (chunk: string, done: boolean) => Promise<void> | void,
+    pipelineCtx?: StageContext,
   ): Promise<ChatMessageResponse> {
     const startTime = Date.now();
 
@@ -506,48 +646,71 @@ export class ChatService {
     const originalMessage = dto.originalMessage || enrichedMessage;
 
     try {
-      // Get or create conversation
-      const conversation = await this.getOrCreateConversation(userId, dto);
+      // === Pipeline-prepared shortcuts ===
+      // ConversationStage pre-loads the conversation + recent messages onto
+      // the pipeline context. When present, skip the duplicate Mongo
+      // round-trips. Falls through to legacy load for callers that haven't
+      // gone through the pipeline (e.g. unit-test harnesses).
+      const conversation =
+        (pipelineCtx?.conversation as ChatConversationDocument | undefined) ??
+        (await this.getOrCreateConversation(userId, dto));
 
-      // Load recent messages for context (needed for template resolution)
-      const recentMessages = await this.contextOptimizer.fetchOptimalContext(
-        conversation._id.toString(),
-        (dto.message ?? '').length,
-      );
+      const recentMessages =
+        (pipelineCtx?.recentMessages as any[] | undefined) ??
+        (await this.contextOptimizer.fetchOptimalContext(
+          conversation._id.toString(),
+          (dto.message ?? '').length,
+        ));
       const recentForTemplateResolution = recentMessages.map((m) => ({
         role: m.role as string,
         content: m.content || '',
       }));
 
-      // Check for GitHub/Vercel/MongoDB context (used by dedicated agents and MCP)
-      const githubContext = conversation.githubContext
-        ? {
-            connectionId: conversation.githubContext.connectionId?.toString(),
-            repositoryId: conversation.githubContext.repositoryId,
-            repositoryName: conversation.githubContext.repositoryName,
-            repositoryFullName: conversation.githubContext.repositoryFullName,
-            integrationId: conversation.githubContext.integrationId?.toString(),
-            branchName: conversation.githubContext.branchName,
-          }
-        : undefined;
-      const vercelContext = conversation.vercelContext
-        ? {
-            connectionId: conversation.vercelContext.connectionId?.toString(),
-            projectId: conversation.vercelContext.projectId,
-            projectName: conversation.vercelContext.projectName,
-          }
-        : undefined;
-      const mongodbContext = conversation.mongodbContext
-        ? {
-            connectionId: conversation.mongodbContext.connectionId?.toString(),
-            activeDatabase: conversation.mongodbContext.activeDatabase,
-            activeCollection: conversation.mongodbContext.activeCollection,
-          }
-        : undefined;
+      // === Pipeline-prepared shortcuts (ContextBuildStage) ===
+      // Reuse the pre-computed integration contexts when the pipeline ran
+      // ContextBuildStage. Fall through to inline derivation otherwise.
+      const githubContext =
+        pipelineCtx?.githubContext ??
+        (conversation.githubContext
+          ? {
+              connectionId: conversation.githubContext.connectionId?.toString(),
+              repositoryId: conversation.githubContext.repositoryId,
+              repositoryName: conversation.githubContext.repositoryName,
+              repositoryFullName: conversation.githubContext.repositoryFullName,
+              integrationId: conversation.githubContext.integrationId?.toString(),
+              branchName: conversation.githubContext.branchName,
+            }
+          : undefined);
+      const vercelContext =
+        pipelineCtx?.vercelContext ??
+        (conversation.vercelContext
+          ? {
+              connectionId: conversation.vercelContext.connectionId?.toString(),
+              projectId: conversation.vercelContext.projectId,
+              projectName: conversation.vercelContext.projectName,
+            }
+          : undefined);
+      const mongodbContext =
+        pipelineCtx?.mongodbContext ??
+        (conversation.mongodbContext
+          ? {
+              connectionId: conversation.mongodbContext.connectionId?.toString(),
+              activeDatabase: conversation.mongodbContext.activeDatabase,
+              activeCollection: conversation.mongodbContext.activeCollection,
+            }
+          : undefined);
 
       // Fetch document metadata if documentIds provided (before user message creation)
-      let attachedDocuments: any[] = [];
-      if (dto.documentIds && dto.documentIds.length > 0) {
+      // === Pipeline-prepared shortcuts (AttachmentStage) ===
+      // AttachmentStage already fetched document metadata when the pipeline
+      // ran. Reuse it; fall through to inline fetch for non-pipeline callers.
+      let attachedDocuments: any[] =
+        (pipelineCtx?.attachedDocuments as any[] | undefined) ?? [];
+      if (
+        attachedDocuments.length === 0 &&
+        dto.documentIds &&
+        dto.documentIds.length > 0
+      ) {
         try {
           attachedDocuments = await this.fetchDocumentMetadata(
             dto.documentIds,
@@ -567,10 +730,18 @@ export class ChatService {
         }
       }
 
-      // Process attachments EARLY (before user message creation, like Express)
-      let processedAttachments: any[] = [];
-      let attachmentContext = '';
-      if (dto.attachments && dto.attachments.length > 0) {
+      // === Pipeline-prepared shortcuts (AttachmentStage) ===
+      // AttachmentStage now performs the full extract-content step too.
+      // Reuse its result; fall through to inline processing for callers
+      // that bypass the pipeline (e.g. unit-test harnesses).
+      let processedAttachments: any[] =
+        (pipelineCtx?.attachments as any[] | undefined) ?? [];
+      let attachmentContext: string = pipelineCtx?.attachmentContext ?? '';
+      if (
+        processedAttachments.length === 0 &&
+        dto.attachments &&
+        dto.attachments.length > 0
+      ) {
         const attachmentInputs = this.mapAttachmentsToInput(dto.attachments);
         const attachmentResult =
           await this.attachmentProcessor.processAttachments(
@@ -581,49 +752,57 @@ export class ChatService {
         attachmentContext = attachmentResult.contextString;
       }
 
-      // SAVE USER MESSAGE FIRST (before template resolution, like Express)
-      // Now includes processed attachments (like Express)
-      const session = await this.chatMessageModel.startSession();
-      let userMessage: any;
+      // === Pipeline-prepared shortcut (UserMessagePersistenceStage) ===
+      // When the pipeline already persisted the user message, reuse the doc.
+      // The stage's rollback will hard-delete it if any subsequent stage
+      // fails — closing the half-write hole that the legacy inline block
+      // (below) has when downstream code throws.
+      let userMessage: any = pipelineCtx?.userMessageDoc;
 
-      await session.withTransaction(async () => {
-        userMessage = await this.chatMessageModel.create(
-          [
-            {
-              conversationId: conversation._id,
+      if (!userMessage) {
+        // SAVE USER MESSAGE FIRST (legacy path — non-pipeline harnesses).
+        const session = await this.chatMessageModel.startSession();
+        try {
+          await session.withTransaction(async () => {
+            const created = await this.chatMessageModel.create(
+              [
+                {
+                  conversationId: conversation._id,
+                  userId,
+                  role: 'user',
+                  content: originalMessage,
+                  attachments: processedAttachments,
+                  attachedDocuments,
+                  metadata: {
+                    temperature: dto.temperature,
+                    maxTokens: dto.maxTokens,
+                  },
+                },
+              ],
+              { session },
+            );
+            userMessage = created[0];
+
+            // Emit user message event for real-time streaming
+            this.chatEventsService.emitMessage(
+              conversation._id.toString(),
               userId,
-              role: 'user',
-              content: originalMessage, // Save original message, will update if template resolved
-              attachments: processedAttachments, // Store processed attachments (like Express)
-              attachedDocuments,
-              metadata: {
-                temperature: dto.temperature,
-                maxTokens: dto.maxTokens,
+              {
+                id: userMessage._id.toString(),
+                conversationId: conversation._id.toString(),
+                role: 'user',
+                content: originalMessage,
+                timestamp: userMessage.createdAt,
+                attachments: processedAttachments,
+                attachedDocuments,
+                metadata: userMessage.metadata,
               },
-            },
-          ],
-          { session },
-        );
-
-        // Emit user message event for real-time streaming
-        this.chatEventsService.emitMessage(
-          conversation._id.toString(),
-          userId,
-          {
-            id: userMessage[0]._id.toString(),
-            conversationId: conversation._id.toString(),
-            role: 'user',
-            content: originalMessage, // Emit original message for real-time updates
-            timestamp: userMessage[0].createdAt,
-            attachments: processedAttachments, // Emit processed attachments
-            attachedDocuments,
-            metadata: userMessage[0].metadata,
-          },
-        );
-      });
-
-      await session.endSession();
-      userMessage = userMessage[0]; // Extract from array
+            );
+          });
+        } finally {
+          await session.endSession();
+        }
+      }
 
       // Resolve template if templateId provided (overrides or supplements message)
       let effectiveMessage = enrichedMessage;
@@ -758,11 +937,13 @@ export class ChatService {
         );
       }
 
-      // EARLY MCP ROUTING CHECK: If integration detected with high confidence, route to MCP handler
-      const integrationIntent = await this.integrationDetector.detect(
-        effectiveMessage,
-        userId,
-      );
+      // EARLY MCP ROUTING CHECK: integration intent is only honoured when the
+      // message explicitly contains an @mention. The in-product UX is "Type @
+      // to manage integrations" — without that anchor, LLM-based intent
+      // detection over-triggers (e.g. it routes "Sonnet pricing" → mcp).
+      const integrationIntent = effectiveMessage.includes('@')
+        ? await this.integrationDetector.detect(effectiveMessage, userId)
+        : { needsIntegration: false, integrations: [], suggestedTools: [], confidence: 0 };
       if (
         integrationIntent.needsIntegration &&
         integrationIntent.confidence > 0.6
@@ -1477,14 +1658,34 @@ export class ChatService {
         ? effectiveMessage + attachmentContext
         : effectiveMessage;
 
-      // Decide routing strategy (decide() returns RouteType string)
-      const route = await this.routeDecider.decide(
-        context,
-        finalMessage,
-        userId,
-        dto.useWebSearch === true,
-        dto.documentIds,
-      );
+      // === Pipeline-prepared shortcuts (RoutingStage) ===
+      // RoutingStage already ran the route decider with the freshness
+      // fast-path + AI router + alternates. Reuse its result; fall through
+      // to inline routing for callers that bypass the pipeline.
+      let route =
+        pipelineCtx?.route ??
+        (await this.routeDecider.decide(
+          context,
+          finalMessage,
+          userId,
+          dto.useWebSearch === true,
+          dto.documentIds,
+        ));
+
+      // Guard: the AI router sometimes picks 'mcp' for natural-language
+      // questions that don't actually invoke an integration. The MCP path
+      // requires an @mention and otherwise returns "No integration command
+      // detected." Fall back to knowledge_base when no @mention is present
+      // so plain questions get a real answer. (RoutingStage's freshness
+      // fast-path also handles many of these — this guard remains as a
+      // safety net for the legacy path.)
+      if (route === 'mcp' && !finalMessage.includes('@')) {
+        this.logger.info(
+          '↩️  Re-routing mcp → knowledge_base (no @mention in message)',
+          { userId, originalRoute: 'mcp' },
+        );
+        route = 'knowledge_base';
+      }
 
       // Check if Cortex streaming is requested (higher priority than other routing)
       if (dto.useCortexStreaming && onChunk) {
@@ -2402,7 +2603,10 @@ export class ChatService {
 
               return {
                 content: responseText,
-                agentPath: ['langchain_multi_agent'],
+                // The langchain orchestrator is the conversational executor,
+                // not a true multi-agent flow — surface that to clients so
+                // the agentPath matches the route the LLM router chose.
+                agentPath: ['conversational_flow'],
                 optimizationsApplied: ['langchain_orchestration'],
                 cacheHit: false,
                 riskLevel: 'low',
@@ -2631,64 +2835,42 @@ export class ChatService {
     integrationSelectorData?: any;
     metadata?: { cost?: number; tokenCount?: number; latency?: number };
   }> {
+    // Phase 2.8: routing fan-out lives in RouteDispatcher. The 4 simple
+    // cases (knowledge_base / web_scraper / multi_agent / mcp) are owned
+    // there. The conversational_flow path still calls back into ChatService
+    // because it has tight coupling to private helpers (integration mention
+    // detection, Bedrock direct, agentService fallback). Phase 2.9 will
+    // move that path out too.
+    if (this.routeDispatcher) {
+      return this.routeDispatcher.dispatch(
+        route,
+        params,
+        startTime,
+        // Legacy fallback only fires when the executor isn't wired (test harnesses).
+        async (p) => this.handleConversationalFlow(p, startTime),
+        (raw) => this.extractThinkingFromMultiAgentResult(raw as any),
+        // ConversationalFlowExecutor (Phase 2.9) calls this for @-mention paths.
+        async (userId, message, mentions, githubContext, userPreferences, contextPreamble) =>
+          this.handleIntegrationCommands(
+            userId,
+            message,
+            mentions,
+            githubContext,
+            userPreferences,
+            contextPreamble,
+          ),
+      );
+    }
+
+    // Fallback: legacy switch when DI hasn't wired the dispatcher (e.g.
+    // a unit-test harness that constructs ChatService manually).
     switch (route) {
-      case 'knowledge_base':
-        // Create handler request
-        const kbHandlerRequest = {
-          userId: params.userId,
-          message: params.message,
-          modelId: params.modelId,
-          temperature: params.temperature,
-          maxTokens: params.maxTokens,
-          chatMode: params.userPreferences?.chatMode || 'balanced',
-          useMultiAgent: false, // Can be extended later
-          useWebSearch: false, // Can be extended later
-          documentIds: params.documentIds,
-          attachments: params.attachments,
-          githubContext: params.githubContext,
-          vercelContext: params.vercelContext,
-          mongodbContext: params.mongodbContext,
-          selectionResponse: params.selectionResponse,
-        };
-
-        // Create processing context
-        const kbProcessingContext: ProcessingContext = {
-          recentMessages: params.previousMessages || [],
-          userId: params.userId,
-          conversation: {
-            _id: params.conversationId as any,
-            userId: params.userId,
-            title: '',
-            modelId: params.modelId || '',
-          } as any,
-        };
-
-        // Call KnowledgeBaseHandler directly
-        const kbResult = await this.knowledgeBaseHandler.handle(
-          kbHandlerRequest,
-          kbProcessingContext,
-          params.contextPreamble,
-        );
-
-        return {
-          content: kbResult.response,
-          agentPath: kbResult.agentPath,
-          optimizationsApplied: kbResult.optimizationsApplied,
-          cacheHit: kbResult.cacheHit,
-          riskLevel: kbResult.riskLevel,
-          agentThinking: kbResult.agentThinking,
-          metadata: kbResult.metadata,
-        };
-
       case 'web_scraper':
         return await this.handleWebScraper(params);
-
       case 'multi_agent':
         return await this.handleMultiAgent(params);
-
       case 'mcp':
         return await this.handleMCP(params);
-
       case 'conversational_flow':
       default:
         return await this.handleConversationalFlow(params, startTime);

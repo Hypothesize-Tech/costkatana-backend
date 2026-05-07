@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema } from 'mongoose';
 import { EncryptionService } from '../../utils/encryption';
+import type { EncryptionEnvelope } from '../../common/encryption/encryption-envelope.service';
 
 export interface IGitHubRepository {
   id: number;
@@ -33,10 +34,24 @@ export class GitHubConnection implements IGitHubConnectionMethods {
   installationId?: string; // GitHub App installation ID
 
   @Prop({ required: true, select: false }) // Don't return by default for security
-  accessToken: string; // Encrypted token
+  accessToken: string; // Encrypted token (legacy CBC format `iv:ct`)
 
   @Prop({ select: false }) // Don't return by default for security
-  refreshToken?: string; // Encrypted refresh token (for OAuth)
+  refreshToken?: string; // Encrypted refresh token (legacy CBC format)
+
+  /**
+   * Versioned envelope encryption (KMS-ready). When present, this is
+   * the canonical token storage; the legacy `accessToken` field stays
+   * populated until `scripts/migrate-encryption-envelope.ts` clears it
+   * after a successful re-encrypt. New writes should populate this
+   * field via `EncryptionEnvelopeService.encrypt()` and only fall back
+   * to the legacy field for not-yet-migrated rows.
+   */
+  @Prop({ type: MongooseSchema.Types.Mixed, select: false })
+  accessTokenEnvelope?: EncryptionEnvelope;
+
+  @Prop({ type: MongooseSchema.Types.Mixed, select: false })
+  refreshTokenEnvelope?: EncryptionEnvelope;
 
   @Prop({ type: String, enum: ['oauth', 'app'], default: 'oauth' })
   tokenType: 'oauth' | 'app'; // OAuth token or GitHub App token

@@ -65,15 +65,24 @@ export class RateLimitMiddleware implements NestMiddleware {
       const isAllowed = await this.checkRateLimitWithTimeout(key, options);
 
       if (isAllowed === 'timeout') {
-        this.logger.warn('Rate limit check timed out, allowing request', {
-          component: 'RateLimitMiddleware',
-          operation: 'use',
-          type: 'rate_limit_timeout',
-          requestId,
-          key,
-          duration: `${Date.now() - startTime}ms`,
-        });
-        return next();
+        // Fail-CLOSED on Redis timeout. Failing open is a security gap:
+        // Redis stalls would let bruteforce attempts bypass all limits.
+        this.logger.warn(
+          'Rate limit check timed out, denying request (fail-closed)',
+          {
+            component: 'RateLimitMiddleware',
+            operation: 'use',
+            type: 'rate_limit_timeout_fail_closed',
+            requestId,
+            key,
+            duration: `${Date.now() - startTime}ms`,
+          },
+        );
+        res.setHeader('Retry-After', '5');
+        throw new HttpException(
+          'Rate limiter unavailable, please retry',
+          HttpStatus.SERVICE_UNAVAILABLE,
+        );
       }
 
       if (isAllowed === false) {
@@ -138,14 +147,23 @@ export class RateLimitMiddleware implements NestMiddleware {
         throw error;
       }
 
-      this.logger.warn('Rate limit check failed, allowing request', {
-        component: 'RateLimitMiddleware',
-        operation: 'use',
-        type: 'rate_limit_fallback',
-        requestId,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        duration: `${Date.now() - startTime}ms`,
-      });
+      // Generic Redis / unknown failure — same fail-closed policy as timeout.
+      this.logger.warn(
+        'Rate limit check failed, denying request (fail-closed)',
+        {
+          component: 'RateLimitMiddleware',
+          operation: 'use',
+          type: 'rate_limit_fallback_fail_closed',
+          requestId,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          duration: `${Date.now() - startTime}ms`,
+        },
+      );
+      res.setHeader('Retry-After', '5');
+      throw new HttpException(
+        'Rate limiter unavailable, please retry',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
 
       next();
     }

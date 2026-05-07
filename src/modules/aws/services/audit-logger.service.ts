@@ -17,6 +17,10 @@ import {
   AuditAnchor as AuditAnchorSchema,
   AuditAnchorDocument,
 } from '../../../schemas/security/audit-anchor.schema';
+import {
+  redactPiiDeep,
+  redactPiiString,
+} from '../../../common/security/pii-redactor';
 
 /**
  * Audit Logger Service - Immutable Hash-Chained Audit Trail
@@ -157,6 +161,24 @@ export class AuditLoggerService implements OnModuleInit {
     // Increment chain position
     this.chainPosition += 1;
 
+    // Pre-redact PII patterns from any free-text we receive. This is
+    // critical because audit entries are hash-chained and anchored to S3
+    // for tamper-evidence — once a row lands in the chain we cannot
+    // mutate it without breaking verification, so secrets caught here
+    // would be effectively immutable. Structured fields like userId,
+    // entryId, and the hashes themselves are NOT redacted; only
+    // free-text user-supplied strings (`error`, `metadata`,
+    // `decisionTrace` strings) get the redactor.
+    const redactedError = entry.error
+      ? redactPiiString(entry.error)
+      : entry.error;
+    const redactedMetadata = entry.metadata
+      ? redactPiiDeep(entry.metadata)
+      : entry.metadata;
+    const redactedDecisionTrace = entry.decisionTrace
+      ? redactPiiDeep(entry.decisionTrace)
+      : entry.decisionTrace;
+
     // Create the audit log entry
     const auditEntry = new this.awsAuditLogModel({
       entryId,
@@ -167,10 +189,10 @@ export class AuditLoggerService implements OnModuleInit {
       context: entry.context,
       action: entry.action || {},
       result: entry.result,
-      error: entry.error,
+      error: redactedError,
       impact: entry.impact || {},
-      decisionTrace: entry.decisionTrace,
-      metadata: entry.metadata,
+      decisionTrace: redactedDecisionTrace,
+      metadata: redactedMetadata,
     });
 
     // Calculate and set the entry hash

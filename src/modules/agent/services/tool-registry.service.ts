@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { registerAgentToolSchemas } from '../tools/schemas';
 
 export interface ToolDefinition {
   name: string;
@@ -37,6 +38,8 @@ export class ToolRegistryService implements OnModuleInit {
   private readonly toolCache: Map<string, ToolDefinition> = new Map();
 
   async onModuleInit(): Promise<void> {
+    // Register tool-arg Zod schemas before any tool dispatch can happen.
+    registerAgentToolSchemas();
     await this.initialize();
   }
 

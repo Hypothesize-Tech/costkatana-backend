@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   PutObjectCommand,
@@ -13,6 +13,27 @@ export class ReferenceImageS3Service {
   private readonly logger = new Logger(ReferenceImageS3Service.name);
 
   constructor(private readonly configService: ConfigService) {}
+
+  /**
+   * Defense-in-depth: throw `ForbiddenException` unless the caller owns the
+   * key. All keys produced by `uploadReferenceImage` start with
+   * `reference-images/{userId}/`, so the prefix is the authoritative
+   * ownership signal. Refuses suspicious paths (`..`, `/`, empty userId).
+   */
+  assertOwnership(s3Key: string, userId: string): void {
+    if (!s3Key || !userId) {
+      throw new ForbiddenException('Missing key or user');
+    }
+    // Reject path traversal early — even though S3 keys aren't filesystem
+    // paths, a `..` pattern is a strong signal of a probing request.
+    if (s3Key.includes('..') || s3Key.includes('//')) {
+      throw new ForbiddenException('Invalid key format');
+    }
+    const expectedPrefix = `reference-images/${userId}/`;
+    if (!s3Key.startsWith(expectedPrefix)) {
+      throw new ForbiddenException('Not authorized to access this resource');
+    }
+  }
 
   /**
    * Upload reference image for a template

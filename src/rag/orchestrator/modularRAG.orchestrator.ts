@@ -22,6 +22,7 @@ import { ChatBedrockConverse } from '@langchain/aws';
 import { loggingService } from '../../common/services/logging.service';
 import { redisService } from '../../services/redis.service';
 import { ragEvaluator } from '../evaluation';
+import { persistEvaluationResult } from '../evaluation/persistence';
 
 export class ModularRAGOrchestrator {
   private config: OrchestratorConfig;
@@ -194,6 +195,17 @@ export class ModularRAGOrchestrator {
           evaluation,
         });
       }
+      if (input.requestId) {
+        await persistEvaluationResult({
+          requestId: input.requestId,
+          metrics: evaluation,
+          userId: input.context?.userId,
+          promptTemplateId: input.promptTemplateId,
+          promptVersionId: input.promptVersionId,
+          modelName: input.modelName,
+          provider: input.provider,
+        });
+      }
       return {
         ...result,
         metadata: {
@@ -226,8 +238,12 @@ export class ModularRAGOrchestrator {
       return this.config.defaultPattern;
     }
 
-    // Check cache first
-    const cacheKey = `pattern_selection:${input.query.substring(0, 100)}`;
+    // Cache key is per-user. Without the userId, user A's pattern
+    // selection (which may have been chosen using their context /
+    // preferences / document scope) leaks to user B for the same query
+    // string — a subtle authorization bug.
+    const userKey = input.context?.userId ?? 'anon';
+    const cacheKey = `pattern_selection:${userKey}:${input.query.substring(0, 100)}`;
     try {
       const cached = await redisService.get(cacheKey);
       if (cached && typeof cached === 'string') {

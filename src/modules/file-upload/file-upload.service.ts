@@ -4,7 +4,13 @@
  * Production implementation - no placeholders.
  */
 
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { validateMagicBytes } from '../../common/files/file-validator';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -98,6 +104,24 @@ export class FileUploadService {
     const documentId = generateSecureId('doc');
 
     const userIdStr = typeof userId === 'string' ? userId : String(userId);
+
+    // Magic-byte verification: refuse a buffer whose first bytes don't
+    // match the claimed mimeType. This catches the renamed-binary case
+    // (e.g. notepad.exe sent as image/png) BEFORE we touch S3, so we
+    // don't pollute the bucket with files that the AV scanner will
+    // also flag a few seconds later.
+    const validation = validateMagicBytes(buffer, mimetype);
+    if (!validation.ok) {
+      this.logger.warn('Upload rejected — magic-byte mismatch', {
+        userId: userIdStr,
+        fileName: originalname,
+        claimed: mimetype,
+        reason: validation.reason,
+      });
+      throw new BadRequestException(
+        `File contents do not match the declared MIME type (${validation.reason}).`,
+      );
+    }
 
     const { s3Key, presignedUrl } = await this.storageService.uploadChatFile(
       userIdStr,

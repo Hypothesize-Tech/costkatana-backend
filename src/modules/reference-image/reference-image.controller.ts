@@ -21,8 +21,8 @@ import { Response } from 'express';
 import { Types, Model } from 'mongoose';
 import { InjectModel } from '@nestjs/mongoose';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { validateMagicBytes } from '../../common/files/file-validator';
 import {
   PromptTemplate,
   PromptTemplateDocument,
@@ -53,16 +53,24 @@ export class ReferenceImageController {
   /**
    * Get presigned URL for viewing a reference image
    * GET /v1/reference-image/presigned-url?s3Key=...
+   *
+   * Authenticated; the caller must own the key. Reference-image S3 keys are
+   * `reference-images/{userId}/...`, so we enforce that prefix matches the
+   * JWT subject. Without this check, knowing any s3Key would yield a
+   * presigned URL — an SSRF / cross-tenant disclosure path.
    */
   @Get('reference-image/presigned-url')
-  @Public()
   async getPresignedUrl(
     @Query() query: PresignedUrlQueryDto,
+    @CurrentUser() userId: string,
   ): Promise<{ presignedUrl: string; expiresIn: number }> {
+    this.referenceImageS3Service.assertOwnership(query.s3Key, userId);
+
     this.logger.log('Generating presigned URL', {
       component: 'ReferenceImageController',
       operation: 'getPresignedUrl',
       s3Key: query.s3Key,
+      userId,
     });
 
     const presignedUrl =
@@ -113,6 +121,17 @@ export class ReferenceImageController {
   }> {
     if (!file) {
       throw new BadRequestException('No file uploaded');
+    }
+
+    // Multer's `fileFilter` only checks the *claimed* mimetype from the
+    // multipart envelope — easily spoofed. Magic-byte verification
+    // looks at the actual bytes and rejects renamed binaries (e.g. a
+    // PE/EXE delivered as image/png).
+    const validation = validateMagicBytes(file.buffer, file.mimetype);
+    if (!validation.ok) {
+      throw new BadRequestException(
+        `File contents do not match the declared MIME type (${validation.reason}).`,
+      );
     }
 
     this.logger.log('Pre-uploading reference image', {
@@ -174,6 +193,14 @@ export class ReferenceImageController {
   ): Promise<{ message: string; data: PromptTemplateDocument }> {
     if (!file) {
       throw new BadRequestException('No file uploaded');
+    }
+
+    // Magic-byte verification — see preUploadReferenceImage for context.
+    const validation = validateMagicBytes(file.buffer, file.mimetype);
+    if (!validation.ok) {
+      throw new BadRequestException(
+        `File contents do not match the declared MIME type (${validation.reason}).`,
+      );
     }
 
     // Validate templateId

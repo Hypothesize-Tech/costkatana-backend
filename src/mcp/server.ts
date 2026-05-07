@@ -25,6 +25,8 @@ import { AuditLogger } from './utils/audit-logger';
 import { RateLimiter } from './utils/rate-limiter';
 import { createMCPError } from './utils/error-mapper';
 import { loggingService } from '../common/services/logging.service';
+import { PermissionValidator } from './permissions/permission-validator';
+import { PermissionManager } from './permissions/permission-manager';
 
 export interface MCPServerConfig {
   name: string;
@@ -336,13 +338,60 @@ export class MCPServer {
       // Refresh token if needed
       await TokenManager.refreshIfNeeded(connectionId, schema.integration);
 
-      // Execute tool
+      // Per-tool permission gate (Phase 3.5 hardening). The
+      // PermissionValidator was previously written but not wired in;
+      // tool handlers were running with empty permissions/scopes (the
+      // TODO comment that used to be on the next field). Without this
+      // gate, *any* authenticated user with a connection could invoke
+      // *any* tool of that integration regardless of the granular
+      // permission scopes their connection actually granted.
+      const permissionDecision = await PermissionValidator.validateOnly(
+        toolName,
+        schema.httpMethod,
+        schema.integration,
+        {
+          userId: this.authContext.userId,
+          connectionId,
+          integration: schema.integration,
+          permissions: [],
+          scopes: [],
+          isAdmin: this.authContext.isAdmin,
+        },
+      );
+      if (!permissionDecision.allowed) {
+        loggingService.warn('MCP permission denied', {
+          userId: this.authContext.userId,
+          toolName,
+          integration: schema.integration,
+          reason: permissionDecision.reason,
+          missingPermission: permissionDecision.missingPermission,
+        });
+        return this.createError(
+          message.id,
+          -32001,
+          permissionDecision.reason ||
+            `Permission denied for tool ${toolName}`,
+        );
+      }
+
+      // Pull the granted permissions/scopes for this connection so the
+      // handler can branch on read-only vs read-write etc. Cheap Mongo
+      // lookup (one document); the validator already verified there
+      // IS a permission record for this tool, so a null here is a race
+      // we treat as "no extra context, proceed" rather than a failure.
+      const grantedPerms = await PermissionManager.getPermissions(
+        this.authContext.userId,
+        schema.integration,
+        connectionId,
+      );
+
+      // Execute tool with the resolved permission context.
       const result = await handler(toolArgs, {
         userId: this.authContext.userId,
         connectionId,
         integration: schema.integration,
-        permissions: [], // Will be filled by permission system
-        scopes: [], // Will be filled by permission system
+        permissions: grantedPerms?.tools ?? [],
+        scopes: grantedPerms?.scopes ?? [],
         isAdmin: this.authContext.isAdmin,
       });
 

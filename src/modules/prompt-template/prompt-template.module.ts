@@ -15,6 +15,10 @@ import {
   PromptTemplateSchema,
 } from '../../schemas/prompt/prompt-template.schema';
 import {
+  PromptVersion,
+  PromptVersionSchema,
+} from '../../schemas/prompt/prompt-version.schema';
+import {
   TemplateExecution,
   TemplateExecutionSchema,
 } from '../../schemas/prompt/template-execution.schema';
@@ -29,7 +33,9 @@ import {
   GeminiCacheSchema,
 } from '../../schemas/prompt/gemini-cache.schema';
 import { PromptTemplateController } from './prompt-template.controller';
+import { PromptVersionController } from './prompt-version.controller';
 import { PromptTemplateService } from './services/prompt-template.service';
+import { PromptVersionService } from './services/prompt-version.service';
 import { ModelRecommendationService } from './services/model-recommendation.service';
 import { AITemplateEngineService } from './services/ai-template-engine.service';
 import { TemplateExecutionService } from './services/template-execution.service';
@@ -60,6 +66,7 @@ import { CortexModule } from '../cortex/cortex.module';
     // Mongoose models
     MongooseModule.forFeature([
       { name: PromptTemplate.name, schema: PromptTemplateSchema },
+      { name: PromptVersion.name, schema: PromptVersionSchema },
       { name: TemplateExecution.name, schema: TemplateExecutionSchema },
       { name: Project.name, schema: ProjectSchema },
       { name: Usage.name, schema: UsageSchema },
@@ -72,9 +79,10 @@ import { CortexModule } from '../cortex/cortex.module';
       dest: './uploads/templates',
     }),
   ],
-  controllers: [PromptTemplateController],
+  controllers: [PromptTemplateController, PromptVersionController],
   providers: [
     PromptTemplateService,
+    PromptVersionService,
     ModelRecommendationService,
     AITemplateEngineService,
     TemplateExecutionService,
@@ -85,6 +93,7 @@ import { CortexModule } from '../cortex/cortex.module';
   ],
   exports: [
     PromptTemplateService,
+    PromptVersionService,
     ModelRecommendationService,
     AITemplateEngineService,
     TemplateExecutionService,

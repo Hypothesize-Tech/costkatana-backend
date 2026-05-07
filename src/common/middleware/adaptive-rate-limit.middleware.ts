@@ -77,18 +77,23 @@ export class AdaptiveRateLimitMiddleware implements NestMiddleware {
       const decision = await this.checkRateLimitWithTimeout(key, options, req);
 
       if (decision === 'timeout') {
+        // Fail-CLOSED on Redis timeout (see RateLimitMiddleware for context).
         this.logger.warn(
-          'Adaptive rate limit check timed out, allowing request',
+          'Adaptive rate limit check timed out, denying request (fail-closed)',
           {
             component: 'AdaptiveRateLimitMiddleware',
             operation: 'use',
-            type: 'adaptive_rate_limit_timeout',
+            type: 'adaptive_rate_limit_timeout_fail_closed',
             requestId,
             key,
             duration: `${Date.now() - startTime}ms`,
           },
         );
-        return next();
+        res.setHeader('Retry-After', '5');
+        throw new HttpException(
+          'Rate limiter unavailable, please retry',
+          HttpStatus.SERVICE_UNAVAILABLE,
+        );
       }
 
       this.setResponseHeaders(res, decision);
