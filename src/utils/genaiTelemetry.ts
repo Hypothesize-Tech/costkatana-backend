@@ -7,9 +7,10 @@ import {
 } from '@opentelemetry/api';
 import * as crypto from 'crypto';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { Logger } from '@nestjs/common';
+import { Model, Types } from 'mongoose';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Usage } from '../schemas/core/usage.schema';
+import { mixpanelService } from '../services/mixpanel.service';
 import type { TelemetryStoreInput } from '../modules/telemetry/services/telemetry-store.service';
 
 const tracer = trace.getTracer('cost-katana-genai', '1.0.0');
@@ -71,6 +72,37 @@ export function setGenAITelemetryStore(
   store: (data: Partial<TelemetryStoreInput>) => Promise<void>,
 ): void {
   telemetryStore = store;
+}
+
+/**
+ * Optional secondary sink that mirrors GenAI usage to the `Usage` collection
+ * (billing/analytics). Registered by GenAITelemetryService via OnModuleInit
+ * so any module that provides it (BedrockModule, GovernedAgentModule, etc.)
+ * automatically opts in. recordGenAIUsage calls this after the telemetry sink
+ * and silently skips records without a valid ObjectId userId.
+ */
+let usageStore: ((record: GenAIUsageRecord) => Promise<void>) | null = null;
+
+export function setGenAIUsageStore(
+  store: ((record: GenAIUsageRecord) => Promise<void>) | null,
+): void {
+  usageStore = store;
+}
+
+/** Map a free-form provider string to the Usage.service enum. */
+function mapProviderToUsageService(provider: string): string {
+  const p = (provider ?? '').toLowerCase();
+  if (
+    p === 'openai' ||
+    p === 'aws-bedrock' ||
+    p === 'anthropic' ||
+    p === 'huggingface' ||
+    p === 'cohere'
+  ) {
+    return p;
+  }
+  if (p === 'google' || p === 'google-ai' || p === 'gemini') return 'google-ai';
+  return 'other';
 }
 
 function redactAndTruncate(text: string, maxLength: number = 500): string {
@@ -301,6 +333,46 @@ export function recordGenAIUsage(record: GenAIUsageRecord): void {
         tenantId: tenantIdResolved,
       });
     }
+
+    // Fan out to Usage collection (billing/analytics). Guarded: only writes
+    // when userId looks like a Mongo ObjectId, since Usage.userId is a User
+    // ref. recordUsage swallows its own errors.
+    if (usageStore && userId && Types.ObjectId.isValid(userId)) {
+      usageStore(record).catch((err) => {
+        logger.warn('Failed to fan out GenAI usage to Usage collection', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+
+    // Fan out to Mixpanel as a named event so product analytics sees every
+    // GenAI operation distinctly (not just generic HTTP hits). The global
+    // mixpanelService is a no-op until the module is bootstrapped.
+    try {
+      mixpanelService.track(
+        `genai.${operationName}`,
+        {
+          provider,
+          model,
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          costUsd: costUSD,
+          latencyMs,
+          status: error ? 'error' : 'success',
+          tenantId: tenantIdResolved,
+          workspaceId: workspaceIdResolved,
+          requestId: requestIdResolved,
+          ...(metadata ?? {}),
+          ...(extra as Record<string, unknown>),
+        },
+        userIdResolved,
+      );
+    } catch (mixErr) {
+      logger.warn('Mixpanel fan-out for GenAI usage failed', {
+        error: mixErr instanceof Error ? mixErr.message : String(mixErr),
+      });
+    }
   } catch (err) {
     logger.error('Error recording GenAI telemetry', {
       error: err instanceof Error ? err.message : String(err),
@@ -351,24 +423,37 @@ export function withGenAITelemetry<
 
 export { redactAndTruncate, hashText };
 
-/** Injectable service that records usage to the Usage collection and can provide the telemetry store for recordGenAIUsage. */
-export class GenAITelemetryService {
+/**
+ * Injectable that mirrors GenAI usage to the `Usage` collection (billing/
+ * analytics). Self-registers as the global usage store on module init so that
+ * every recordGenAIUsage call (builder, template, runs, all Bedrock paths)
+ * fans out automatically.
+ */
+@Injectable()
+export class GenAITelemetryService implements OnModuleInit {
   private readonly log = new Logger(GenAITelemetryService.name);
 
   constructor(
     @InjectModel(Usage.name) private readonly usageModel: Model<Usage>,
   ) {}
 
+  onModuleInit(): void {
+    setGenAIUsageStore((record) => this.recordUsage(record));
+  }
+
   /**
    * Persist a simplified usage record to the Usage collection (for billing/analytics).
-   * Skips create when userId is missing, as Usage schema requires userId.
+   * Skips when userId is missing or not a Mongo ObjectId, since Usage.userId is a User ref.
    */
   async recordUsage(record: GenAIUsageRecord): Promise<void> {
     try {
+      if (!record.userId || !Types.ObjectId.isValid(record.userId)) {
+        return;
+      }
       const totalTokens = record.promptTokens + record.completionTokens;
-      const payload = {
+      const payload: Record<string, unknown> = {
         userId: record.userId,
-        service: record.provider,
+        service: mapProviderToUsageService(record.provider),
         model: record.model,
         prompt: '',
         promptTokens: record.promptTokens,
@@ -376,10 +461,13 @@ export class GenAITelemetryService {
         totalTokens,
         cost: record.cost,
         responseTime: record.latencyMs ?? 0,
+        traceId: record.requestId,
         metadata: {
           operationName: record.operationName,
           sessionId: record.sessionId,
-          ...record.metadata,
+          provider: record.provider,
+          ...(record.metadata ?? {}),
+          ...(record.extra ?? {}),
         },
         tags: [],
         costAllocation: {},
@@ -387,12 +475,6 @@ export class GenAITelemetryService {
         errorOccurred: !!record.error,
         errorMessage: record.error?.message,
       };
-      if (!payload.userId) {
-        this.log.debug('Skipping Usage create: userId required', {
-          model: record.model,
-        });
-        return;
-      }
       await this.usageModel.create(payload);
       this.log.debug('Recorded GenAI usage to Usage collection', {
         model: record.model,

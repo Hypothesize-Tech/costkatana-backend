@@ -10,6 +10,7 @@ import {
   AgentTemplate,
   AgentTemplateDocument,
 } from '../../../schemas/agent-platform/agent-template.schema';
+import { recordGenAIUsage } from '../../../utils/genaiTelemetry';
 import { BUILTIN_TEMPLATES } from '../templates';
 import type { AgentDag } from '../interfaces/dag.interface';
 import {
@@ -100,6 +101,29 @@ export class AgentTemplateService implements OnApplicationBootstrap {
       { _id: template._id },
       { $inc: { clonedCount: 1 } },
     );
+
+    recordGenAIUsage({
+      provider: 'internal',
+      operationName: 'agent.template.instantiate',
+      model: 'n/a',
+      promptTokens: 0,
+      completionTokens: 0,
+      cost: 0,
+      userId,
+      metadata: {
+        templateSlug: slug,
+        templateId: String(template._id),
+        agentId: String(result.agent._id),
+        versionId: String(result.version._id),
+        projectId,
+        teamId,
+      },
+      extra: {
+        eventCategory: 'template',
+        source: 'agent-template',
+        isOfficial: !!template.isOfficial,
+      },
+    });
 
     return result;
   }

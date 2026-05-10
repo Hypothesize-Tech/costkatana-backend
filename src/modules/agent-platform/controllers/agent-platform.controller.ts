@@ -11,11 +11,14 @@ import {
   Post,
   Put,
   Query,
+  Req,
   Sse,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import type { Request } from 'express';
+import { recordGenAIUsage } from '../../../utils/genaiTelemetry';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Observable } from 'rxjs';
@@ -65,8 +68,25 @@ export class AgentPlatformController {
 
   @Post('text-to-agent')
   @HttpCode(HttpStatus.OK)
-  async textToAgent(@Body() body: { description: string }) {
-    return this.textToAgentService.generate(body?.description ?? '');
+  async textToAgent(
+    @CurrentUser() user: { id: string },
+    @Req() req: Request,
+    @Body()
+    body: {
+      description: string;
+      projectId?: string;
+      builderSessionId?: string;
+    },
+  ) {
+    const traceCtx = (req as Request & {
+      traceContext?: { traceId?: string };
+    }).traceContext;
+    return this.textToAgentService.generate(body?.description ?? '', {
+      userId: user?.id,
+      projectId: body?.projectId,
+      traceId: traceCtx?.traceId,
+      builderSessionId: body?.builderSessionId,
+    });
   }
 
   @Get('templates')
@@ -100,6 +120,27 @@ export class AgentPlatformController {
       body.projectId,
       body.teamId,
     );
+
+    if (body.builderSessionId) {
+      recordGenAIUsage({
+        provider: 'internal',
+        operationName: 'agent.builder.commit',
+        model: 'n/a',
+        promptTokens: 0,
+        completionTokens: 0,
+        cost: 0,
+        userId: user.id,
+        sessionId: body.builderSessionId,
+        metadata: {
+          agentId: String(agent._id),
+          versionId: String(version._id),
+          projectId: body.projectId,
+          teamId: body.teamId,
+        },
+        extra: { eventCategory: 'builder', source: 'agent-builder-commit' },
+      });
+    }
+
     return {
       agent: agent.toObject(),
       version: version.toObject(),
