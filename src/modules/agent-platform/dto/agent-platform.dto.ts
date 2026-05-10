@@ -32,6 +32,17 @@ export class CreateAgentDto {
   @IsOptional()
   @IsMongoId()
   teamId?: string;
+
+  /**
+   * Optional builder session id returned from POST /text-to-agent. When the
+   * UI forwards it on save, the platform emits a 0-token
+   * `agent.builder.commit` telemetry event linking the build to the new
+   * agent so the trace UI can show "build → committed".
+   */
+  @IsOptional()
+  @IsString()
+  @Length(8, 64)
+  builderSessionId?: string;
 }
 
 export class UpdateAgentDto {

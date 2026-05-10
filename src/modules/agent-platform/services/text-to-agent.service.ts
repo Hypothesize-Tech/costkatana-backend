@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { BedrockService } from '../../bedrock/bedrock.service';
 import type {
   AgentDag,
@@ -6,11 +7,23 @@ import type {
 } from '../interfaces/dag.interface';
 import { AgentCompilerService } from './agent-compiler.service';
 
+export interface TextToAgentContext {
+  userId?: string;
+  projectId?: string;
+  traceId?: string;
+  /** Pass an existing builderSessionId to group iterative builder calls. */
+  builderSessionId?: string;
+}
+
 interface TextToAgentResult {
   dag: AgentDag;
   validation: DagValidationResult;
   suggestedName: string;
+  /** UUID grouping every LLM call for this build attempt; echo back on agent save. */
+  builderSessionId: string;
 }
+
+const BUILDER_MODEL = 'anthropic.claude-3-5-sonnet-20241022-v2:0';
 
 const SYSTEM_PROMPT = `You convert plain-English agent descriptions into a JSON DAG for the CostKatana Agent Builder.
 
@@ -65,23 +78,39 @@ export class TextToAgentService {
 
   constructor(private readonly compiler: AgentCompilerService) {}
 
-  async generate(description: string): Promise<TextToAgentResult> {
+  async generate(
+    description: string,
+    ctx: TextToAgentContext = {},
+  ): Promise<TextToAgentResult> {
     const trimmed = description?.trim() ?? '';
     if (!trimmed) {
       throw new BadRequestException('description is required');
     }
 
+    const builderSessionId = ctx.builderSessionId ?? randomUUID();
     const userPrompt = `Description:\n${trimmed}\n\nReturn JSON now.`;
     let parsed: { name?: string; dag?: AgentDag } | undefined;
 
     try {
       const { response } = await BedrockService.invokeConverseText(
-        'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        BUILDER_MODEL,
         userPrompt,
         {
           system: SYSTEM_PROMPT,
           temperature: 0,
           maxTokens: 2048,
+          telemetry: {
+            operationName: 'agent.builder.text_to_agent',
+            eventCategory: 'builder',
+            source: 'agent-builder',
+            userId: ctx.userId,
+            sessionId: builderSessionId,
+            requestId: ctx.traceId,
+            metadata: {
+              projectId: ctx.projectId,
+              descriptionLength: trimmed.length,
+            },
+          },
         },
       );
       parsed = extractJsonObject(response);
@@ -108,6 +137,7 @@ export class TextToAgentService {
       dag,
       validation,
       suggestedName,
+      builderSessionId,
     };
   }
 

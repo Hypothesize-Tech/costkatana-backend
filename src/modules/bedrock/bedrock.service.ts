@@ -987,8 +987,29 @@ export class BedrockService {
   public static async invokeConverseText(
     modelId: string,
     userMessage: string,
-    opts?: { maxTokens?: number; temperature?: number; system?: string },
+    opts?: {
+      maxTokens?: number;
+      temperature?: number;
+      system?: string;
+      /**
+       * Optional telemetry context. When provided, the call records to the
+       * unified GenAI telemetry pipe (recordGenAIUsage). Callers like
+       * text-to-agent override `operationName` so events surface under a
+       * builder-specific tag.
+       */
+      telemetry?: {
+        operationName?: string;
+        userId?: string;
+        sessionId?: string;
+        requestId?: string;
+        eventCategory?: string;
+        source?: string;
+        metadata?: Record<string, unknown>;
+        extra?: Record<string, unknown>;
+      };
+    },
   ): Promise<{ response: string; inputTokens: number; outputTokens: number }> {
+    const startTime = Date.now();
     const actualModelId = this.convertToInferenceProfile(modelId);
     const command = new ConverseCommand({
       modelId: actualModelId,
@@ -1005,23 +1026,90 @@ export class BedrockService {
       },
     });
 
-    const response = await ServiceHelper.withRetry(
-      () => bedrockClient.send(command),
-      { maxRetries: 2, delayMs: 500, backoffMultiplier: 1.5 },
-    );
+    const operationName = opts?.telemetry?.operationName ?? 'bedrock.converse_text';
+    const eventCategory = opts?.telemetry?.eventCategory ?? 'bedrock-converse-text';
 
-    const text = response.output?.message?.content?.[0]?.text ?? '';
-    const inputTokens =
-      response.usage?.inputTokens ?? Math.ceil(userMessage.length / 4);
-    const outputTokens =
-      response.usage?.outputTokens ?? Math.ceil(text.length / 4);
-    return { response: text, inputTokens, outputTokens };
+    try {
+      const response = await ServiceHelper.withRetry(
+        () => bedrockClient.send(command),
+        { maxRetries: 2, delayMs: 500, backoffMultiplier: 1.5 },
+      );
+
+      const text = response.output?.message?.content?.[0]?.text ?? '';
+      const inputTokens =
+        response.usage?.inputTokens ?? Math.ceil(userMessage.length / 4);
+      const outputTokens =
+        response.usage?.outputTokens ?? Math.ceil(text.length / 4);
+
+      const costUSD = calculateCost(
+        inputTokens,
+        outputTokens,
+        BEDROCK_PROVIDER,
+        modelId,
+      );
+      recordGenAIUsage({
+        provider: BEDROCK_PROVIDER,
+        operationName,
+        model: actualModelId,
+        promptTokens: inputTokens,
+        completionTokens: outputTokens,
+        cost: costUSD,
+        latencyMs: Date.now() - startTime,
+        userId: opts?.telemetry?.userId,
+        sessionId: opts?.telemetry?.sessionId,
+        requestId: opts?.telemetry?.requestId,
+        temperature: opts?.temperature,
+        maxTokens: opts?.maxTokens,
+        metadata: opts?.telemetry?.metadata,
+        extra: {
+          eventCategory,
+          source: opts?.telemetry?.source ?? 'bedrock-converse-text',
+          ...(opts?.telemetry?.extra ?? {}),
+        },
+      });
+
+      return { response: text, inputTokens, outputTokens };
+    } catch (error) {
+      recordGenAIUsage({
+        provider: BEDROCK_PROVIDER,
+        operationName,
+        model: actualModelId,
+        promptTokens: 0,
+        completionTokens: 0,
+        cost: 0,
+        latencyMs: Date.now() - startTime,
+        userId: opts?.telemetry?.userId,
+        sessionId: opts?.telemetry?.sessionId,
+        requestId: opts?.telemetry?.requestId,
+        temperature: opts?.temperature,
+        maxTokens: opts?.maxTokens,
+        metadata: opts?.telemetry?.metadata,
+        extra: {
+          eventCategory,
+          source: opts?.telemetry?.source ?? 'bedrock-converse-text',
+          ...(opts?.telemetry?.extra ?? {}),
+        },
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+      throw error;
+    }
   }
 
   public static async invokeModelDirectly(
     modelId: string,
     requestBody: Record<string, unknown>,
+    telemetry?: {
+      operationName?: string;
+      userId?: string;
+      sessionId?: string;
+      requestId?: string;
+      eventCategory?: string;
+      source?: string;
+      metadata?: Record<string, unknown>;
+      extra?: Record<string, unknown>;
+    },
   ): Promise<{ response: string; inputTokens: number; outputTokens: number }> {
+    const startTime = Date.now();
     const actualModelId = this.convertToInferenceProfile(modelId);
     const command = new InvokeModelCommand({
       modelId: actualModelId,
@@ -1030,51 +1118,107 @@ export class BedrockService {
       body: JSON.stringify(requestBody),
     });
 
-    const response = await ServiceHelper.withRetry(
-      () => bedrockClient.send(command),
-      {
-        maxRetries: 3,
-        delayMs: 1000,
-        backoffMultiplier: 1.5,
-      },
-    );
+    const operationName = telemetry?.operationName ?? 'bedrock.invoke_model_direct';
+    const eventCategory = telemetry?.eventCategory ?? 'bedrock-direct';
 
-    const responseBody = JSON.parse(
-      new TextDecoder().decode(response.body),
-    ) as Record<string, unknown>;
-    let responseText = '';
+    try {
+      const response = await ServiceHelper.withRetry(
+        () => bedrockClient.send(command),
+        {
+          maxRetries: 3,
+          delayMs: 1000,
+          backoffMultiplier: 1.5,
+        },
+      );
 
-    const content = responseBody.content as
-      | Array<{ text?: string; type?: string }>
-      | undefined;
-    if (content?.length) {
-      const textBlock = content.find((c) => c.type === 'text' || 'text' in c);
-      responseText = (textBlock?.text as string) ?? '';
-      if (!responseText && content[0]) {
-        responseText = (content[0] as { text?: string }).text ?? '';
+      const responseBody = JSON.parse(
+        new TextDecoder().decode(response.body),
+      ) as Record<string, unknown>;
+      let responseText = '';
+
+      const content = responseBody.content as
+        | Array<{ text?: string; type?: string }>
+        | undefined;
+      if (content?.length) {
+        const textBlock = content.find((c) => c.type === 'text' || 'text' in c);
+        responseText = (textBlock?.text as string) ?? '';
+        if (!responseText && content[0]) {
+          responseText = (content[0] as { text?: string }).text ?? '';
+        }
       }
+
+      const output = responseBody.output as
+        | { message?: { content?: Array<{ text: string }> } }
+        | undefined;
+      if (!responseText && output?.message?.content?.length) {
+        responseText = output.message.content[0]?.text ?? '';
+      }
+
+      const usage = responseBody.usage as
+        | { input_tokens?: number; output_tokens?: number }
+        | undefined;
+      const inputTokens =
+        usage?.input_tokens ?? Math.ceil(JSON.stringify(requestBody).length / 4);
+      const outputTokens =
+        usage?.output_tokens ?? Math.ceil(responseText.length / 4);
+
+      const filteredResponse = await applyGuardrailIfConfigured(
+        responseText,
+        'OUTPUT',
+      );
+
+      const costUSD = calculateCost(
+        inputTokens,
+        outputTokens,
+        BEDROCK_PROVIDER,
+        actualModelId,
+      );
+      recordGenAIUsage({
+        provider: BEDROCK_PROVIDER,
+        operationName,
+        model: actualModelId,
+        promptTokens: inputTokens,
+        completionTokens: outputTokens,
+        cost: costUSD,
+        latencyMs: Date.now() - startTime,
+        userId: telemetry?.userId,
+        sessionId: telemetry?.sessionId,
+        requestId: telemetry?.requestId,
+        metadata: telemetry?.metadata,
+        extra: {
+          eventCategory,
+          source: telemetry?.source ?? 'bedrock-invoke-model',
+          ...(telemetry?.extra ?? {}),
+        },
+      });
+
+      return {
+        response: filteredResponse,
+        inputTokens,
+        outputTokens,
+      };
+    } catch (error) {
+      recordGenAIUsage({
+        provider: BEDROCK_PROVIDER,
+        operationName,
+        model: actualModelId,
+        promptTokens: 0,
+        completionTokens: 0,
+        cost: 0,
+        latencyMs: Date.now() - startTime,
+        userId: telemetry?.userId,
+        sessionId: telemetry?.sessionId,
+        requestId: telemetry?.requestId,
+        metadata: telemetry?.metadata,
+        extra: {
+          eventCategory,
+          source: telemetry?.source ?? 'bedrock-invoke-model',
+          ...(telemetry?.extra ?? {}),
+        },
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+      throw error;
     }
-
-    const output = responseBody.output as
-      | { message?: { content?: Array<{ text: string }> } }
-      | undefined;
-    if (!responseText && output?.message?.content?.length) {
-      responseText = output.message.content[0]?.text ?? '';
-    }
-
-    const usage = responseBody.usage as
-      | { input_tokens?: number; output_tokens?: number }
-      | undefined;
-    const inputTokens =
-      usage?.input_tokens ?? Math.ceil(JSON.stringify(requestBody).length / 4);
-    const outputTokens =
-      usage?.output_tokens ?? Math.ceil(responseText.length / 4);
-
-    // Apply Bedrock Guardrails to the OUTPUT before returning to callers.
-    // Configured via BEDROCK_GUARDRAIL_ID. No-op when env unset.
-    const filtered = await applyGuardrailIfConfigured(responseText, 'OUTPUT');
-
-    return { response: filtered, inputTokens, outputTokens };
   }
 
   /**
