@@ -51,6 +51,14 @@ import { GovernedAgentModule } from '../governed-agent/governed-agent.module';
 // Schemas (for MongooseModule.forFeature)
 import { Usage, UsageSchema } from '../../schemas/core/usage.schema';
 import {
+  PromptTemplate,
+  PromptTemplateSchema,
+} from '../../schemas/prompt/prompt-template.schema';
+import {
+  PromptVersion,
+  PromptVersionSchema,
+} from '../../schemas/prompt/prompt-version.schema';
+import {
   Optimization,
   OptimizationSchema,
 } from '../../schemas/core/optimization.schema';
@@ -103,6 +111,8 @@ import {
       { name: VercelConnection.name, schema: VercelConnectionSchema },
       { name: UserApprovalRequest.name, schema: UserApprovalRequestSchema },
       { name: UserPreference.name, schema: UserPreferenceSchema },
+      { name: PromptTemplate.name, schema: PromptTemplateSchema },
+      { name: PromptVersion.name, schema: PromptVersionSchema },
     ]),
   ],
   controllers: [AgentController],

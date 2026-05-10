@@ -13,12 +13,17 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Types } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
+import { createHash } from 'crypto';
 import { ThreatLog } from '../../schemas/security/threat-log.schema';
 import { TraceSpan } from '../../schemas/trace/trace-span.schema';
 import {
   PromptFirewallService,
   ThreatDetectionResult,
 } from './prompt-firewall.service';
+import { redactMatchedPatterns } from '../../common/security/pii-redactor';
+
+const sha256Hex = (s: string): string =>
+  createHash('sha256').update(s).digest('hex');
 
 export interface SecurityAnalytics {
   detectionRate: number;
@@ -426,7 +431,14 @@ export class LlmSecurityService implements OnModuleInit, OnModuleDestroy {
             stage: result.stage,
             riskScore: (result as any).riskScore,
             containmentAction: (result as any).containmentAction,
-            matchedPatterns: (result as any).matchedPatterns,
+            // Hash-only: the raw regex source can leak signature
+            // fragments that an attacker could correlate against
+            // their probes. Category prefix (`injection:` /
+            // `jailbreak:`) is preserved so dashboards still slice.
+            matchedPatternsHashed: redactMatchedPatterns(
+              (result as any).matchedPatterns as string[] | undefined,
+              sha256Hex,
+            ),
             provenanceSource: (result as any).provenanceSource,
           },
           prompt: {
@@ -615,7 +627,13 @@ export class LlmSecurityService implements OnModuleInit, OnModuleDestroy {
       threatLevel,
       riskScore,
       modified: false,
-      detections: (result as any).matchedPatterns ?? [],
+      // Same hash-only redaction as the trace-span attribute path —
+      // detections leave the trust boundary via API responses and would
+      // otherwise leak signature fragments to clients.
+      detections: redactMatchedPatterns(
+        (result as any).matchedPatterns as string[] | undefined,
+        sha256Hex,
+      ),
       blockedReason: result.isBlocked ? result.reason : undefined,
     };
   }

@@ -16,6 +16,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { ContextAssemblerService } from '../services/context-assembler.service';
 import { ContextAssemblyService } from '../services/context-assembly.service';
+import { WebSearchService } from '../services/web-search.service';
 
 @Injectable()
 export class KnowledgeBaseHandler {
@@ -28,6 +29,7 @@ export class KnowledgeBaseHandler {
     @InjectModel('GoogleConnection') private googleConnectionModel: Model<any>,
     private readonly contextAssemblerService: ContextAssemblerService,
     private readonly contextAssemblyService: ContextAssemblyService,
+    private readonly webSearchService: WebSearchService,
   ) {}
 
   /**
@@ -134,6 +136,9 @@ export class KnowledgeBaseHandler {
         chatMode: request.chatMode,
         useMultiAgent: request.useMultiAgent,
         useWebSearch: request.useWebSearch,
+        // Always run RAGAS-aligned eval so quality data flows into the evals
+        // dashboard. Persistence is keyed by requestId below.
+        evaluation: { enabled: true, logResults: false },
       };
 
       if (request.documentIds && request.documentIds.length > 0) {
@@ -160,11 +165,18 @@ export class KnowledgeBaseHandler {
         config.attachments = request.attachments;
       }
 
+      // Generate a per-turn requestId so each RAG call lands as its own
+      // row in evaluation_results (the schema indexes requestId as unique).
+      const evalRequestId = `${request.conversationId ?? 'rag'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
       // Execute modular RAG
       const ragResult = await modularRAGOrchestrator.execute({
         query: request.message ?? '',
         context: ragContext,
         config,
+        requestId: evalRequestId,
+        modelName: request.modelId,
+        promptTemplateId: request.templateId,
       });
 
       this.logger.log('📚 Modular RAG completed', {
@@ -212,15 +224,39 @@ export class KnowledgeBaseHandler {
       if (ragResult.success && ragResult.answer) {
         // Enhance response with Google Drive context if available but no knowledge base results
         let enhancedResponse = ragResult.answer;
-        if (
-          (ragResult.documents?.length === 0 || !ragResult.documents) &&
-          googleDriveContext
-        ) {
+        const noDocs = !ragResult.documents || ragResult.documents.length === 0;
+        if (noDocs && googleDriveContext) {
           enhancedResponse = await this.enhanceWithGoogleDrive(
             googleDriveContext,
             request.message ?? '',
             request.modelId,
           );
+        } else if (noDocs && !googleDriveContext) {
+          // RAG succeeded but retrieved nothing — answer would be ungrounded.
+          // Try the live web before falling back.
+          const webAnswer = await this.tryWebSearchFallback(
+            request.message ?? '',
+            request.modelId,
+            request.userId,
+          );
+          if (webAnswer) {
+            return {
+              response: webAnswer.answer,
+              agentPath: ['knowledge_base', 'web_search_fallback'],
+              optimizationsApplied: [
+                'rag_no_documents',
+                `web_search_${webAnswer.resultCount}_results`,
+              ],
+              cacheHit: false,
+              riskLevel: 'low',
+              webSearchUsed: true,
+              metadata: {
+                documentsRetrieved: 0,
+                sources: webAnswer.sources,
+              },
+              success: true,
+            };
+          }
         }
 
         const optimizations = [
@@ -282,6 +318,31 @@ export class KnowledgeBaseHandler {
         }
 
         return result;
+      }
+
+      // No useful answer from RAG → try web-search fallback before giving up
+      const webAnswer = await this.tryWebSearchFallback(
+        request.message ?? '',
+        request.modelId,
+        request.userId,
+      );
+      if (webAnswer) {
+        return {
+          response: webAnswer.answer,
+          agentPath: ['knowledge_base', 'web_search_fallback'],
+          optimizationsApplied: [
+            'rag_no_results',
+            `web_search_${webAnswer.resultCount}_results`,
+          ],
+          cacheHit: false,
+          riskLevel: 'low',
+          webSearchUsed: true,
+          metadata: {
+            documentsRetrieved: 0,
+            sources: webAnswer.sources,
+          },
+          success: true,
+        };
       }
 
       // Fallback if RAG fails
@@ -530,5 +591,45 @@ ${userMessage}
       response.response?.trim() ||
       'I retrieved the document but could not generate an answer.'
     );
+  }
+
+  /**
+   * When RAG retrieval comes up empty, search the live web and synthesize
+   * an answer from the result snippets. Returns null when web search is
+   * unavailable or finds nothing — caller should then surface the generic
+   * "I don't have enough information" message.
+   */
+  private async tryWebSearchFallback(
+    query: string,
+    modelId?: string,
+    userId?: string,
+  ): Promise<{ answer: string; sources: string[]; resultCount: number } | null> {
+    if (!query.trim()) return null;
+    try {
+      const results = await this.webSearchService.search(query, {
+        maxResults: 5,
+        userId,
+      });
+      if (!results || results.length === 0) return null;
+
+      const docs = results.map((r) => ({
+        content: `${r.title}\n${r.snippet}\n(source: ${r.url})`,
+        metadata: { fileName: r.displayUrl || r.url },
+      }));
+      const answer = await this.generateAnswerFromDocuments(query, docs, modelId ?? '');
+      const sources = results.map((r) => r.url).filter(Boolean);
+
+      this.logger.log('🌐 Web search fallback synthesised an answer', {
+        resultCount: results.length,
+        query: query.substring(0, 100),
+      });
+
+      return { answer, sources, resultCount: results.length };
+    } catch (error) {
+      this.logger.warn('Web search fallback failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 }
